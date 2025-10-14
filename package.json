@@ -13,7 +13,8 @@
     "scripts": {
         "start": "node index.js",
         "microphone:rtsp": "node microphone/index.js",
-        "sensors": "node sensors/examples/sensor-monitor.js",
-        "sensors:all": "node sensors/index.js"
+        "sensors": "node sensors/index.js",
+        "display": "node display/index.js",
+        "sensors:zenoh": "node sensors/examples/sensor-zenoh-publisher.js"
     }
 }
