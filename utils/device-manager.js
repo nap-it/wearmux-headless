@@ -1,5 +1,6 @@
 // Device connection and management utilities for BrilliantSole devices (Noble-only)
 const EventEmitter = require("events");
+/** @type {import("brilliantsole/node")?} */
 let BS = null;
 
 class DeviceManager extends EventEmitter {
@@ -10,7 +11,10 @@ class DeviceManager extends EventEmitter {
 
     async connectToDevice() {
         try {
-            if (!BS) BS = await import("brilliantsole/node");
+            if (!BS) {
+                BS = await import("brilliantsole/node");
+                BS.setAllConsoleLevelFlags({log: true}):
+            }
 
             const filterId = process.env.MIC_DEVICE_ID || "";
             const filterName = process.env.MIC_DEVICE_NAME || "";
