@@ -42,7 +42,7 @@ for raw in sys.stdin:
     try:
         msg = json.loads(line)
         key = str(msg.get("key") or KEY_PREFIX)
-        payload = json.dumps(msg.get("json", None), separators=(",", ":"))
+        payload = json.dumps(msg.get("json", None), indent=4)
         _pub_for(key).put(payload)  # send as string (robust across versions)
         # print(f"[py-sidecar] put {key}", file=sys.stderr)  # debug if needed
     except Exception as e:

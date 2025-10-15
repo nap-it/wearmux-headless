@@ -83,11 +83,11 @@ class Config {
 
     static getZenohConfig() {
         // Single endpoint via ZENOH_LOCATOR (e.g., "tcp/127.0.0.1:7447")
-        const enabled = process.env.ZENOH_ENABLE === "1" || process.env.ZENOH === "1";
-        const keyPrefix = process.env.ZENOH_KEY_PREFIX || "bsole/sensors";
-        const prettyJson = process.env.ZENOH_JSON_PRETTY === "1";
-        const attachAll = process.env.ZENOH_ATTACH_ALL !== "0"; // default on: publish all events from SensorManager
-        const locator = process.env.ZENOH_LOCATOR || "tcp/127.0.0.1:7447";
+    const enabled = process.env.ZENOH_ENABLE === "1";
+    const keyPrefix = process.env.ZENOH_KEY_PREFIX || "bsole/sensors";
+    const prettyJson = true; // Always pretty-print
+    const attachAll = process.env.ZENOH_ATTACH_ALL !== "0"; // default on: publish all events from SensorManager
+    const locator = "tcp/127.0.0.1:7447"; // Fixed default
 
         return {
             enabled,

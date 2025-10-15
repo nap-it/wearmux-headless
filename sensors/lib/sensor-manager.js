@@ -16,13 +16,10 @@ class SensorManager extends EventEmitter {
         this.zenohEnabled =
             options.zenohEnabled !== undefined
                 ? Boolean(options.zenohEnabled)
-                : process.env.ZENOH_ENABLE === "1" || process.env.ZENOH === "1";
+                : process.env.ZENOH_ENABLE === "1";
         this.zenohOptions = {
             keyPrefix: options.zenohKeyPrefix || process.env.ZENOH_KEY_PREFIX || "bsole/sensors",
-            prettyJson:
-                options.zenohJsonPretty !== undefined
-                    ? Boolean(options.zenohJsonPretty)
-                    : process.env.ZENOH_JSON_PRETTY === "1",
+            prettyJson: true,
         };
         this.zenohAttachAll =
             options.zenohAttachAll !== undefined
@@ -32,7 +29,7 @@ class SensorManager extends EventEmitter {
 
         // Available sensor types with their default device rates (SDK expects multiples of 5)
         this.availableSensors = {
-            // Motion sensors (continuous)
+            // Motion sensors
             acceleration: 50,
             linearAcceleration: 50,
             gyroscope: 50,
@@ -40,7 +37,6 @@ class SensorManager extends EventEmitter {
             gameRotation: 50,
             rotation: 50,
             orientation: 50,
-
             // Event sensors
             tapDetector: 5,
         };

@@ -10,12 +10,8 @@ class ZenohManager extends EventEmitter {
     constructor(options = {}) {
         super();
         this.keyPrefix = options.keyPrefix || "bsole/sensors";
-        this.prettyJson = Boolean(options.prettyJson);
-        this.mode = options.mode || "client"; // advisory
-        this.endpoints = Array.isArray(options.endpoints) ? options.endpoints : [];
-        // Single source of truth: TCP locator via ZENOH_LOCATOR
-        this.locator = options.locator || process.env.ZENOH_LOCATOR || null; // e.g., tcp/127.0.0.1:7447
-
+        this.prettyJson = true;
+        this.locator = "tcp/127.0.0.1:7447";
         this._z = null; // unused in python sidecar mode
         this.session = null;
         this._mode = "python"; // always python sidecar
@@ -43,8 +39,6 @@ class ZenohManager extends EventEmitter {
         const pyBin = process.env.PYTHON_BIN || "python3";
         const args = ["-u", script]; // -u = unbuffered stdin/stdout
         const env = { ...process.env };
-        // Use provided locator or default to local TCP router
-        env.ZENOH_LOCATOR = this.locator || env.ZENOH_LOCATOR || "tcp/127.0.0.1:7447";
         if (!env.ZENOH_KEY_PREFIX && this.keyPrefix) env.ZENOH_KEY_PREFIX = this.keyPrefix;
         const child = spawn(pyBin, args, { stdio: ["pipe", "inherit", "inherit"], env });
         this._child = child;
@@ -56,7 +50,7 @@ class ZenohManager extends EventEmitter {
             this._childReady = false;
         });
         // Placeholder session descriptor for python mode
-        this.session = { bridge: "python", locator: env.ZENOH_LOCATOR || null };
+        this.session = { bridge: "python", locator: this.locator };
     }
 
     async stop() {
