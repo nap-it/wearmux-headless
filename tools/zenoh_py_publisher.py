@@ -6,12 +6,12 @@ import msgpack
 KEY_PREFIX = os.environ.get("ZENOH_KEY_PREFIX", "bsole/sensors")
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "zenoh", "peer.json5")
 if not os.path.exists(CONFIG_FILE):
-    print(f"[Python-Sidecar] zenoh peer config not found: {CONFIG_FILE}", file=sys.stderr)
+    print(f"[PythonSidecar] zenoh peer config not found: {CONFIG_FILE}", file=sys.stderr)
     sys.exit(1)
 
 conf = zenoh.Config.from_file(CONFIG_FILE)
 session = zenoh.open(conf)
-print(f"[Python-Sidecar] loaded zenoh peer config: {CONFIG_FILE}", file=sys.stderr)
+print(f"[PythonSidecar] loaded zenoh peer config: {CONFIG_FILE}", file=sys.stderr)
 
 publishers = {}
 
@@ -63,9 +63,9 @@ atexit.register(_cleanup_socket, UDS_PATH)
 srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 srv.bind(UDS_PATH)
 srv.listen(1)
-print(f"[Python-Sidecar] UDS listening at {UDS_PATH}", file=sys.stderr)
+print(f"[PythonSidecar] UDS listening at {UDS_PATH}", file=sys.stderr)
 # Signal readiness only after the socket is listening
-print("[Python-Sidecar] READY", flush=True)
+print("[PythonSidecar] READY", flush=True)
 conn, _ = srv.accept()
 try:
     unpacker = msgpack.Unpacker(raw=False)
@@ -80,7 +80,7 @@ try:
                     obj = json.loads(obj.decode("utf-8", "replace"))
                 handle_msg(obj)
             except Exception as e:
-                print(f"[Python-Sidecar] bad msgpack/publish error: {e}", file=sys.stderr)
+                print(f"[PythonSidecar] bad msgpack/publish error: {e}", file=sys.stderr)
 finally:
     try: conn.close()
     except Exception: pass

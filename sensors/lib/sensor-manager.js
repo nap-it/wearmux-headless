@@ -6,7 +6,7 @@ const { ZenohManager } = require("../../utils/zenoh-manager");
 class SensorManager extends EventEmitter {
     constructor(options = {}) {
         super();
-        this.deviceManager = options.deviceManager || new DeviceManager();
+        this.deviceManager = new DeviceManager();
         this.sampleRate = options.sampleRate || 50; // Default 50Hz
         this.enabledSensors = options.enabledSensors || [];
         this.device = null;

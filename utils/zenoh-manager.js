@@ -56,7 +56,7 @@ class ZenohManager extends EventEmitter {
         await new Promise((resolve) => {
             const onData = (chunk) => {
                 const txt = chunk.toString();
-                if (txt.includes("[Python-Sidecar] READY")) {
+                if (txt.includes("[PythonSidecar] READY")) {
                     child.stdout.off("data", onData);
                     resolve();
                 }
@@ -167,7 +167,6 @@ class ZenohManager extends EventEmitter {
                 this.setDeviceInfo({
                     id: dev.bluetoothId || dev.id || undefined,
                     name: dev.name || undefined,
-                    connectionType: dev.connectionType || undefined,
                 });
             }
         } catch {}

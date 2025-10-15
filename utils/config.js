@@ -24,8 +24,6 @@ class Config {
 
     static getDeviceConfig() {
         return {
-            connectionType: (process.env.MIC_CONNECTION || "").toLowerCase(),
-            allowFallback: process.env.MIC_ALLOW_FALLBACK === "1",
             deviceId: process.env.MIC_DEVICE_ID || "",
             deviceName: process.env.MIC_DEVICE_NAME || "",
             connectOnly: process.env.MIC_CONNECT_ONLY === "1",

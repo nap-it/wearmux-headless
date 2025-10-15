@@ -1,7 +1,5 @@
-// Device connection and management utilities for BrilliantSole devices
+// Device connection and management utilities for BrilliantSole devices (Noble-only)
 const EventEmitter = require("events");
-
-// Defer loading ESM module until runtime using dynamic import
 let BS = null;
 
 class DeviceManager extends EventEmitter {
@@ -12,35 +10,11 @@ class DeviceManager extends EventEmitter {
 
     async connectToDevice() {
         try {
-            if (!BS) {
-                BS = await import("brilliantsole/node");
-            }
+            if (!BS) BS = await import("brilliantsole/node");
 
-            const connectionType = (process.env.MIC_CONNECTION || "").toLowerCase();
-            const allowFallback = process.env.MIC_ALLOW_FALLBACK === "1";
             const filterId = process.env.MIC_DEVICE_ID || "";
             const filterName = process.env.MIC_DEVICE_NAME || "";
-
-            if (connectionType === "webbluetooth") {
-                await this._connectViaWebBluetooth();
-            } else {
-                try {
-                    await this._connectViaNoble(filterId, filterName);
-                } catch (e) {
-                    console.warn(
-                        "[DeviceManager] Noble path failed:",
-                        e?.message || e
-                    );
-                    if (allowFallback) {
-                        console.warn(
-                            "[DeviceManager] Falling back to WebBluetooth because MIC_ALLOW_FALLBACK=1"
-                        );
-                        await this._connectViaWebBluetooth();
-                    } else {
-                        throw e;
-                    }
-                }
-            }
+            await this._connectViaNoble(filterId, filterName);
 
             this._setupEventListeners();
             await this._waitForConnection();
@@ -66,9 +40,7 @@ class DeviceManager extends EventEmitter {
         }
 
         if (!scanner || !scanner.isSupported) {
-            throw new Error(
-                "Scanner not available or not supported in this environment"
-            );
+            throw new Error("Scanner not available or not supported in this environment");
         }
 
         // Wait for scanning availability if needed
@@ -80,11 +52,7 @@ class DeviceManager extends EventEmitter {
                 ev.message.isScanningAvailable
             );
 
-            if (!ev.message.isScanningAvailable) {
-                throw new Error(
-                    "BLE scanning not available. On macOS, enable Bluetooth permission for your terminal in System Settings → Privacy & Security → Bluetooth."
-                );
-            }
+            if (!ev.message.isScanningAvailable) throw new Error("BLE scanning not available.");
         }
 
         if (process.env.DEBUG) console.log("[DeviceManager] starting BLE scan...");
@@ -137,7 +105,6 @@ class DeviceManager extends EventEmitter {
                     list.map((d) => ({
                         id: d.bluetoothId,
                         name: d.name,
-                        type: d.connectionType,
                     }))
                 );
             }
@@ -149,48 +116,26 @@ class DeviceManager extends EventEmitter {
         this.device = connected;
     }
 
-    async _connectViaWebBluetooth() {
-        if (process.env.DEBUG)
-            console.log("[DeviceManager] connecting with WebBluetooth path...");
-        const device = new BS.Device();
-        this.device = device;
-        await device.connect({ type: "webBluetooth" });
-        if (process.env.DEBUG)
-            console.log("[DeviceManager] connected with WebBluetooth path");
-    }
-
     _setupEventListeners() {
         try {
             this.device.addEventListener?.("connectionStatus", () => {
                 if (process.env.DEBUG) {
-                    console.log(
-                        "[DeviceManager] connectionStatus:",
-                        this.device.connectionStatus
-                    );
+                    console.log("[DeviceManager] connectionStatus:", this.device.connectionStatus);
                 }
             });
             this.device.addEventListener?.("microphoneStatus", () => {
                 if (process.env.DEBUG) {
-                    console.log(
-                        "[DeviceManager] microphoneStatus:",
-                        this.device.microphoneStatus
-                    );
+                    console.log("[DeviceManager] microphoneStatus:", this.device.microphoneStatus);
                 }
             });
             this.device.addEventListener?.("getSensorConfiguration", () => {
                 if (process.env.DEBUG) {
-                    console.log(
-                        "[DeviceManager] sensorConfiguration:",
-                        this.device.sensorConfiguration
-                    );
+                    console.log("[DeviceManager] sensorConfiguration:", this.device.sensorConfiguration);
                 }
             });
             this.device.addEventListener?.("getMicrophoneConfiguration", () => {
                 if (process.env.DEBUG) {
-                    console.log(
-                        "[DeviceManager] microphoneConfiguration:",
-                        this.device.microphoneConfiguration
-                    );
+                    console.log("[DeviceManager] microphoneConfiguration:", this.device.microphoneConfiguration);
                 }
             });
         } catch (error) {
