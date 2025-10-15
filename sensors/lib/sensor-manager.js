@@ -23,13 +23,6 @@ class SensorManager extends EventEmitter {
                 options.zenohJsonPretty !== undefined
                     ? Boolean(options.zenohJsonPretty)
                     : process.env.ZENOH_JSON_PRETTY === "1",
-            mode: options.zenohMode || (process.env.ZENOH_MODE || "client").toLowerCase(),
-            endpoints: Array.isArray(options.zenohEndpoints)
-                ? options.zenohEndpoints
-                : (process.env.ZENOH_ENDPOINTS || "")
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
         };
         this.zenohAttachAll =
             options.zenohAttachAll !== undefined
@@ -81,8 +74,6 @@ class SensorManager extends EventEmitter {
                 this.zenoh = new ZenohManager({
                     keyPrefix: this.zenohOptions.keyPrefix,
                     prettyJson: this.zenohOptions.prettyJson,
-                    mode: this.zenohOptions.mode,
-                    endpoints: this.zenohOptions.endpoints,
                 });
                 this.zenoh.on("error", (e) =>
                     console.warn("[SensorManager][Zenoh]", e?.message || e)
