@@ -1,0 +1,31 @@
+services:
+  zenoh-router:
+    image: eclipse/zenoh:1.6.1
+    container_name: zenoh-router
+    command: -c /zenoh/router.json5
+    ports:
+      - "7447:7447"
+    volumes:
+      - ./zenoh/router.json5:/zenoh/router.json5
+    environment:
+      - RUST_LOG=debug
+    restart: unless-stopped
+
+  bsole:
+    build: .
+    container_name: bsole-app
+    depends_on:
+      - zenoh-router
+    volumes:
+      - ./config.ini:/config/config.ini:ro
+      - ./zenoh/peer.docker.json5:/app/zenoh/peer.json5:ro
+    privileged: true
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    security_opt:
+      - seccomp:unconfined
+    devices:
+      - "/dev/bus/usb:/dev/bus/usb"
+    restart: unless-stopped
