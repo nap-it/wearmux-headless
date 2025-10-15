@@ -47,39 +47,23 @@ class DeviceManager extends EventEmitter {
             throw new Error("Scanner not available or not supported in this environment");
         }
 
-        // Wait for scanning availability if needed. The 'isScanningAvailable' event
-        // fires on changes (true/false), not guaranteed to be true when fired.
+        // Wait for scanning availability if needed (use event listener for better Linux compatibility)
         if (!scanner.isScanningAvailable) {
             console.log("[DeviceManager] waiting for scanning availability...");
-            const ok = await new Promise((resolve) => {
-                let settled = false;
-                const timeoutMs = 15000;
-                const pollMs = 250;
-                const finish = (v) => {
-                    if (settled) return;
-                    settled = true;
-                    try { scanner.removeEventListener?.("isScanningAvailable", onEvt); } catch {}
-                    clearTimeout(timer);
-                    clearInterval(interval);
-                    resolve(Boolean(v));
+            await new Promise((resolve, reject) => {
+                const onAvail = (ev) => {
+                    if (ev && ev.message && ev.message.isScanningAvailable) {
+                        scanner.removeEventListener?.("isScanningAvailable", onAvail);
+                        resolve();
+                    }
                 };
-                const onEvt = (ev) => {
-                    const v = ev?.message?.isScanningAvailable ?? scanner.isScanningAvailable;
-                    if (process.env.DEBUG)
-                        console.log("[DeviceManager] isScanningAvailable event:", v);
-                    if (v) finish(true);
-                };
-                try { scanner.addEventListener?.("isScanningAvailable", onEvt); } catch {}
-                const interval = setInterval(() => {
-                    if (scanner.isScanningAvailable) finish(true);
-                }, pollMs);
-                const timer = setTimeout(() => finish(false), timeoutMs);
+                scanner.addEventListener?.("isScanningAvailable", onAvail);
+                // Minimal guard: fail after 20s if it never becomes available
+                setTimeout(() => {
+                    scanner.removeEventListener?.("isScanningAvailable", onAvail);
+                    reject(new Error("BLE scanning not available."));
+                }, 20000);
             });
-            if (!ok) {
-                throw new Error(
-                    "BLE scanning not available. Ensure permissions (NET_RAW), rfkill unblocked, and hci0 is UP."
-                );
-            }
         }
 
         if (process.env.DEBUG) console.log("[DeviceManager] starting BLE scan...");
