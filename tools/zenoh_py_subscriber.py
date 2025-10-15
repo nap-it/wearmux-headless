@@ -8,15 +8,15 @@ def dec(v):
         return v.decode("utf-8", "replace")
     return str(v)
 
-LOCATOR = os.environ.get("ZENOH_LOCATOR", "tcp/127.0.0.1:7447")
 KEYEXPR = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ZENOH_SUB", "bsole/sensors/**")
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "zenoh", "peer.json5")
+if not os.path.exists(CONFIG_FILE):
+    print(f"[Python-Sidecar] zenoh peer config not found: {CONFIG_FILE}", file=sys.stderr)
+    sys.exit(1)
 
-conf = zenoh.Config()
-conf.insert_json5("mode", '"client"')                               # <-- JSON string
-conf.insert_json5("connect/endpoints", f'["{LOCATOR}"]')            # <-- JSON array
-
+conf = zenoh.Config.from_file(CONFIG_FILE)
 s = zenoh.open(conf)
-print(f"[Python-Sidecar] connected to {LOCATOR}; subscribing {KEYEXPR}")
+print(f"[Python-Sidecar] loaded zenoh peer config: {CONFIG_FILE}; subscribing {KEYEXPR}")
 
 def cb(sample):
     key = getattr(sample, "key_expr", None) or getattr(sample, "key", "<key>")

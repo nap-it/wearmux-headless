@@ -4,14 +4,14 @@ import zenoh
 import msgpack
 
 KEY_PREFIX = os.environ.get("ZENOH_KEY_PREFIX", "bsole/sensors")
-LOCATOR = "tcp/127.0.0.1:7447"
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "zenoh", "peer.json5")
+if not os.path.exists(CONFIG_FILE):
+    print(f"[Python-Sidecar] zenoh peer config not found: {CONFIG_FILE}", file=sys.stderr)
+    sys.exit(1)
 
-conf = zenoh.Config()
-conf.insert_json5("mode", '"client"')                    # JSON string
-conf.insert_json5("connect/endpoints", f'["{LOCATOR}"]') # JSON array
-
+conf = zenoh.Config.from_file(CONFIG_FILE)
 session = zenoh.open(conf)
-print(f"[Python-Sidecar] connected to {LOCATOR}", file=sys.stderr)
+print(f"[Python-Sidecar] loaded zenoh peer config: {CONFIG_FILE}", file=sys.stderr)
 
 publishers = {}
 

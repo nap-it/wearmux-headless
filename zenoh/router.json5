@@ -1,0 +1,5 @@
+{
+  "mode": "router",
+  "listen": { "endpoints": { "router": ["tcp/0.0.0.0:7447"] } },
+  "timestamping": { "enabled": true, "drop_future_timestamp": false }
+}

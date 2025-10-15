@@ -1,0 +1,12 @@
+// Zenoh peer configuration (JSON5)
+// This file is used by both publisher and subscriber Python tools.
+{
+  // Run as a client that connects to the local router
+  mode: "client",
+  // Default local router endpoint
+  connect: {
+    endpoints: ["tcp/127.0.0.1:7447"],
+  },
+  // Optional: increase RX/TX buffers or tune session here if needed.
+  // transport: { /* ... */ }
+}
