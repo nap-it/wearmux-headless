@@ -9,32 +9,32 @@ The project has been organized with clear separation of concerns:
 ```
 bsole-connector/
 ├── config/
-│   ├── 
-│   ├── peer.json5               # Zenoh peer configuration
-│   ├── peer.docker.json5        # Zenoh peer configuration (for Docker)
-│   └── router.json5             # Zenoh router configuration
+│   ├── config.ini                  # App configuration (for Docker)
+│   ├── peer.json5                  # Zenoh peer configuration
+│   ├── peer.docker.json5           # Zenoh peer configuration (for Docker)
+│   └── router.json5                # Zenoh router configuration
 ├── display/
-│   ├── index.js                 # Show images on device display
-│   └── lib/display-manager.js   # Display rendering & tiling
+│   ├── index.js                    # Show images on device display
+│   └── lib/display-manager.js      # Display rendering & tiling
 ├── microphone/
-│   ├── index.js                 # Microphone → RTSP publisher
-│   └── lib/brilliantsole-microphone.js
+│   ├── index.js                    # Microphone → RTSP publisher
+│   └── lib/microphone-manager.js
 ├── sensors/
-│   ├── index.js                 # Sensor monitor
+│   ├── index.js                    # Sensor monitor
 │   └── lib/
-│       ├── sensor-manager.js    # Device + sensor orchestration
-│       ├── motion-sensors.js    # Motion handlers/utilities
-│       └── activity-sensors.js  # Tap detector
+│       ├── sensor-manager.js       # Device + sensor orchestration
+│       ├── motion-sensors.js       # Motion handlers/utilities
+│       └── activity-sensors.js     # Tap detector
 ├── tools/
-│   ├── launcher.js              # Config parser and script launcher
-│   ├── zenoh_py_publisher.py    # Python sidecar: UDS→Zenoh publisher
-│   └── zenoh_py_subscriber.py   # Python subscriber helper
+│   ├── launcher.js                 # Config parser and script launcher
+│   ├── zenoh_py_publisher.py       # Python sidecar: UDS→Zenoh publisher
+│   └── zenoh_py_subscriber.py      # Python subscriber helper
 ├── utils/
-│   ├── config.js                # Env-driven config loader
-│   ├── device-manager.js        # BLE connection
-│   ├── stream-manager.js        # FFmpeg RTSP publisher
-│   └── zenoh-manager.js         # Node→Python sidecar bridge (UDS)
-├── docker-compose.yml           # Docker for Linux
+│   ├── config.js                   # Env-driven config loader
+│   ├── device-manager.js           # BLE connection
+│   ├── stream-manager.js           # FFmpeg RTSP publisher
+│   └── zenoh-manager.js            # Node→Python sidecar bridge (UDS)
+├── docker-compose.yml              # Docker for Linux
 ├── package.json
 └── README.md
 ```
