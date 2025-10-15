@@ -40,7 +40,7 @@ class ZenohManager extends EventEmitter {
         const args = ["-u", script]; // -u = unbuffered stdin/stdout
         const env = { ...process.env };
         if (!env.ZENOH_KEY_PREFIX && this.keyPrefix) env.ZENOH_KEY_PREFIX = this.keyPrefix;
-        const child = spawn(pyBin, args, { stdio: ["pipe", "inherit", "inherit"], env });
+        const child = spawn(pyBin, args, { stdio: ["pipe", "pipe", "inherit"], env });
         this._child = child;
         this._childReady = true;
         child.on("error", (err) => this.emit("error", new Error(`[ZenohManager] Python sidecar error: ${err?.message || err}`)));
@@ -48,6 +48,17 @@ class ZenohManager extends EventEmitter {
             if (code !== 0) this.emit("error", new Error(`[ZenohManager] Python sidecar exited code=${code} signal=${signal}`));
             this._child = null;
             this._childReady = false;
+        });
+        // Wait for readiness from sidecar
+        await new Promise((resolve) => {
+            const onData = (chunk) => {
+                const txt = chunk.toString();
+                if (txt.includes("[Python-Sidecar] READY")) {
+                    child.stdout.off("data", onData);
+                    resolve();
+                }
+            };
+            child.stdout.on("data", onData);
         });
         // Placeholder session descriptor for python mode
         this.session = { bridge: "python", locator: this.locator };

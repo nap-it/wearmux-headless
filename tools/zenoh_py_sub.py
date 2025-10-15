@@ -15,7 +15,7 @@ conf.insert_json5("mode", '"client"')                               # <-- JSON s
 conf.insert_json5("connect/endpoints", f'["{LOCATOR}"]')            # <-- JSON array
 
 s = zenoh.open(conf)
-print(f"[py-sub] connected to {LOCATOR}; subscribing {KEYEXPR}")
+print(f"[Python-Sidecar] connected to {LOCATOR}; subscribing {KEYEXPR}")
 
 def cb(sample):
     key = getattr(sample, "key_expr", None) or getattr(sample, "key", "<key>")

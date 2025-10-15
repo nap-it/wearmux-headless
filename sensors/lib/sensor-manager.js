@@ -56,15 +56,7 @@ class SensorManager extends EventEmitter {
     }
 
     async startSensors() {
-        this._configureSensors();
-
-        // Wait for configuration to take effect
-        await new Promise((r) => setTimeout(r, 500));
-
-        // Setup event listeners for sensor data
-        this._setupSensorEventListeners();
-
-        // Optional Zenoh publishing: enabled via env or options
+        // If Zenoh is enabled, make sure the sidecar is up and handlers are attached first
         if (this.zenohEnabled && this.zenohAttachAll) {
             try {
                 this.zenoh = new ZenohManager({
@@ -83,6 +75,14 @@ class SensorManager extends EventEmitter {
                 );
             }
         }
+
+        this._configureSensors();
+
+        // Wait for configuration to take effect
+        await new Promise((r) => setTimeout(r, 500));
+
+        // Setup event listeners for sensor data
+        this._setupSensorEventListeners();
     }
 
     _configureSensors() {

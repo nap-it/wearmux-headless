@@ -10,7 +10,9 @@ conf.insert_json5("mode", '"client"')                    # JSON string
 conf.insert_json5("connect/endpoints", f'["{LOCATOR}"]') # JSON array
 
 session = zenoh.open(conf)
-print(f"[py-sidecar] connected to {LOCATOR}", file=sys.stderr)
+print(f"[Python-Sidecar] connected to {LOCATOR}", file=sys.stderr)
+# Signal readiness on stdout so the parent process can wait deterministically
+print("[Python-Sidecar] READY", flush=True)
 
 publishers = {}
 
@@ -44,8 +46,8 @@ for raw in sys.stdin:
         key = str(msg.get("key") or KEY_PREFIX)
         payload = json.dumps(msg.get("json", None), indent=4)
         _pub_for(key).put(payload)  # send as string (robust across versions)
-        # print(f"[py-sidecar] put {key}", file=sys.stderr)  # debug if needed
+        # print(f"[Python-Sidecar] put {key}", file=sys.stderr)  # debug if needed
     except Exception as e:
-        print(f"[py-sidecar] bad line/publish error: {e} | line={line}", file=sys.stderr)
+        print(f"[Python-Sidecar] bad line/publish error: {e} | line={line}", file=sys.stderr)
 
 shutdown()
