@@ -13,7 +13,7 @@ class DeviceManager extends EventEmitter {
         try {
             if (!BS) {
                 BS = await import("brilliantsole/node");
-                BS.setAllConsoleLevelFlags({log: true}):
+                BS.setAllConsoleLevelFlags({log: true});
             }
 
             const filterId = process.env.MIC_DEVICE_ID || "";
