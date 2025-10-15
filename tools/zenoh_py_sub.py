@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
+# ! THIS SUBSCRIBER IS FOR DEBUG PURPOSES, NOT FOR TRASNFERING OUTSIDE INFORMATION TO THE BSOLE CONNECTOR
 import os, sys, json, time
-import zenoh  # pip install 'zenoh==1.6.1'
+import zenoh
 
 def dec(v):
     if isinstance(v, (bytes, bytearray)):

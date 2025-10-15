@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-import os, sys, json, signal
+import os, sys, json, signal, socket, atexit
 import zenoh
+import msgpack
 
 KEY_PREFIX = os.environ.get("ZENOH_KEY_PREFIX", "bsole/sensors")
-LOCATOR = os.environ.get("ZENOH_LOCATOR") or "tcp/127.0.0.1:7447"
+LOCATOR = "tcp/127.0.0.1:7447"
 
 conf = zenoh.Config()
 conf.insert_json5("mode", '"client"')                    # JSON string
@@ -11,8 +12,6 @@ conf.insert_json5("connect/endpoints", f'["{LOCATOR}"]') # JSON array
 
 session = zenoh.open(conf)
 print(f"[Python-Sidecar] connected to {LOCATOR}", file=sys.stderr)
-# Signal readiness on stdout so the parent process can wait deterministically
-print("[Python-Sidecar] READY", flush=True)
 
 publishers = {}
 
@@ -37,17 +36,55 @@ def shutdown(*_):
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
-for raw in sys.stdin:
-    line = raw.strip()
-    if not line:
-        continue
+UDS_PATH = "/tmp/bsole-zenoh.sock"
+
+def handle_msg(obj):
+    key = str(obj.get("key") or KEY_PREFIX)
+    if obj.get("declare") and "json" not in obj:
+        _pub_for(key)
+        return
+    payload = json.dumps(obj.get("json", None), indent=4)
+    _pub_for(key).put(payload)
+
+try:
+    if os.path.exists(UDS_PATH):
+        os.unlink(UDS_PATH)
+except Exception:
+    pass
+
+def _cleanup_socket(path: str):
     try:
-        msg = json.loads(line)
-        key = str(msg.get("key") or KEY_PREFIX)
-        payload = json.dumps(msg.get("json", None), indent=4)
-        _pub_for(key).put(payload)  # send as string (robust across versions)
-        # print(f"[Python-Sidecar] put {key}", file=sys.stderr)  # debug if needed
-    except Exception as e:
-        print(f"[Python-Sidecar] bad line/publish error: {e} | line={line}", file=sys.stderr)
+        if os.path.exists(path):
+            os.unlink(path)
+    except Exception:
+        pass
+
+atexit.register(_cleanup_socket, UDS_PATH)
+srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+srv.bind(UDS_PATH)
+srv.listen(1)
+print(f"[Python-Sidecar] UDS listening at {UDS_PATH}", file=sys.stderr)
+# Signal readiness only after the socket is listening
+print("[Python-Sidecar] READY", flush=True)
+conn, _ = srv.accept()
+try:
+    unpacker = msgpack.Unpacker(raw=False)
+    while True:
+        data = conn.recv(65536)
+        if not data:
+            break
+        unpacker.feed(data)
+        for obj in unpacker:
+            try:
+                if isinstance(obj, (bytes, bytearray)):
+                    obj = json.loads(obj.decode("utf-8", "replace"))
+                handle_msg(obj)
+            except Exception as e:
+                print(f"[Python-Sidecar] bad msgpack/publish error: {e}", file=sys.stderr)
+finally:
+    try: conn.close()
+    except Exception: pass
+    try: srv.close()
+    except Exception: pass
 
 shutdown()

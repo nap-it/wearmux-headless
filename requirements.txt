@@ -1,1 +1,2 @@
 eclipse-zenoh==1.6.1
+msgpack==1.1.2

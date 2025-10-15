@@ -2,6 +2,8 @@
 // Supports multiple package names: '@eclipse-zenoh/zenoh-ts', 'zenoh-ts', 'zenoh', '@eclipse-zenoh/zenoh-node'
 const EventEmitter = require("events");
 const { spawn } = require("child_process");
+const net = require("net");
+const msgpack = require("@msgpack/msgpack");
 const path = require("path");
 
 // Native bindings are not supported in Node here; we use a small Python sidecar.
@@ -12,7 +14,6 @@ class ZenohManager extends EventEmitter {
         this.keyPrefix = options.keyPrefix || "bsole/sensors";
         this.prettyJson = true;
         this.locator = "tcp/127.0.0.1:7447";
-        this._z = null; // unused in python sidecar mode
         this.session = null;
         this._mode = "python"; // always python sidecar
         this._pubCache = new Map(); // key => publisher or null for session.put
@@ -21,6 +22,9 @@ class ZenohManager extends EventEmitter {
         this._deviceInfo = null; // optional info injected via setDeviceInfo
         this._child = null; // python sidecar
         this._childReady = false;
+        // UDS transport (MessagePack) only
+        this._udsPath = "/tmp/bsole-zenoh.sock";
+        this._udsSocket = null;
     }
 
     setDeviceInfo(info) {
@@ -36,11 +40,10 @@ class ZenohManager extends EventEmitter {
 
     async _startDenoBridge() { // historical name; starts the Python sidecar
         const script = path.resolve(__dirname, "../tools/zenoh_py_publisher.py");
-        const pyBin = process.env.PYTHON_BIN || "python3";
+        const pyBin = "python3";
         const args = ["-u", script]; // -u = unbuffered stdin/stdout
         const env = { ...process.env };
-        if (!env.ZENOH_KEY_PREFIX && this.keyPrefix) env.ZENOH_KEY_PREFIX = this.keyPrefix;
-        const child = spawn(pyBin, args, { stdio: ["pipe", "pipe", "inherit"], env });
+        const child = spawn(pyBin, args, { stdio: ["ignore", "pipe", "inherit"], env });
         this._child = child;
         this._childReady = true;
         child.on("error", (err) => this.emit("error", new Error(`[ZenohManager] Python sidecar error: ${err?.message || err}`)));
@@ -60,6 +63,22 @@ class ZenohManager extends EventEmitter {
             };
             child.stdout.on("data", onData);
         });
+        // Connect to the UDS socket now (UDS-only)
+        if (!msgpack) {
+            throw new Error("@msgpack/msgpack is required for UDS transport. Please install dependencies.");
+        }
+        await new Promise((resolve, reject) => {
+            const sock = net.createConnection({ path: this._udsPath }, () => resolve());
+            sock.on("error", (e) => {
+                this.emit("error", new Error(`[ZenohManager] UDS socket error: ${e?.message || e}`));
+                reject(e);
+            });
+            sock.on("close", () => {
+                // Sidecar closed the socket; keep state but notify
+                this.emit("error", new Error("[ZenohManager] UDS socket closed"));
+            });
+            this._udsSocket = sock;
+        });
         // Placeholder session descriptor for python mode
         this.session = { bridge: "python", locator: this.locator };
     }
@@ -69,17 +88,15 @@ class ZenohManager extends EventEmitter {
             await this.detachAll();
         } catch {}
         try {
-            if (this._mode === "python") {
-                if (this._child?.stdin) {
-                    try {
-                        this._child.stdin.end();
-                    } catch {}
-                }
-                await new Promise((r) => setTimeout(r, 100));
-                try {
-                    this._child?.kill("SIGTERM");
-                } catch {}
+            if (this._udsSocket) {
+                try { this._udsSocket.end(); } catch {}
+                try { this._udsSocket.destroy(); } catch {}
+                this._udsSocket = null;
             }
+            await new Promise((r) => setTimeout(r, 100));
+            try {
+                this._child?.kill("SIGTERM");
+            } catch {}
         } catch (e) {
             this.emit("error", e);
         } finally {
@@ -125,24 +142,11 @@ class ZenohManager extends EventEmitter {
     }
 
     async publish(key, payload) {
-        if (this._mode === "python") {
-            if (!this._child || !this._child.stdin) throw new Error("Python bridge is not running");
-            const line = JSON.stringify({ key, json: payload }) + "\n";
-            const ok = this._child.stdin.write(line);
-            if (!ok) await new Promise((resolve) => this._child.stdin.once("drain", resolve));
-            return;
-        }
-        if (!this.session) throw new Error("Zenoh session is not started");
-        const pub = await this._getPublisher(key);
-        const data = this._serialize(payload);
-        if (pub && (pub.put || pub.write)) {
-            const fn = pub.put || pub.write;
-            return fn.call(pub, data);
-        }
-        // Generic session.put path
-        const put = this.session.put || this.session.write || this.session.putKey;
-        if (!put) throw new Error("Zenoh binding does not expose put/write");
-        return put.call(this.session, key, data);
+        if (!this._udsSocket) throw new Error("UDS socket is not connected");
+        const buf = Buffer.from(msgpack.encode({ key, json: payload }));
+        const ok = this._udsSocket.write(buf);
+        if (!ok) await new Promise((resolve) => this._udsSocket.once("drain", resolve));
+        return;
     }
 
     // Attach all enabled sensors from SensorManager and publish
@@ -170,6 +174,12 @@ class ZenohManager extends EventEmitter {
 
         sensors.forEach((sensorType) => {
             const key = this._topicFor(sensorType);
+            // Predeclare publisher on the Python sidecar to avoid first-message latency
+            try {
+                if (this._udsSocket) {
+                    this._udsSocket.write(Buffer.from(msgpack.encode({ key, declare: true })));
+                }
+            } catch {}
             const handler = async (event) => {
                 // Prefer the plain message payload to avoid circular refs
                 const safeMessage = event && typeof event === "object" ? event.message ?? null : null;
