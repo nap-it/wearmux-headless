@@ -47,16 +47,39 @@ class DeviceManager extends EventEmitter {
             throw new Error("Scanner not available or not supported in this environment");
         }
 
-        // Wait for scanning availability if needed
+        // Wait for scanning availability if needed. The 'isScanningAvailable' event
+        // fires on changes (true/false), not guaranteed to be true when fired.
         if (!scanner.isScanningAvailable) {
             console.log("[DeviceManager] waiting for scanning availability...");
-            const ev = await scanner.waitForEvent("isScanningAvailable");
-            console.log(
-                "[DeviceManager] isScanningAvailable event:",
-                ev.message.isScanningAvailable
-            );
-
-            if (!ev.message.isScanningAvailable) throw new Error("BLE scanning not available.");
+            const ok = await new Promise((resolve) => {
+                let settled = false;
+                const timeoutMs = 15000;
+                const pollMs = 250;
+                const finish = (v) => {
+                    if (settled) return;
+                    settled = true;
+                    try { scanner.removeEventListener?.("isScanningAvailable", onEvt); } catch {}
+                    clearTimeout(timer);
+                    clearInterval(interval);
+                    resolve(Boolean(v));
+                };
+                const onEvt = (ev) => {
+                    const v = ev?.message?.isScanningAvailable ?? scanner.isScanningAvailable;
+                    if (process.env.DEBUG)
+                        console.log("[DeviceManager] isScanningAvailable event:", v);
+                    if (v) finish(true);
+                };
+                try { scanner.addEventListener?.("isScanningAvailable", onEvt); } catch {}
+                const interval = setInterval(() => {
+                    if (scanner.isScanningAvailable) finish(true);
+                }, pollMs);
+                const timer = setTimeout(() => finish(false), timeoutMs);
+            });
+            if (!ok) {
+                throw new Error(
+                    "BLE scanning not available. Ensure permissions (NET_RAW), rfkill unblocked, and hci0 is UP."
+                );
+            }
         }
 
         if (process.env.DEBUG) console.log("[DeviceManager] starting BLE scan...");
