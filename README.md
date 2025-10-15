@@ -93,9 +93,9 @@ Note: BLE is supported via Noble only. WebBluetooth has been removed.
 ### Running the application
 
 ```bash
-## Scripts
+## Install dependencies
+npm install
 
-```bash
 # Microphone → RTSP
 npm run microphone:rtsp
 
