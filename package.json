@@ -14,6 +14,7 @@
         "start": "node index.js",
         "microphone:rtsp": "node microphone/index.js",
         "sensors": "node sensors/index.js",
-        "display": "node display/index.js"
+        "display": "node display/index.js",
+        "camera": "node camera/index.js"
     }
 }

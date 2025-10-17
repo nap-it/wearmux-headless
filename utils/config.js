@@ -1,4 +1,5 @@
 // Configuration utilities for environment variables and settings
+const path = require("path");
 class Config {
     static getAudioConfig() {
         return {
@@ -79,6 +80,42 @@ class Config {
         };
     }
 
+    static getCameraConfig() {
+        const n = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined);
+        const s = (v) => (v !== undefined && v !== null && v !== "" ? String(v) : undefined);
+        return {
+            // Output directory is optional; if not set, images won't be saved automatically
+            outputDir: (process.env.CAMERA_OUTPUT_DIR && process.env.CAMERA_OUTPUT_DIR.trim()) || undefined,
+            autoPicture: process.env.CAMERA_AUTO_PICTURE === "1",
+            imageFormat: s(process.env.CAMERA_IMAGE_FORMAT) || "jpg",
+            quality: n(process.env.CAMERA_QUALITY), // legacy alias
+            // Extended tuning knobs (if supported by device/SDK)
+            // Prefer a single square resolution: CAMERA_RESOLUTION (e.g., 300 -> 300x300)
+            resolution: (() => {
+                const r = n(process.env.CAMERA_RESOLUTION);
+                if (r) return { width: r, height: r };
+                // Backward-compat: allow explicit width/height if provided
+                const w = n(process.env.CAMERA_WIDTH);
+                const h = n(process.env.CAMERA_HEIGHT);
+                if (w && h) return { width: w, height: h };
+                return undefined;
+            })(),
+            qualityFactor: n(process.env.CAMERA_QUALITY_FACTOR),
+            shutter: s(process.env.CAMERA_SHUTTER) || n(process.env.CAMERA_SHUTTER),
+            gain: n(process.env.CAMERA_GAIN),
+            redGain: n(process.env.CAMERA_RED_GAIN),
+            greenGain: n(process.env.CAMERA_GREEN_GAIN),
+            blueGain: n(process.env.CAMERA_BLUE_GAIN),
+            // Optional lightweight viewer
+            viewEnable: process.env.CAMERA_VIEW_ENABLE === "1",
+            viewHost: s(process.env.CAMERA_VIEW_HOST) || "127.0.0.1",
+            viewPort: n(process.env.CAMERA_VIEW_PORT) || 8099,
+            viewMjpeg: process.env.CAMERA_VIEW_MJPEG === "1",
+            // Camera sensor sampling rate (if device uses sensorConfiguration for camera)
+            rate: n(process.env.CAMERA_RATE) || n(process.env.CAMERA_SENSOR_RATE) || 10,
+        };
+    }
+
     static getZenohConfig() {
         // Single endpoint via ZENOH_LOCATOR (e.g., "tcp/127.0.0.1:7447")
     const enabled = process.env.ZENOH_ENABLE === "1";
@@ -105,6 +142,7 @@ class Config {
             microphone: this.getMicrophoneConfig(),
             sensors: this.getSensorConfig(),
             display: this.getDisplayConfig(),
+            camera: this.getCameraConfig(),
             zenoh: this.getZenohConfig(),
         };
     }
