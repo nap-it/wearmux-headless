@@ -35,6 +35,39 @@ bsole-connector/
 │   ├── stream-manager.js           # FFmpeg RTSP publisher
 │   └── zenoh-manager.js            # Node→Python sidecar bridge (UDS)
 ├── docker-compose.yml              # Docker for Linux
+
+## Camera capture (no ML)
+
+This repo includes a simple camera capture utility (`CameraManager`) that connects to a BrilliantSole device and can show live images in a browser and optionally save them (no ML/AI processing).
+
+- Single capture and exit:
+
+   npm run camera
+
+- Continuous auto-capture (poll as fast as possible):
+
+   CAMERA_AUTO_PICTURE=1 npm run camera
+
+Environment variables:
+
+- CAMERA_OUTPUT_DIR: optional directory for saved images (if unset, images aren’t written to disk)
+- CAMERA_AUTO_PICTURE: set to 1 to continuously poll the camera
+- CAMERA_IMAGE_FORMAT: file extension to use (default: jpg)
+- CAMERA_QUALITY: legacy quality setting (kept for compatibility)
+- CAMERA_RESOLUTION: square frame size (e.g., 300 => 300x300)
+- CAMERA_QUALITY_FACTOR: quality factor (1..100, device-dependent)
+- CAMERA_SHUTTER: shutter/exposure setting (number or supported string)
+- CAMERA_GAIN: overall gain
+- CAMERA_RED_GAIN / CAMERA_GREEN_GAIN / CAMERA_BLUE_GAIN: per-channel gains
+- CAMERA_VIEW_ENABLE: set to 1 to enable a lightweight browser viewer (default http://127.0.0.1:8099)
+- CAMERA_VIEW_HOST / CAMERA_VIEW_PORT: viewer host/port
+ - CAMERA_VIEW_MJPEG: set to 1 to use a true MJPEG stream at /stream.mjpg (lower latency)
+
+Notes:
+
+- Uses the same Noble-based connection as the microphone/sensors modules via `utils/device-manager.js`.
+- Images are emitted as raw buffers from the SDK and saved directly without any processing.
+- The browser viewer auto-refreshes the latest image. If you want a smoother MJPEG endpoint, I can add `/stream.mjpg`.
 ├── package.json
 └── README.md
 ```
