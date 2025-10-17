@@ -4,7 +4,7 @@ import zenoh
 import msgpack
 
 KEY_PREFIX = os.environ.get("ZENOH_KEY_PREFIX", "bsole/sensors")
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "zenoh", "peer.json5")
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "peer.json5")
 if not os.path.exists(CONFIG_FILE):
     print(f"[PythonSidecar] zenoh peer config not found: {CONFIG_FILE}", file=sys.stderr)
     sys.exit(1)
