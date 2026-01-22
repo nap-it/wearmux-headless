@@ -76,7 +76,8 @@ class Config {
             fit: s(process.env.DISPLAY_FIT) || "contain", // contain | cover | fill | inside | outside
             align: s(process.env.DISPLAY_ALIGN) || "center", // top|bottom|left|right|center
             pixelDepth: [1, 2, 4].includes(pxDepth) ? pxDepth : undefined,
-            brightness: s(process.env.DISPLAY_BRIGHTNESS) || undefined // veryLow|low|medium|high|veryHigh
+            brightness: s(process.env.DISPLAY_BRIGHTNESS) || undefined, // veryLow|low|medium|high|veryHigh
+            tileMaxPixels: n(process.env.DISPLAY_TILE_MAX_PIXELS) || 220 // Max pixels per tile (fallback when MTU not available, or minimum when MTU yields smaller tiles)
         };
     }
 
