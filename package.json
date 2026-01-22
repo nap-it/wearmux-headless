@@ -1,7 +1,7 @@
 {
     "dependencies": {
-        "@abandonware/noble": "^1.9.2-26",
         "@msgpack/msgpack": "^3.0.0",
+        "@stoprocent/noble": "^2.3.10",
         "auto-bind": "^5.0.1",
         "brilliantsole": "^0.0.32",
         "dgram": "^1.0.1",

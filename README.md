@@ -103,9 +103,12 @@ Audio / RTSP
 - `TEST_MODE` (default `0`): If `1`, saves audio to `test_output.wav` instead of RTSP.
 
 Device discovery / connection
-- `MIC_DEVICE_ID` (optional): Filter by Bluetooth ID when scanning.
-- `MIC_DEVICE_NAME` (optional): Filter by device name when scanning.
-- `MIC_CONNECT_ONLY` (default `0`): If `1`, connect to device but don’t start microphone.
+- `USE_CUSTOM_NOBLE` (default `false`): Set to `true` or `1` to use custom Noble implementation for Linux kernel 6.x compatibility. Required on Linux with kernel 6.x due to `@abandonware/noble` incompatibility.
+- `DEVICE_ID` (optional): Filter by Bluetooth MAC address (e.g., `CE:59:C3:0F:4D:C9`). If not set, auto-discovers first BrilliantSole device.
+- `DEVICE_NAME` (optional): Filter by device name when scanning. If not set, matches any BrilliantSole device.
+- `MIC_DEVICE_ID` (optional):  Filter by Bluetooth ID when scanning.
+- `MIC_DEVICE_NAME` (optional):  Filter by device name when scanning.
+- `MIC_CONNECT_ONLY` (default `0`):  If `1`, connect to device but don't start microphone.
 
 Sensors
 - `ENABLED_SENSORS` (optional): Comma-separated list. If unset, the CLI enables common sensors.
@@ -185,3 +188,20 @@ Linux BLE troubleshooting (e.g., Raspberry Pi):
    - `rfkill unblock bluetooth`
    - `sudo hciconfig hci0 up` (or `bluetoothctl power on`)
 - Verify your user is in the appropriate groups (e.g., `bluetooth`) or run as root.
+
+
+## Troubleshooting
+
+### Linux Kernel 6.x Compatibility
+
+The BrilliantSole SDK uses `@abandonware/noble` which has a compatibility bug with Linux kernel 6.x. If you experience connection issues, enable the custom Noble implementation:
+
+```bash
+# Set in .env file:
+USE_CUSTOM_NOBLE=true
+
+# Or via environment variable:
+USE_CUSTOM_NOBLE=true npm run sensors
+```
+
+The custom implementation uses `@stoprocent/noble` (maintained fork) and bypasses the SDK's built-in scanner with manual event triggering for full Linux kernel 6.x support.
