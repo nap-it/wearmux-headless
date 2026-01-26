@@ -1,60 +1,20 @@
-// Activity sensor handling for tap detection, step counting, etc.
+// Activity sensor handling for hardware tap detection
 const EventEmitter = require("events");
 
-class ActivitySensorHandler extends EventEmitter {
-    constructor(sensorType) {
-        super();
-        this.sensorType = sensorType;
-        this.data = null;
-        this.lastUpdate = null;
-        this.eventCount = 0;
-    }
-
-    updateData(rawData) {
-        this.data = rawData;
-        this.lastUpdate = Date.now();
-        this.eventCount++;
-
-        this.emit("event", {
-            sensor: this.sensorType,
-            data: rawData,
-            timestamp: this.lastUpdate,
-            eventCount: this.eventCount,
-        });
-    }
-
-    getData() {
-        return {
-            sensor: this.sensorType,
-            data: this.data,
-            timestamp: this.lastUpdate,
-            eventCount: this.eventCount,
-            isActive: this.data !== null,
-        };
-    }
-
-    reset() {
-        this.data = null;
-        this.lastUpdate = null;
-        this.eventCount = 0;
-    }
-}
-
-class TapDetectorHandler extends ActivitySensorHandler {
+class TapDetectorHandler extends EventEmitter {
     constructor() {
-        super("tapDetector");
+        super();
+        this.data = null;
+        this.lastUpdate = null;
+        this.eventCount = 0;
         this.tapHistory = [];
         this.maxHistorySize = 10;
+        
         // Debounce and gesture grouping
         this.debounceMs = parseInt(process.env.TAP_DEBOUNCE_MS || "120", 10);
-        this.doubleWindowMs = parseInt(
-            process.env.TAP_DOUBLE_WINDOW_MS || "350",
-            10
-        );
-        this.tripleWindowMs = parseInt(
-            process.env.TAP_TRIPLE_WINDOW_MS || "700",
-            10
-        );
+        this.doubleWindowMs = parseInt(process.env.TAP_DOUBLE_WINDOW_MS || "350", 10);
+        this.tripleWindowMs = parseInt(process.env.TAP_TRIPLE_WINDOW_MS || "700", 10);
+        
         this._lastRawTapMs = 0;
         this._groupCount = 0;
         this._groupFirstMs = 0;
@@ -63,13 +23,16 @@ class TapDetectorHandler extends ActivitySensorHandler {
 
     updateData(rawData) {
         const now = Date.now();
+        
         // Debounce repeated frames per physical tap
         if (now - this._lastRawTapMs < this.debounceMs) {
             return;
         }
         this._lastRawTapMs = now;
 
-        super.updateData(rawData);
+        this.data = rawData;
+        this.lastUpdate = Date.now();
+        this.eventCount++;
 
         // Add to tap history
         this.tapHistory.push({
@@ -82,13 +45,11 @@ class TapDetectorHandler extends ActivitySensorHandler {
             this.tapHistory.shift();
         }
 
-        this.emit("tap", {
-            tapDetector: rawData,
-            timestamp: this.lastUpdate,
-            totalTaps: this.eventCount,
-        });
-
         // Gesture grouping: single/double/triple
+        this._processGesture(now);
+    }
+
+    _processGesture(now) {
         const clearGroup = () => {
             if (this._groupTimer) {
                 clearTimeout(this._groupTimer);
@@ -156,26 +117,45 @@ class TapDetectorHandler extends ActivitySensorHandler {
         }
     }
 
-    // Get recent tap pattern
+    getData() {
+        return {
+            sensor: "tapDetector",
+            data: this.data,
+            timestamp: this.lastUpdate,
+            eventCount: this.eventCount,
+            isActive: this.data !== null,
+        };
+    }
+
     getRecentTaps(maxAge = 5000) {
         const cutoff = Date.now() - maxAge;
         return this.tapHistory.filter((tap) => tap.timestamp > cutoff);
     }
 
-    // Detect double tap pattern
     isDoubleTap(maxInterval = 500) {
         const recentTaps = this.getRecentTaps(maxInterval);
         return recentTaps.length >= 2;
     }
 
-    // Detect triple tap pattern
     isTripleTap(maxInterval = 1000) {
         const recentTaps = this.getRecentTaps(maxInterval);
         return recentTaps.length >= 3;
     }
+
+    reset() {
+        this.data = null;
+        this.lastUpdate = null;
+        this.eventCount = 0;
+        this.tapHistory = [];
+        if (this._groupTimer) {
+            clearTimeout(this._groupTimer);
+            this._groupTimer = null;
+        }
+        this._groupCount = 0;
+        this._groupFirstMs = 0;
+    }
 }
 
 module.exports = {
-    ActivitySensorHandler,
     TapDetectorHandler,
 };

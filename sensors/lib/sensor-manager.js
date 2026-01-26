@@ -1,17 +1,23 @@
 // Sensor management for BrilliantSole device sensors
 const EventEmitter = require("events");
-const { DeviceManager } = require("../../utils/device-manager");
 const { ZenohManager } = require("../../utils/zenoh-manager");
 
 class SensorManager extends EventEmitter {
-    constructor(options = {}) {
+    /**
+     * @param {Device} device - SDK device instance (already connected)
+     * @param {Object} options - Configuration options
+     */
+    constructor(device, options = {}) {
         super();
-        this.deviceManager = new DeviceManager();
-        this.sampleRate = options.sampleRate || 50; // Default 50Hz
+        if (!device) {
+            throw new Error("SensorManager requires a device instance (use SDK DeviceManager to connect)");
+        }
+        this.device = device;
+        this.sampleRate = options.sampleRate || 50;
         this.enabledSensors = options.enabledSensors || [];
-        this.device = null;
         this.isMonitoring = false;
         this.sensorConfiguration = {};
+        
         // Zenoh integration controls (env or options)
         this.zenohEnabled =
             options.zenohEnabled !== undefined
@@ -24,12 +30,11 @@ class SensorManager extends EventEmitter {
         this.zenohAttachAll =
             options.zenohAttachAll !== undefined
                 ? Boolean(options.zenohAttachAll)
-                : process.env.ZENOH_ATTACH_ALL !== "0"; // default true
+                : process.env.ZENOH_ATTACH_ALL !== "0";
         this.zenoh = null;
 
         // Available sensor types with their default device rates (SDK expects multiples of 5)
         this.availableSensors = {
-            // Motion sensors
             acceleration: 50,
             linearAcceleration: 50,
             gyroscope: 50,
@@ -37,22 +42,11 @@ class SensorManager extends EventEmitter {
             gameRotation: 50,
             rotation: 50,
             orientation: 50,
-            // Event sensors
             tapDetector: 5,
         };
 
         // Build per-sensor output throttle (Hz or ms) from environment
         this.outputThrottleMs = this._buildOutputThrottleMap();
-    }
-
-    async connect() {
-        try {
-            this.device = await this.deviceManager.connectToDevice();
-            return this.device;
-        } catch (err) {
-            this.emit("error", err);
-            throw err;
-        }
     }
 
     async startSensors() {
@@ -83,6 +77,8 @@ class SensorManager extends EventEmitter {
 
         // Setup event listeners for sensor data
         this._setupSensorEventListeners();
+        
+        this.isMonitoring = true;
     }
 
     _configureSensors() {
@@ -131,7 +127,6 @@ class SensorManager extends EventEmitter {
 
     _buildOutputThrottleMap() {
         // Accept per-sensor RATE as either Hz (number) or ms (string with 'ms')
-        // Example: ORIENTATION_RATE=11  -> ~90.91ms; ORIENTATION_RATE=90ms -> 90ms
         const sensors = Object.keys(this.availableSensors);
         const toEnvKey = (name) => name.replace(/([A-Z])/g, "_$1").toUpperCase();
         const clampMs = (ms) => Math.max(5, Math.min(1000, ms));
@@ -208,9 +203,8 @@ class SensorManager extends EventEmitter {
             }
         });
 
-        // Generic sensor data event (DEBUG only to reduce noise)
-        if (process.env.DEBUG) {
-            console.log("[SensorManager] Adding listener for sensorData (DEBUG)");
+        if (process.env.DEBUG === '1') {
+            console.log("[SensorManager] Adding listener for sensorData (DEBUG mode)");
             this.device.addEventListener("sensorData", (event) => {
                 console.log("[SensorManager] Generic sensorData received:", event);
                 this.emit("sensorData", event);
@@ -228,9 +222,7 @@ class SensorManager extends EventEmitter {
         } finally {
             this.zenoh = null;
         }
-        if (this.deviceManager) {
-            await this.deviceManager.disconnect();
-        }
+        this.isMonitoring = false;
     }
 
     // Sensor-specific methods
@@ -281,10 +273,6 @@ class SensorManager extends EventEmitter {
 
     getSensorConfiguration() {
         return { ...this.sensorConfiguration };
-    }
-
-    getDeviceManager() {
-        return this.deviceManager;
     }
 }
 
