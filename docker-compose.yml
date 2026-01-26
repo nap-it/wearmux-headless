@@ -1,31 +1,98 @@
 services:
+  # Zenoh Router - Message broker for sensor data
   zenoh-router:
     image: eclipse/zenoh:1.6.1
     container_name: zenoh-router
     command: -c /zenoh/router.json5
     ports:
-      - "7447:7447"
+      - "7447:7447"  # TCP port for zenoh
+      # - "8000:8000"  # REST API (optional, disabled to avoid conflicts)
     volumes:
-      - ./config/router.json5:/zenoh/router.json5
+      - ./config/router.json5:/zenoh/router.json5:ro
     environment:
-      - RUST_LOG=debug
+      - RUST_LOG=${ZENOH_LOG_LEVEL:-info}
+    networks:
+      - bsole-network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep zenohd || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
+  # BrilliantSole Connector - Main application
   bsole:
-    build: .
+    build:
+      context: .
     container_name: bsole-app
     depends_on:
-      - zenoh-router
+      zenoh-router:
+        condition: service_healthy
     volumes:
+      # Configuration
       - ./config/config.ini:/config/config.ini:ro
       - ./config/peer.docker.json5:/app/zenoh/peer.json5:ro
-    privileged: true
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    security_opt:
-      - seccomp:unconfined
-    devices:
-      - "/dev/bus/usb:/dev/bus/usb"
+      # Data persistence (optional)
+      - ./training-data:/app/training-data
+      - ./logs:/app/logs
+      # Display assets (if using display module)
+      - ./display/assets:/app/display/assets:ro
+    environment:
+      # Core settings
+      - NODE_ENV=${NODE_ENV:-production}
+      - DEBUG=${DEBUG:-0}
+      
+      # BLE device configuration
+      - DEVICE_NAME=${DEVICE_NAME:-}
+      - DEVICE_ID=${DEVICE_ID:-}
+      - USE_CUSTOM_NOBLE=${USE_CUSTOM_NOBLE:-true}
+      
+      # Zenoh configuration
+      - ZENOH_ENABLE=${ZENOH_ENABLE:-1}
+      - ZENOH_DOCKER_ROUTER=1
+      
+      # Sensor configuration
+      - ENABLED_SENSORS=${ENABLED_SENSORS:-acceleration,orientation,tapDetector}
+      
+      # Display configuration (if using display module)
+      - DISPLAY_TIMING=${DISPLAY_TIMING:-0}
+      
+      # ML configuration (if using ML features)
+      - ML_CONFIDENCE_THRESHOLD=${ML_CONFIDENCE_THRESHOLD:-0.6}
+    
+    # BLE access requires special permissions
+    privileged: ${PRIVILEGED:-true}
+    network_mode: host  # Required for BLE discovery
+    
+    # Alternative to privileged mode (more secure, but may not work for all systems)
+    # cap_add:
+    #   - NET_ADMIN
+    #   - NET_RAW
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - seccomp:unconfined
+    # devices:
+    #   - "/dev/bus/usb:/dev/bus/usb"
+    
     restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "node", "-e", "console.log('healthy')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  bsole-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# Volume definitions (optional, for named volumes)
+volumes:
+  training-data:
+  logs:
+
