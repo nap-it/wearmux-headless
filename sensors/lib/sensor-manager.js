@@ -34,15 +34,17 @@ class SensorManager extends EventEmitter {
         this.zenoh = null;
 
         // Available sensor types with their default device rates (SDK expects multiples of 5)
+        // Note: Frame hardware only has: acceleration, magnetometer, orientation, tapDetector
         this.availableSensors = {
             acceleration: 50,
-            linearAcceleration: 50,
-            gyroscope: 50,
             magnetometer: 50,
-            gameRotation: 50,
-            rotation: 50,
             orientation: 50,
             tapDetector: 5,
+            // Frame doesn't have these sensors:
+            linearAcceleration: 0,
+            gyroscope: 0,
+            gameRotation: 0,
+            rotation: 0,
         };
 
         // Build per-sensor output throttle (Hz or ms) from environment

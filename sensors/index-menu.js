@@ -24,9 +24,9 @@ function showMenu() {
         });
 
         console.log("\n=== Sensor Monitoring Menu ===");
-        console.log("1. Motion sensors (acceleration, gyroscope, magnetometer, orientation)");
+        console.log("1. Motion sensors (acceleration, magnetometer, orientation)");
         console.log("2. Activity sensors (tap detector)");
-        console.log("3. Gesture sensors (nod detection)");
+        console.log("3. Gesture sensors (nod & shake detection)");
         console.log("0. Exit\n");
 
         rl.question("Select option (0-3): ", (answer) => {
@@ -48,8 +48,8 @@ async function selectSensors() {
     
     switch (choice) {
         case "1":
-            enabledSensors = ["acceleration", "gyroscope", "magnetometer", "orientation"];
-            console.log("\n✓ Selected: Motion sensors");
+            enabledSensors = ["acceleration", "magnetometer", "orientation"];
+            console.log("\n✓ Selected: Motion sensors (Frame: accel, mag, orient)");
             break;
         case "2":
             enabledSensors = ["tapDetector"];
