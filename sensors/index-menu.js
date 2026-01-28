@@ -7,9 +7,9 @@ const {
     OrientationHandler,
 } = require("./lib/motion-sensors");
 const { TapDetectorHandler } = require("./lib/activity-sensors");
-const { ShakeDetectorHandler, NodDetectorHandler } = require("./lib/gesture-detectors");
 const { DeviceManager } = require("../utils/device-manager");
 const readline = require("readline");
+const MLGestureDetector = require("./lib/ml-gesture-detector");
 
 async function getDevice() {
     const device = await new DeviceManager().connectToDevice();
@@ -26,7 +26,7 @@ function showMenu() {
         console.log("\n=== Sensor Monitoring Menu ===");
         console.log("1. Motion sensors (acceleration, magnetometer, orientation)");
         console.log("2. Activity sensors (tap detector)");
-        console.log("3. Gesture sensors (nod & shake detection)");
+        console.log("3. ML Gesture Detection");
         console.log("0. Exit\n");
 
         rl.question("Select option (0-3): ", (answer) => {
@@ -43,9 +43,9 @@ async function selectSensors() {
     }
 
     const choice = await showMenu();
-    
+
     let enabledSensors = [];
-    
+
     switch (choice) {
         case "1":
             enabledSensors = ["acceleration", "magnetometer", "orientation"];
@@ -56,8 +56,8 @@ async function selectSensors() {
             console.log("\n✓ Selected: Activity sensors");
             break;
         case "3":
-            enabledSensors = ["orientation"]; // Only orientation needed for nod detection
-            console.log("\n✓ Selected: Gesture sensors (nod detection)");
+            enabledSensors = ["acceleration", "orientation"];
+            console.log("\n✓ Selected: ML Gesture Detection");
             break;
         case "0":
             console.log("\nExiting...");
@@ -67,16 +67,33 @@ async function selectSensors() {
             console.log("\n✗ Invalid option. Exiting.");
             process.exit(0);
     }
-    
+
     return enabledSensors;
 }
 
 async function main() {
     // Show menu to select sensors
     const enabledSensors = await selectSensors();
-    
-    // Enable gesture detection only for gesture sensors option (option 3)
-    const enableGestures = enabledSensors.length === 1 && enabledSensors.includes("orientation");
+
+    // Enable ML gestures for option 3 or via env variable
+    const enableMLGestures = enabledSensors.includes("acceleration") && enabledSensors.includes("orientation") && enabledSensors.length === 2;
+    let mlDetector = null;
+
+    if (enableMLGestures || process.env.ML_GESTURES === '1') {
+        try {
+            mlDetector = new MLGestureDetector(30);
+            console.log('\nInitializing ML gesture detector...');
+            while (!mlDetector.initialized) {
+                await new Promise(r => setTimeout(r, 50));
+            }
+            console.log('✓ ML gesture detector ready');
+        } catch (error) {
+            console.log('⚠ ML model not found, gesture detection disabled');
+            mlDetector = null;
+        }
+    }
+
+
 
     console.log("\nConnecting to device...");
     const device = await getDevice();
@@ -111,9 +128,9 @@ async function main() {
         if (!hz) continue;
         const rate = roundTo5(hz);
         if (!enabledSensors.includes(sensor)) {
-            try { sensorManager.enableSensor(sensor, rate); } catch {}
+            try { sensorManager.enableSensor(sensor, rate); } catch { }
         } else {
-            try { sensorManager.setSensorRate(sensor, rate); } catch {}
+            try { sensorManager.setSensorRate(sensor, rate); } catch { }
         }
     }
 
@@ -131,10 +148,20 @@ async function main() {
     const magHandler = enabledSensors.includes("magnetometer") ? new MagnetometerHandler() : null;
     const orientHandler = enabledSensors.includes("orientation") ? new OrientationHandler() : null;
     const tapHandler = enabledSensors.includes("tapDetector") ? new TapDetectorHandler() : null;
-    
-    // Gesture detectors are opt-in via menu selection
-    const shakeHandler = (enableGestures && enabledSensors.includes("acceleration")) ? new ShakeDetectorHandler() : null;
-    const nodHandler = (enableGestures && enabledSensors.includes("orientation")) ? new NodDetectorHandler() : null;
+
+    // ML gesture detection event handler
+    let latestAcc = null;
+    if (mlDetector) {
+        mlDetector.on('ml-gesture', (result) => {
+            if (result && result.results && result.results.length > 0) {
+                const top = result.results.reduce((a, b) => (a.value > b.value ? a : b));
+                if (top.value > 0.7) {
+                    const msg = `[ML] ${top.label} (${(top.value * 100).toFixed(1)}%)`;
+                    console.log(msg);
+                }
+            }
+        });
+    }
 
     // Helper to clear previous lines and print new ones
     const updateDisplay = (lines) => {
@@ -148,17 +175,15 @@ async function main() {
         lastLines = lines.length;
     };
 
-    // Map sensor types to their display indices
-    // Don't show orientation data if only gesture detection is enabled
-    const showOrientationData = !(enableGestures && enabledSensors.length === 1 && enabledSensors.includes("orientation"));
-    
+
+
     const sensorLineMap = {};
     let lineIndex = 0;
     if (enabledSensors.includes("acceleration")) sensorLineMap.acceleration = lineIndex++;
     if (enabledSensors.includes("gyroscope")) sensorLineMap.gyroscope = lineIndex++;
     if (enabledSensors.includes("magnetometer")) sensorLineMap.magnetometer = lineIndex++;
-    if (enabledSensors.includes("orientation") && showOrientationData) sensorLineMap.orientation = lineIndex++;
-    
+    if (enabledSensors.includes("orientation")) sensorLineMap.orientation = lineIndex++;
+
     const sensorLines = new Array(lineIndex);
 
     if (enabledSensors.includes("acceleration")) {
@@ -171,10 +196,10 @@ async function main() {
             const line = `[Accel] #${eventCount}: x:${a.x.toFixed(3)} y:${a.y.toFixed(3)} z:${a.z.toFixed(3)} | mag:${mag?.toFixed(3)}`;
             sensorLines[sensorLineMap.acceleration] = line;
             updateDisplay(sensorLines.filter(Boolean));
-            
-            // Update shake detector only if gestures are enabled
-            if (enableGestures && shakeHandler) {
-                shakeHandler.updateData(event.message);
+
+            // Feed to ML detector
+            if (mlDetector) {
+                latestAcc = a;
             }
         });
     }
@@ -207,22 +232,24 @@ async function main() {
 
     if (enabledSensors.includes("orientation")) {
         sensorManager.on("orientation", (event) => {
-            orientHandler.updateData(event.message);
-            
-            // Only show orientation data if not in gesture-only mode
-            if (showOrientationData) {
-                const data = orientHandler.getData();
-                const { heading, pitch, roll } = data.data.orientation;
-                const isPortrait = orientHandler.isPortrait();
-                const isLandscape = orientHandler.isLandscape();
-                const line = `[Orient] H:${heading.toFixed(1)}° P:${pitch.toFixed(1)}° R:${roll.toFixed(1)}° | ${isPortrait ? "Portrait" : isLandscape ? "Landscape" : "Tilted"}`;
-                sensorLines[sensorLineMap.orientation] = line;
-                updateDisplay(sensorLines.filter(Boolean));
-            }
-            
-            // Update nod detector only if gestures are enabled
-            if (enableGestures && nodHandler) {
-                nodHandler.updateData(event.message);
+            const data = orientHandler.getData();
+            const { heading, pitch, roll } = data.data.orientation;
+            const isPortrait = orientHandler.isPortrait();
+            const isLandscape = orientHandler.isLandscape();
+            const line = `[Orient] H:${heading.toFixed(1)}° P:${pitch.toFixed(1)}° R:${roll.toFixed(1)}° | ${isPortrait ? "Portrait" : isLandscape ? "Landscape" : "Tilted"}`;
+            sensorLines[sensorLineMap.orientation] = line;
+            updateDisplay(sensorLines.filter(Boolean));
+
+            // Feed to ML detector
+            if (mlDetector && latestAcc) {
+                mlDetector.addSample({
+                    accX: latestAcc.x,
+                    accY: latestAcc.y,
+                    accZ: latestAcc.z,
+                    heading: heading,
+                    pitch: pitch,
+                    roll: roll
+                });
             }
         });
     }
@@ -236,38 +263,13 @@ async function main() {
 
     if (tapHandler) {
         tapHandler.on("gesture", ({ type }) => {
-            const msg = type === "single" ? "[Tap] Single tap" : 
-                       type === "double" ? "[Tap] Double tap" : 
-                       "[Tap] Triple tap";
+            const msg = type === "single" ? "[Tap] Single tap" :
+                type === "double" ? "[Tap] Double tap" :
+                    "[Tap] Triple tap";
             _printGesture(msg);
         });
     }
 
-    if (shakeHandler) {
-        shakeHandler.on("gesture", ({ type, intensity }) => {
-            const msg = `[Shake] Detected (intensity: ${intensity.toFixed(2)})`;
-            _printGesture(msg);
-        });
-    }
-
-    if (nodHandler) {
-        nodHandler.on("gesture", ({ type, cycles }) => {
-            const msg = `[Nod] Detected (${cycles} cycle${cycles > 1 ? 's' : ''})`;
-            _printGesture(msg);
-        });
-    }
-
-    // Helper to print gestures below sensor display
-    function _printGesture(msg) {
-        if (lastLines > 0) {
-            process.stdout.write(`\x1b[${lastLines}B`); // Move down to end
-        }
-        console.log(msg);
-        // Restore cursor position
-        if (lastLines > 0) {
-            process.stdout.write(`\x1b[${lastLines}A`); // Move back up
-        }
-    }
 
     try {
         await sensorManager.startSensors();

@@ -7,8 +7,8 @@ const {
     OrientationHandler,
 } = require("./lib/motion-sensors");
 const { TapDetectorHandler } = require("./lib/activity-sensors");
-const { ShakeDetectorHandler, NodDetectorHandler } = require("./lib/gesture-detectors");
 const { DeviceManager } = require("../utils/device-manager");
+const MLGestureDetector = require("./lib/ml-gesture-detector");
 
 async function getDevice() {
     const device = await new DeviceManager().connectToDevice();
@@ -16,10 +16,27 @@ async function getDevice() {
 }
 
 async function main() {
-    // Get enabled sensors from environment variable or default to all
     const enabledSensors = process.env.ENABLED_SENSORS
         ? process.env.ENABLED_SENSORS.split(",").map((s) => s.trim())
-        : ["acceleration", "gyroscope", "magnetometer", "orientation", "tapDetector"];
+        : ["acceleration", "magnetometer", "orientation", "tapDetector"];
+
+    // ML gesture detection (enabled by default if model exists, disable with ML_GESTURES=0)
+    const enableMLGestures = process.env.ML_GESTURES !== '0';
+    let mlDetector = null;
+
+    if (enableMLGestures) {
+        try {
+            mlDetector = new MLGestureDetector(30); // 30 samples for 1.5s at 20Hz
+            console.log('Initializing ML gesture detector...');
+            while (!mlDetector.initialized) {
+                await new Promise(r => setTimeout(r, 50));
+            }
+            console.log('✓ ML gesture detector ready\n');
+        } catch (error) {
+            console.log('⚠ ML model not found, gesture detection disabled\n');
+            mlDetector = null;
+        }
+    }
 
     console.log("Connecting to device...");
     const device = await getDevice();
@@ -54,9 +71,9 @@ async function main() {
         if (!hz) continue;
         const rate = roundTo5(hz);
         if (!enabledSensors.includes(sensor)) {
-            try { sensorManager.enableSensor(sensor, rate); } catch {}
+            try { sensorManager.enableSensor(sensor, rate); } catch { }
         } else {
-            try { sensorManager.setSensorRate(sensor, rate); } catch {}
+            try { sensorManager.setSensorRate(sensor, rate); } catch { }
         }
     }
 
@@ -69,7 +86,7 @@ async function main() {
     let lastLines = 0;
     let gestureMessage = '';
     let gestureTimeout = null;
-    
+
     // Disable in-place updates when DEBUG=1 (verbose output mode)
     const isDebugMode = process.env.DEBUG === '1';
 
@@ -79,10 +96,19 @@ async function main() {
     const magHandler = enabledSensors.includes("magnetometer") ? new MagnetometerHandler() : null;
     const orientHandler = enabledSensors.includes("orientation") ? new OrientationHandler() : null;
     const tapHandler = enabledSensors.includes("tapDetector") ? new TapDetectorHandler() : null;
-    
-    // Gesture detectors (always available if orientation sensor is enabled)
-    const shakeHandler = orientHandler ? new ShakeDetectorHandler() : null; // Head shake (horizontal)
-    const nodHandler = orientHandler ? new NodDetectorHandler() : null; // Head nod (vertical)
+
+    // ML gesture detection event handler
+    let latestAcc = null;
+    if (mlDetector) {
+        mlDetector.on('ml-gesture', (result) => {
+            if (result && result.results && result.results.length > 0) {
+                const top = result.results.reduce((a, b) => (a.value > b.value ? a : b));
+                if (top.value > 0.7) { // Only show high-confidence gestures
+                    showGesture(`🤖 ML: ${top.label} (${(top.value * 100).toFixed(1)}%)`);
+                }
+            }
+        });
+    }
 
     // Helper to clear previous lines and print new ones
     const updateDisplay = (lines) => {
@@ -91,7 +117,7 @@ async function main() {
             console.log(lines.filter(Boolean).join(' | '));
             return;
         }
-        
+
         // Move cursor up to clear previous lines
         if (lastLines > 0) {
             process.stdout.write(`\x1b[${lastLines}A`); // Move up
@@ -115,10 +141,10 @@ async function main() {
             console.log(msg);
             return;
         }
-        
+
         gestureMessage = msg;
         updateDisplay(sensorLines.filter(Boolean));
-        
+
         // Clear gesture after 2 seconds
         if (gestureTimeout) clearTimeout(gestureTimeout);
         gestureTimeout = setTimeout(() => {
@@ -134,7 +160,7 @@ async function main() {
     if (enabledSensors.includes("gyroscope")) sensorLineMap.gyroscope = lineIndex++;
     if (enabledSensors.includes("magnetometer")) sensorLineMap.magnetometer = lineIndex++;
     if (enabledSensors.includes("orientation")) sensorLineMap.orientation = lineIndex++;
-    
+
     const sensorLines = new Array(lineIndex);
 
     if (accelHandler) {
@@ -147,6 +173,11 @@ async function main() {
             const line = `📱 Accel #${eventCount}: x:${a.x.toFixed(3)} y:${a.y.toFixed(3)} z:${a.z.toFixed(3)} | mag:${mag?.toFixed(3)}`;
             sensorLines[sensorLineMap.acceleration] = line;
             updateDisplay(sensorLines.filter(Boolean));
+
+            // Feed to ML detector
+            if (mlDetector) {
+                latestAcc = a;
+            }
         });
     }
 
@@ -186,13 +217,17 @@ async function main() {
             const line = `🧭 Orient: H:${heading.toFixed(1)}° P:${pitch.toFixed(1)}° R:${roll.toFixed(1)}° | ${isPortrait ? "Portrait" : isLandscape ? "Landscape" : "Tilted"}`;
             sensorLines[sensorLineMap.orientation] = line;
             updateDisplay(sensorLines.filter(Boolean));
-            
-            // Update gesture detectors
-            if (nodHandler) {
-                nodHandler.updateData(event.message);
-            }
-            if (shakeHandler) {
-                shakeHandler.updateData(event.message);
+
+            // Feed to ML detector
+            if (mlDetector && latestAcc) {
+                mlDetector.addSample({
+                    accX: latestAcc.x,
+                    accY: latestAcc.y,
+                    accZ: latestAcc.z,
+                    heading: heading,
+                    pitch: pitch,
+                    roll: roll
+                });
             }
         });
     }
@@ -210,19 +245,7 @@ async function main() {
         });
     }
 
-    // Head shake gesture detector (horizontal)
-    if (shakeHandler) {
-        shakeHandler.on("gesture", ({ type, cycles, headingRange }) => {
-            showGesture(`🙅 Shake detected! (cycles: ${cycles}, range: ${headingRange.toFixed(1)}°)`);
-        });
-    }
 
-    // Nod gesture detector (vertical)
-    if (nodHandler) {
-        nodHandler.on("gesture", ({ type, cycles, pitchRange }) => {
-            showGesture(`🙂 Nod detected! (cycles: ${cycles}, range: ${pitchRange.toFixed(1)}°)`);
-        });
-    }
 
     try {
         await sensorManager.startSensors();

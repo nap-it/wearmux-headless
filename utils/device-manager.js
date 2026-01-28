@@ -9,7 +9,7 @@ class DeviceManager extends EventEmitter {
         this.device = null;
         this._reconnecting = false;
         this._lastFilters = { id: "", name: "" };
-        
+
         // Check if we should use custom Noble implementation
         this._useCustomNoble = process.env.USE_CUSTOM_NOBLE === 'true' || process.env.USE_CUSTOM_NOBLE === '1';
         if (this._useCustomNoble) {
@@ -21,7 +21,7 @@ class DeviceManager extends EventEmitter {
     async connectToDevice() {
         // If custom Noble is enabled, delegate to NobleDeviceManager
         if (this._useCustomNoble) {
-            if (process.env.DEBUG) {
+            if (process.env.DEBUG === '1') {
                 console.log("[DeviceManager] Using custom Noble implementation");
             }
             return await this._nobleManager.connectToDevice();
@@ -41,12 +41,12 @@ class DeviceManager extends EventEmitter {
             const existing = this._pickFromDeviceManager(filterId, filterName);
             if (existing) {
                 if (!existing.isConnected && typeof existing.connect === "function") {
-                    try { await existing.connect(); } catch {}
+                    try { await existing.connect(); } catch { }
                 }
                 this.device = existing;
             } else {
                 // 2) Use scanner-based connection
-                if (process.env.DEBUG) console.log("[DeviceManager] Starting scanner-based connection...");
+                if (process.env.DEBUG === '1') console.log("[DeviceManager] Starting scanner-based connection...");
                 await this._connectViaScanner(filterId, filterName);
             }
 
@@ -81,7 +81,7 @@ class DeviceManager extends EventEmitter {
 
     async _connectViaScanner(filterId, filterName) {
         const scanner = BS.Scanner;
-        if (process.env.DEBUG) {
+        if (process.env.DEBUG === '1') {
             console.log(
                 "[DeviceManager] scanner present:",
                 Boolean(scanner),
@@ -100,7 +100,7 @@ class DeviceManager extends EventEmitter {
             if (!ok) throw new Error("BLE scanning not available.");
         }
 
-        if (process.env.DEBUG) console.log("[DeviceManager] starting BLE scan...");
+        if (process.env.DEBUG === '1') console.log("[DeviceManager] starting BLE scan...");
         scanner.startScan();
         try {
             // Select first discovered device that matches optional filters
@@ -113,7 +113,7 @@ class DeviceManager extends EventEmitter {
                     return dd;
                 }
             })();
-            if (process.env.DEBUG) console.log("[DeviceManager] discovered:", discoveredDevice?.name || discoveredDevice?.bluetoothId);
+            if (process.env.DEBUG === '1') console.log("[DeviceManager] discovered:", discoveredDevice?.name || discoveredDevice?.bluetoothId);
             scanner.stopScan();
             const id = discoveredDevice.bluetoothId || discoveredDevice.id;
             await scanner.connectToDevice(id);
@@ -123,34 +123,34 @@ class DeviceManager extends EventEmitter {
                 throw new Error("Connected device instance not found after connectToDevice");
             }
         } finally {
-            try { scanner.stopScan(); } catch {}
+            try { scanner.stopScan(); } catch { }
         }
     }
 
     async _waitForScanningAvailable(scanner, timeoutMs = 20000) {
         if (scanner.isScanningAvailable) return true;
-        if (process.env.DEBUG) console.log("[DeviceManager] Waiting for BLE adapter to be ready...");
+        if (process.env.DEBUG === '1') console.log("[DeviceManager] Waiting for BLE adapter to be ready...");
         return new Promise((resolve) => {
             let done = false;
             const cleanup = () => {
                 if (done) return; done = true;
                 clearInterval(iv);
                 clearTimeout(to);
-                try { scanner.removeEventListener?.("isScanningAvailable", onEvt); } catch {}
+                try { scanner.removeEventListener?.("isScanningAvailable", onEvt); } catch { }
             };
             const onEvt = (ev) => {
                 const avail = ev?.message?.isScanningAvailable ?? ev?.isScanningAvailable ?? scanner.isScanningAvailable;
-                if (process.env.DEBUG) console.log("[DeviceManager] BLE event, available:", avail);
+                if (process.env.DEBUG === '1') console.log("[DeviceManager] BLE event, available:", avail);
                 if (avail) { cleanup(); resolve(true); }
             };
-            try { scanner.addEventListener?.("isScanningAvailable", onEvt); } catch {}
+            try { scanner.addEventListener?.("isScanningAvailable", onEvt); } catch { }
             const iv = setInterval(() => {
-                if (process.env.DEBUG) console.log("[DeviceManager] Checking... isScanningAvailable:", scanner.isScanningAvailable);
+                if (process.env.DEBUG === '1') console.log("[DeviceManager] Checking... isScanningAvailable:", scanner.isScanningAvailable);
                 if (scanner.isScanningAvailable) { cleanup(); resolve(true); }
             }, 300);
-            const to = setTimeout(() => { 
-                if (process.env.DEBUG) console.log("[DeviceManager] Timeout waiting for BLE adapter");
-                cleanup(); resolve(false); 
+            const to = setTimeout(() => {
+                if (process.env.DEBUG === '1') console.log("[DeviceManager] Timeout waiting for BLE adapter");
+                cleanup(); resolve(false);
             }, timeoutMs);
         });
     }
@@ -171,7 +171,7 @@ class DeviceManager extends EventEmitter {
     _setupEventListeners() {
         try {
             this.device.addEventListener?.("connectionStatus", () => {
-                if (process.env.DEBUG) {
+                if (process.env.DEBUG === '1') {
                     console.log("[DeviceManager] connectionStatus:", this.device.connectionStatus);
                 }
                 // Auto-reconnect on disconnect
@@ -180,17 +180,17 @@ class DeviceManager extends EventEmitter {
                 });
             });
             this.device.addEventListener?.("microphoneStatus", () => {
-                if (process.env.DEBUG) {
+                if (process.env.DEBUG === '1') {
                     console.log("[DeviceManager] microphoneStatus:", this.device.microphoneStatus);
                 }
             });
             this.device.addEventListener?.("getSensorConfiguration", () => {
-                if (process.env.DEBUG) {
+                if (process.env.DEBUG === '1') {
                     console.log("[DeviceManager] sensorConfiguration:", this.device.sensorConfiguration);
                 }
             });
             this.device.addEventListener?.("getMicrophoneConfiguration", () => {
-                if (process.env.DEBUG) {
+                if (process.env.DEBUG === '1') {
                     console.log("[DeviceManager] microphoneConfiguration:", this.device.microphoneConfiguration);
                 }
             });
@@ -205,13 +205,13 @@ class DeviceManager extends EventEmitter {
             if (isConnected) return;
             if (this._reconnecting) return;
             this._reconnecting = true;
-            if (process.env.DEBUG) console.log("[DeviceManager] Disconnected. Attempting auto-reconnect via scanner...");
+            if (process.env.DEBUG === '1') console.log("[DeviceManager] Disconnected. Attempting auto-reconnect via scanner...");
 
             // Prefer scanner to establish a fresh connection path
             await this._connectViaScanner(this._lastFilters.id, this._lastFilters.name);
             await this._waitForConnection();
             this.emit("reconnected", this.device);
-            if (process.env.DEBUG) console.log("[DeviceManager] Auto-reconnect successful");
+            if (process.env.DEBUG === '1') console.log("[DeviceManager] Auto-reconnect successful");
         } finally {
             this._reconnecting = false;
         }

@@ -5,7 +5,7 @@ services:
     container_name: zenoh-router
     command: -c /zenoh/router.json5
     ports:
-      - "7447:7447"  # TCP port for zenoh
+      - "7447:7447" # TCP port for zenoh
       # - "8000:8000"  # REST API (optional, disabled to avoid conflicts)
     volumes:
       - ./config/router.json5:/zenoh/router.json5:ro
@@ -15,7 +15,7 @@ services:
       - bsole-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pgrep zenohd || exit 1"]
+      test: [ "CMD-SHELL", "pgrep zenohd || exit 1" ]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -42,29 +42,29 @@ services:
       # Core settings
       - NODE_ENV=${NODE_ENV:-production}
       - DEBUG=${DEBUG:-0}
-      
+
       # BLE device configuration
       - DEVICE_NAME=${DEVICE_NAME:-}
       - DEVICE_ID=${DEVICE_ID:-}
       - USE_CUSTOM_NOBLE=${USE_CUSTOM_NOBLE:-true}
-      
+
       # Zenoh configuration
       - ZENOH_ENABLE=${ZENOH_ENABLE:-1}
       - ZENOH_DOCKER_ROUTER=1
-      
+
       # Sensor configuration
-      - ENABLED_SENSORS=${ENABLED_SENSORS:-acceleration,orientation,tapDetector}
-      
+      - ENABLED_SENSORS=${ENABLED_SENSORS:-acceleration,magnetometer,orientation,tapDetector}
+
       # Display configuration (if using display module)
       - DISPLAY_TIMING=${DISPLAY_TIMING:-0}
-      
+
       # ML configuration (if using ML features)
       - ML_CONFIDENCE_THRESHOLD=${ML_CONFIDENCE_THRESHOLD:-0.6}
-    
+
     # BLE access requires special permissions
     privileged: ${PRIVILEGED:-true}
-    network_mode: host  # Required for BLE discovery
-    
+    network_mode: host # Required for BLE discovery
+
     # Alternative to privileged mode (more secure, but may not work for all systems)
     # cap_add:
     #   - NET_ADMIN
@@ -74,11 +74,11 @@ services:
     #   - seccomp:unconfined
     # devices:
     #   - "/dev/bus/usb:/dev/bus/usb"
-    
+
     restart: unless-stopped
-    
+
     healthcheck:
-      test: ["CMD", "node", "-e", "console.log('healthy')"]
+      test: [ "CMD", "node", "-e", "console.log('healthy')" ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -95,4 +95,3 @@ networks:
 volumes:
   training-data:
   logs:
-

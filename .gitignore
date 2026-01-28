@@ -357,3 +357,15 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# ML Training Data
+training-data/
+
+# Microphone Recordings
+microphone/recordings/
+
+# Edge Impulse Models (large binary files)
+sensors/model/*.js
+sensors/model/*.wasm
+sensors/model/*.eim
+!sensors/model/.gitkeep
