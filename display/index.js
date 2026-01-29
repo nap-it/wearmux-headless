@@ -2,25 +2,26 @@
 const { DisplayManager } = require("./lib/display-manager");
 const { Config } = require("../utils/config");
 const { DeviceManager } = require("../utils/device-manager");
+const { ZenohManager } = require("../utils/zenoh-manager");
 
 async function getDevice() {
     const device = await new DeviceManager().connectToDevice();
     
-    if (!device.isDisplayAvailable) {
-        await device.waitForEvent("isDisplayAvailable");
-    }
-    if (!device.isDisplayReady) {
-        try {
-            await device.waitForEvent("displayReady");
-        } catch {}
-    }
+        if (!device.isDisplayAvailable) {
+            await device.waitForEvent("isDisplayAvailable");
+        }
+        if (!device.isDisplayReady) {
+            try {
+                await device.waitForEvent("displayReady");
+            } catch {}
+        }
     
-    if (device.displayStatus === "asleep") {
-        await device.wakeDisplay();
-    }
-    const dcfg = Config.getDisplayConfig();
-    const brightness = dcfg.brightness || "medium";
-    await device.setDisplayBrightness(brightness, true);
+            if (device.displayStatus === "asleep") {
+                await device.wakeDisplay();
+            }
+            const dcfg = Config.getDisplayConfig();
+            const brightness = dcfg.brightness || "medium";
+            await device.setDisplayBrightness(brightness, true);
     
     return device;
 }
@@ -36,6 +37,20 @@ async function main() {
     
     console.log("Connecting to device...");
     const device = await getDevice();
+
+    const zenohEnabled = process.env.ZENOH_ENABLE === "1" && process.env.ZENOH_DISPLAY_ENABLE !== "0";
+    const zenoh = zenohEnabled
+        ? new ZenohManager({
+            keyPrefix: process.env.ZENOH_DISPLAY_KEY_PREFIX || "bsole/display",
+            udsPath: process.env.ZENOH_DISPLAY_UDS_PATH || `/tmp/bsole-zenoh-display-${process.pid}.sock`,
+        })
+        : null;
+    if (zenoh) {
+        zenoh.on("error", (e) => {
+            if (process.env.DEBUG === "1") console.warn("[Display][Zenoh]", e?.message || e);
+        });
+        await zenoh.start();
+    }
     
     if (!device.isDisplayAvailable) {
         throw new Error("Display is not available on this device");
@@ -46,6 +61,16 @@ async function main() {
         console.log(`Device display: ${info.width}x${info.height} depth=${info.pixelDepth}`);
     } else {
         console.warn("Warning: Could not get display information");
+    }
+
+    if (zenoh) {
+        try {
+            await zenoh.publish(`${zenoh.keyPrefix}/info`, {
+                ts: Date.now(),
+                device: { id: device.bluetoothId || device.id, name: device.name },
+                displayInformation: info || null,
+            });
+        } catch {}
     }
     
     const dm = new DisplayManager(device, {
@@ -73,6 +98,26 @@ async function main() {
         align: dcfg.align,
         pixelDepth: dcfg.pixelDepth,
     });
+
+    if (zenoh) {
+        try {
+            await zenoh.publish(`${zenoh.keyPrefix}/shown`, {
+                ts: Date.now(),
+                device: { id: device.bluetoothId || device.id, name: device.name },
+                imagePath: img,
+                config: {
+                    x: dcfg.x,
+                    y: dcfg.y,
+                    width: dcfg.outWidth,
+                    height: dcfg.outHeight,
+                    fit: dcfg.fit,
+                    align: dcfg.align,
+                    pixelDepth: dcfg.pixelDepth,
+                },
+            });
+        } catch {}
+        try { await zenoh.stop(); } catch {}
+    }
     
     console.log("Done. Press Ctrl+C to exit.");
 }

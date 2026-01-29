@@ -36,7 +36,7 @@ def shutdown(*_):
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
-UDS_PATH = "/tmp/bsole-zenoh.sock"
+UDS_PATH = os.environ.get("ZENOH_UDS_PATH", "/tmp/bsole-zenoh.sock")
 
 def handle_msg(obj):
     key = str(obj.get("key") or KEY_PREFIX)

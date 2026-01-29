@@ -19,11 +19,12 @@ class ZenohManager extends EventEmitter {
         this._pubCache = new Map(); // key => publisher or null for session.put
         this._attached = false;
         this._attachedHandlers = new Map(); // sensorType => handler fn
+        this._sensorManager = null;
         this._deviceInfo = null; // optional info injected via setDeviceInfo
         this._child = null; // python sidecar
         this._childReady = false;
         // UDS transport (MessagePack) only
-        this._udsPath = "/tmp/bsole-zenoh.sock";
+        this._udsPath = options.udsPath || process.env.ZENOH_UDS_PATH || "/tmp/bsole-zenoh.sock";
         this._udsSocket = null;
     }
 
@@ -43,6 +44,8 @@ class ZenohManager extends EventEmitter {
         const pyBin = "python3";
         const args = ["-u", script]; // -u = unbuffered stdin/stdout
         const env = { ...process.env };
+        env.ZENOH_UDS_PATH = this._udsPath;
+        env.ZENOH_KEY_PREFIX = this.keyPrefix;
         const child = spawn(pyBin, args, { stdio: ["ignore", "pipe", "inherit"], env });
         this._child = child;
         this._childReady = true;
@@ -85,7 +88,7 @@ class ZenohManager extends EventEmitter {
 
     async stop() {
         try {
-            await this.detachAll();
+            await this.detachAll(this._sensorManager);
         } catch {}
         try {
             if (this._udsSocket) {
@@ -105,6 +108,7 @@ class ZenohManager extends EventEmitter {
             this._child = null;
             this._childReady = false;
             this._mode = "python";
+            this._sensorManager = null;
         }
     }
 
@@ -153,6 +157,7 @@ class ZenohManager extends EventEmitter {
     async attachToSensorManager(sensorManager, options = {}) {
         if (this._attached) return;
         if (!this.session) await this.start();
+        this._sensorManager = sensorManager;
         const enabled = sensorManager.getEnabledSensors?.() || [];
         const sensors =
             Array.isArray(options.sensors) && options.sensors.length > 0
@@ -162,7 +167,7 @@ class ZenohManager extends EventEmitter {
 
         // Capture device info for payload enrichment
         try {
-            const dev = sensorManager.getDeviceManager?.().getDevice?.();
+            const dev = sensorManager?.device || sensorManager.getDevice?.() || sensorManager.getDeviceManager?.().getDevice?.();
             if (dev) {
                 this.setDeviceInfo({
                     id: dev.bluetoothId || dev.id || undefined,
@@ -206,13 +211,14 @@ class ZenohManager extends EventEmitter {
 
     async detachAll(sensorManager) {
         if (!this._attached) return;
-        if (sensorManager && this._attachedHandlers.size) {
+        const sm = sensorManager || this._sensorManager;
+        if (sm && this._attachedHandlers.size) {
             for (const [sensorType, handler] of this._attachedHandlers.entries()) {
                 try {
-                    sensorManager.off?.(sensorType, handler);
+                    sm.off?.(sensorType, handler);
                 } catch {}
                 try {
-                    sensorManager.removeListener?.(sensorType, handler);
+                    sm.removeListener?.(sensorType, handler);
                 } catch {}
             }
         }

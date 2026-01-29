@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { Config } = require("../utils/config");
 const { DeviceManager } = require("../utils/device-manager");
+const { ZenohManager } = require("../utils/zenoh-manager");
 
 async function ensureDir(dir) {
     await fs.promises.mkdir(dir, { recursive: true });
@@ -36,8 +37,53 @@ async function main() {
     const viewMjpeg = config.camera.viewMjpeg;
     let latestImage = null;
     let viewerServer = null;
+    const zenohEnabled = process.env.ZENOH_ENABLE === "1" && process.env.ZENOH_CAMERA_ENABLE !== "0";
+    const zenoh = zenohEnabled
+        ? new ZenohManager({
+            keyPrefix: process.env.ZENOH_CAMERA_KEY_PREFIX || "bsole/camera",
+            udsPath: process.env.ZENOH_CAMERA_UDS_PATH || `/tmp/bsole-zenoh-camera-${process.pid}.sock`,
+        })
+        : null;
+    const zenohRawEnabled = Boolean(zenoh) && process.env.ZENOH_CAMERA_RAW_ENABLE === "1";
+    const zenohRawChunkSize = Math.max(1024, Number(process.env.ZENOH_RAW_CHUNK_SIZE || 30000));
+
+    async function publishRawImage(buffer, meta) {
+        if (!zenohRawEnabled) return;
+        const frameId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const b64 = buffer.toString("base64");
+        const totalChunks = Math.ceil(b64.length / zenohRawChunkSize);
+        await zenoh.publish(`${zenoh.keyPrefix}/raw/meta`, {
+            ts: Date.now(),
+            frameId,
+            totalChunks,
+            encoding: "base64",
+            mime: meta?.mime || null,
+            bytes: meta?.bytes || buffer.length,
+            device: meta?.device || null,
+            cameraTimestamp: meta?.cameraTimestamp || null,
+            latencyMs: meta?.latencyMs || null,
+        });
+        for (let i = 0; i < totalChunks; i += 1) {
+            const part = b64.slice(i * zenohRawChunkSize, (i + 1) * zenohRawChunkSize);
+            await zenoh.publish(`${zenoh.keyPrefix}/raw/chunk`, {
+                ts: Date.now(),
+                frameId,
+                idx: i,
+                data: part,
+            });
+        }
+    }
 
     try {
+        if (zenoh) {
+            zenoh.on("error", (e) => {
+                if (process.env.DEBUG === "1") {
+                    console.warn("[Camera][Zenoh]", e?.message || e);
+                }
+            });
+            await zenoh.start();
+        }
+
         const device = await getDevice();
         console.log(`Connected to device: ${device.name || device.id}`);
 
@@ -128,6 +174,24 @@ async function main() {
                 const file = path.join(outDir, fname);
                 await fs.promises.writeFile(file, bestImage.buffer);
                 console.log("[SAVED]", file, bestImage.buffer.length, "bytes");
+            }
+
+            if (zenoh) {
+                try {
+                    const meta = {
+                        ts: Date.now(),
+                        device: { id: device.bluetoothId || device.id, name: device.name },
+                        bytes: bestImage.buffer.length,
+                        mime: formatToMime(imgFmt),
+                        cameraTimestamp: bestImage.timestamp || null,
+                        latencyMs: bestImage.latency || null,
+                        saved: Boolean(outDir),
+                    };
+                    await zenoh.publish(`${zenoh.keyPrefix}/image`, meta);
+                    await publishRawImage(bestImage.buffer, meta);
+                } catch (e) {
+                    if (process.env.DEBUG === "1") console.warn("[Camera][Zenoh] publish failed:", e?.message || e);
+                }
             }
             
             latestImage = { buffer: bestImage.buffer, mime: formatToMime(imgFmt) };
@@ -277,6 +341,24 @@ async function main() {
                     if (viewerServer && typeof viewerServer.pushFrame === 'function') {
                         viewerServer.pushFrame(latestImage);
                     }
+
+                    if (zenoh) {
+                        try {
+                            const meta = {
+                                ts: Date.now(),
+                                device: { id: device.bluetoothId || device.id, name: device.name },
+                                bytes: buffer.length,
+                                mime: formatToMime(imgFmt),
+                                cameraTimestamp: cameraImage.timestamp || null,
+                                latencyMs: cameraImage.latency || null,
+                                saved: Boolean(outDir),
+                            };
+                            await zenoh.publish(`${zenoh.keyPrefix}/image`, meta);
+                            await publishRawImage(buffer, meta);
+                        } catch (e) {
+                            if (process.env.DEBUG === "1") console.warn("[Camera][Zenoh] publish failed:", e?.message || e);
+                        }
+                    }
                     
                     savedCount += 1;
                     lastSavedTimestamp = cameraImage.timestamp || null;
@@ -322,6 +404,9 @@ async function main() {
             process.on("SIGINT", async () => {
                 console.log("\nShutting down camera...");
                 device.autoPicture = false;
+                if (zenoh) {
+                    try { await zenoh.stop(); } catch {}
+                }
                 await device.disconnect();
                 if (viewerServer) try { viewerServer.close(); } catch {}
                 process.exit(0);
