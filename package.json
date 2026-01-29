@@ -12,9 +12,21 @@
     },
     "scripts": {
         "start": "node index.js",
+        "help": "echo 'Available scripts: start, microphone:rtsp, microphone:record, clean:recordings, sensors, display, camera'",
+
         "microphone:rtsp": "node microphone/index.js",
+        "microphone:record": "node microphone/record-audio.js",
+
         "sensors": "node sensors/index.js",
+        "sensors:ml-gesture": "node sensors/real-time-ml-gesture.js",
+        "sensors:inference": "node sensors/run-inference.js",
+        "sensors:collect-training": "node sensors/collect-training-data.js",
+
         "display": "node display/index.js",
-        "camera": "node camera/index.js"
+
+        "camera": "node camera/index.js",
+        
+        "clean:recordings": "rm -rf microphone/recordings/*",
+        "clean:training-data": "rm -rf sensors/model/*"
     }
 }

@@ -18,13 +18,21 @@ bsole-connector/
 │   └── lib/display-manager.js      # Display rendering & tiling
 ├── microphone/
 │   ├── index.js                    # Microphone → RTSP publisher
-│   └── lib/microphone-manager.js
+│   ├── record-audio.js             # Record audio to WAV file
+│   └── lib/microphone-manager.js   # Microphone data handling
 ├── sensors/
 │   ├── index.js                    # Sensor monitor
+│   ├── real-time-ml-gesture.js     # ML gesture recognition
+│   ├── run-inference.js            # Edge Impulse inference runner
 │   └── lib/
 │       ├── sensor-manager.js       # Device + sensor orchestration
 │       ├── motion-sensors.js       # Motion handlers/utilities
-│       └── activity-sensors.js     # Tap detector
+│       ├── activity-sensors.js     # Tap detector & activity classification
+│       ├── ml-gesture-detector.js  # ML gesture detection
+│       └── ei-classifier.js        # Edge Impulse classifier wrapper
+├── camera/
+│   ├── index.js                    # Camera capture utility
+│   └── lib/camera-manager.js       # Camera connection & capture
 ├── tools/
 │   ├── launcher.js                 # Config parser and script launcher
 │   ├── zenoh_py_publisher.py       # Python sidecar: UDS→Zenoh publisher
@@ -35,173 +43,195 @@ bsole-connector/
 │   ├── stream-manager.js           # FFmpeg RTSP publisher
 │   └── zenoh-manager.js            # Node→Python sidecar bridge (UDS)
 ├── docker-compose.yml              # Docker for Linux
-
-## Camera capture (no ML)
-
-This repo includes a simple camera capture utility (`CameraManager`) that connects to a BrilliantSole device and can show live images in a browser and optionally save them (no ML/AI processing).
-
-- Single capture and exit:
-
-   npm run camera
-
-- Continuous auto-capture (poll as fast as possible):
-
-   CAMERA_AUTO_PICTURE=1 npm run camera
-
-Environment variables:
-
-- CAMERA_OUTPUT_DIR: optional directory for saved images (if unset, images aren’t written to disk)
-- CAMERA_AUTO_PICTURE: set to 1 to continuously poll the camera
-- CAMERA_IMAGE_FORMAT: file extension to use (default: jpg)
-- CAMERA_QUALITY: legacy quality setting (kept for compatibility)
-- CAMERA_RESOLUTION: square frame size (e.g., 300 => 300x300)
-- CAMERA_QUALITY_FACTOR: quality factor (1..100, device-dependent)
-- CAMERA_SHUTTER: shutter/exposure setting (number or supported string)
-- CAMERA_GAIN: overall gain
-- CAMERA_RED_GAIN / CAMERA_GREEN_GAIN / CAMERA_BLUE_GAIN: per-channel gains
-- CAMERA_VIEW_ENABLE: set to 1 to enable a lightweight browser viewer (default http://127.0.0.1:8099)
-- CAMERA_VIEW_HOST / CAMERA_VIEW_PORT: viewer host/port
- - CAMERA_VIEW_MJPEG: set to 1 to use a true MJPEG stream at /stream.mjpg (lower latency)
-
-Notes:
-
-- Uses the same Noble-based connection as the microphone/sensors modules via `utils/device-manager.js`.
-- Images are emitted as raw buffers from the SDK and saved directly without any processing.
-- The browser viewer auto-refreshes the latest image. If you want a smoother MJPEG endpoint, I can add `/stream.mjpg`.
 ├── package.json
 └── README.md
 ```
 
-## Components
 
-1. **Config** (`utils/config.js`)
-   - Centralized configuration management
-   - Environment variable handling
-
-2. **DeviceManager** (`utils/device-manager.js`)
-   - BrilliantSole device connection logic
-   - BLE scanning and connection management
-
-3. **SensorManager** (`sensors/lib/sensor-manager.js`)
-   - Sensor data collection
-   - Motion sensors (accelerometer, gyroscope, magnetometer)
-   - Event sensors (tap detector)
-   - Configurable sample rates and sensor selection
-
-## Usage
-
-### Environment variables
-
-Audio / RTSP
-- `RTSP_URL` (default `rtsp://127.0.0.1:8554/mic`): RTSP destination for microphone.
-- `SAMPLE_RATE` (default `16000`): Microphone sample rate (Hz).
-- `CHANNELS` (default `1`): Audio channels.
-- `SAMPLE_FORMAT` (default `s16le`): PCM format forwarded to FFmpeg.
-- `AUDIO_BITRATE` (default `64k`): OPUS bitrate for RTSP.
-- `FFMPEG_PATH` (default `ffmpeg`): FFmpeg binary path.
-- `FFMPEG_LOGLEVEL` (default `error`): FFmpeg verbosity.
-- `TEST_MODE` (default `0`): If `1`, saves audio to `test_output.wav` instead of RTSP.
-
-Device discovery / connection
-- `USE_CUSTOM_NOBLE` (default `false`): Set to `true` or `1` to use custom Noble implementation for Linux kernel 6.x compatibility. Required on Linux with kernel 6.x due to `@abandonware/noble` incompatibility.
-- `DEVICE_ID` (optional): Filter by Bluetooth MAC address (e.g., `CE:59:C3:0F:4D:C9`). If not set, auto-discovers first BrilliantSole device.
-- `DEVICE_NAME` (optional): Filter by device name when scanning. If not set, matches any BrilliantSole device.
-- `MIC_DEVICE_ID` (optional):  Filter by Bluetooth ID when scanning.
-- `MIC_DEVICE_NAME` (optional):  Filter by device name when scanning.
-- `MIC_CONNECT_ONLY` (default `0`):  If `1`, connect to device but don't start microphone.
-
-Sensors
-- `ENABLED_SENSORS` (optional): Comma-separated list. If unset, the CLI enables common sensors.
-   - Example: `acceleration,gyroscope,magnetometer,orientation,tapDetector`
-- `SENSOR_SAMPLE_RATE` (default `50` Hz): Default rate used by the SDK for supported sensors.
-- Per-sensor rate overrides (Hz or `<ms>ms`, rounded to nearest 5 Hz):
-   - `ACCELERATION_RATE`, `GYROSCOPE_RATE`, `MAGNETOMETER_RATE`, `ORIENTATION_RATE`,
-   - `TAP_DETECTOR_RATE`, `LINEAR_ACCELERATION_RATE`, `GAME_ROTATION_RATE`, `ROTATION_RATE`.
-
-Zenoh (optional)
-- `ZENOH_ENABLE`: Enable Zenoh publishing (default: `0`)
-- `ZENOH_KEY_PREFIX`: Key prefix for topics (default: `bsole/sensors`)
-- `ZENOH_ATTACH_ALL`: Automatically attach and publish all enabled sensors (default: `1`)
-
-Transport between Node and Python sidecar is Unix Domain Socket + MessagePack by default. Socket path is fixed at `/tmp/bsole-zenoh.sock`.
-Note: BLE is supported via Noble only. WebBluetooth has been removed.
-
-### Running the application
+## Quick Start
 
 ```bash
-## Install dependencies
+# Install dependencies
 npm install
 
 # Microphone → RTSP
 npm run microphone:rtsp
 
-# Clean sensor monitor (use ENABLED_SENSORS and per-sensor *_RATE envs)
+# Record audio to WAV file
+npm run microphone:record
+
+# Clean recorded audio files
+npm run clean:recordings
+
+# Sensor monitor (use ENABLED_SENSORS and per-sensor *_RATE envs)
 npm run sensors
 
 # Display an image on the device display
 npm run display -- path/to/image.png
 
-# Example: sensors with custom rates
-ENABLED_SENSORS="orientation,acceleration" ORIENTATION_RATE=5 ACCELERATION_RATE=10 npm run sensors
-````
-
-## Zenoh: Publish sensor data
-
-This project publishes sensor data to Zenoh keys at `bsole/sensors/<sensor>` using a small Python sidecar that connects to a local zenohd over TCP.
-
-Steps:
-- Run a zenoh router locally (zenohd) listening on TCP. Default: `tcp/127.0.0.1:7447`.
-- Run sensors with Zenoh enabled:
-
-```
-ZENOH_ENABLE=1 npm run sensors
+# Camera capture
+npm run camera
 ```
 
-Quick verification in another terminal with the Python subscriber provided here:
 
-```bash
-python3 -u tools/zenoh_py_subscriber.py "bsole/sensors/**"
-```
+## Features
 
-Payload structure:
+### 🎤 Audio Streaming
+- **Real-time RTSP streaming** at 8kHz or 16kHz
+- **Recording** to WAV files with configurable quality
+- **Audio level monitoring** via Zenoh
+- Supports multiple concurrent listeners
 
-```
-{
-   ts: 1690000000000,
-   sensor: "acceleration",
-   device: { id, name },
-   message: { ...event.message if present... }
-}
-```
+### 📊 Sensor Monitoring
+- **Motion sensors**: acceleration, gyroscope, magnetometer
+- **Activity detection**: step counting, activity classification
+- **ML gesture recognition**: powered by Edge Impulse models
+- Real-time data publishing via Zenoh
 
-## Running Docker
+### 📷 Camera Integration
+- Capture images from device camera
+- Browser-based viewer interface
+- Automatic continuous capture mode
+- Configurable output directory
 
-Notes:
-- This uses host networking, privileged mode, NET_ADMIN/NET_RAW caps, seccomp:unconfined, and passes the USB bus to the container. Adjust devices mapping to your host.
-- You may also need to ensure the container user has access to Bluetooth groups, e.g., via `--group-add` or running as root (default).
-- If you don’t need BLE in Docker, stick to the default compose which avoids extra privileges.
+### 🖼️ Display Control
+- Render images to device display
+- Automatic image preprocessing and dithering
+- Performance timing diagnostics
+- Supports PNG and JPEG formats
 
-Linux BLE troubleshooting (e.g., Raspberry Pi):
-- If you see "adapter state unauthorized", run with sudo/root or grant NET_RAW capability to Node:
-   - `sudo setcap cap_net_raw+eip $(readlink -f $(which node))`
-- Ensure the adapter is unblocked and up:
-   - `rfkill unblock bluetooth`
-   - `sudo hciconfig hci0 up` (or `bluetoothctl power on`)
-- Verify your user is in the appropriate groups (e.g., `bluetooth`) or run as root.
+
+## Zenoh Integration
+- Enable Zenoh by setting `ZENOH_ENABLE=1` in your environment
+- Publishes data to keys like `bsole/sensors/<sensor>`, `bsole/microphone/level`, etc.
+- See tools/zenoh_py_publisher.py and tools/zenoh_py_subscriber.py for Python helpers
+
+
+## Docker
+
+This project provides a `docker-compose.yml` for running the connector in a containerized environment.
+
+### Quick Start
+
+1. **Build and start the container:**
+  ```bash
+  docker-compose up --build
+  ```
+
+2. **Stop the container:**
+  ```bash
+  docker-compose down
+  ```
+
+3. **Run with custom environment variables:**
+  - You can pass environment variables via a `.env` file or with `-e` flags:
+  ```bash
+  ZENOH_ENABLE=1 docker-compose up
+  ```
+
+### Permissions & Troubleshooting
+
+- Ensure your user has access to Bluetooth and USB devices. You may need to run as root or add your user to the `bluetooth` group.
+- On Linux, grant NET_RAW capability to Node.js if you see BLE errors:
+  ```bash
+  sudo setcap cap_net_raw+eip $(readlink -f $(which node))
+  ```
+- Make sure Bluetooth is unblocked and powered on:
+  ```bash
+  rfkill unblock bluetooth
+  sudo hciconfig hci0 up
+  ```
+- If you do not need BLE in Docker, you can use the default compose file which avoids extra privileges.
+
+See the Troubleshooting section below for more details on BLE and device access issues.
 
 
 ## Troubleshooting
+- For Linux kernel 6.x, set `USE_CUSTOM_NOBLE=true` to enable compatibility
+- If BLE adapter is unauthorized, run with sudo or set NET_RAW capability:
+  - `sudo setcap cap_net_raw+eip $(readlink -f $(which node))`
+- Ensure Bluetooth is unblocked and powered on:
+  - `rfkill unblock bluetooth`
+  - `sudo hciconfig hci0 up`
+- For Zenoh, ensure the router is running locally or via Docker
 
-### Linux Kernel 6.x Compatibility
 
-The BrilliantSole SDK uses `@abandonware/noble` which has a compatibility bug with Linux kernel 6.x. If you experience connection issues, enable the custom Noble implementation:
 
-```bash
-# Set in .env file:
-USE_CUSTOM_NOBLE=true
+## Environment Variables
 
-# Or via environment variable:
-USE_CUSTOM_NOBLE=true npm run sensors
-```
+Below is a comprehensive list of environment variables, grouped by function. For more advanced options, see comments in each script or the main README.md.
 
-The custom implementation uses `@stoprocent/noble` (maintained fork) and bypasses the SDK's built-in scanner with manual event triggering for full Linux kernel 6.x support.
+### Audio / RTSP
+
+| Variable           | Description                                 | Default                | Example/Values           |
+|--------------------|---------------------------------------------|------------------------|--------------------------|
+| `RTSP_URL`         | RTSP destination for microphone             | `rtsp://127.0.0.1:8554/mic` | `rtsp://...`      |
+| `SAMPLE_RATE`      | Microphone sample rate (Hz)                 | `16000`                | `8000`, `16000`          |
+| `CHANNELS`         | Audio channels                              | `1`                    | `1`, `2`                 |
+| `SAMPLE_FORMAT`    | PCM format for FFmpeg                       | `s16le`                | `s16le`, `s8`            |
+| `AUDIO_BITRATE`    | OPUS bitrate for RTSP                       | `64k`                  | `64k`, `128k`            |
+| `FFMPEG_PATH`      | FFmpeg binary path                          | `ffmpeg`               | `/usr/bin/ffmpeg`        |
+| `FFMPEG_LOGLEVEL`  | FFmpeg verbosity                            | `error`                | `info`, `warning`        |
+| `TEST_MODE`        | If `1`, saves audio to `test_output.wav`    | `0`                    | `1`                      |
+| `BIT_DEPTH`        | Audio bit depth                             | `16`                   | `8`, `16`                |
+
+### Device Discovery / Connection
+
+| Variable           | Description                                 | Default   | Example/Values                |
+|--------------------|---------------------------------------------|-----------|------------------------------|
+| `USE_CUSTOM_NOBLE` | Use custom Noble for Linux kernel 6.x       | `false`   | `true`, `1`                  |
+| `DEVICE_ID`        | Filter by Bluetooth MAC address             | -         | `CE:59:C3:0F:4D:C9`          |
+| `DEVICE_NAME`      | Filter by device name                       | -         | `BrilliantSole`              |
+| `MIC_DEVICE_ID`    | Filter by Bluetooth ID for microphone       | -         | `CE:59:C3:0F:4D:C9`          |
+| `MIC_DEVICE_NAME`  | Filter by device name for microphone        | -         | `BrilliantSole`              |
+| `MIC_CONNECT_ONLY` | If `1`, connect but don't start microphone  | `0`       | `1`                          |
+
+### Sensors
+
+| Variable                    | Description                                 | Default | Example/Values              |
+|-----------------------------|---------------------------------------------|---------|----------------------------|
+| `ENABLED_SENSORS`           | Comma-separated list of sensors             | -       | `acceleration,gyroscope`    |
+| `SENSOR_SAMPLE_RATE`        | Default rate for all sensors (Hz)           | `50`    | `100`                      |
+| `ACCELERATION_RATE`         | Acceleration sensor rate (Hz)               | `50`    | `100`                      |
+| `GYROSCOPE_RATE`            | Gyroscope sensor rate (Hz)                  | `50`    | `100`                      |
+| `MAGNETOMETER_RATE`         | Magnetometer sensor rate (Hz)               | `50`    | `100`                      |
+| `ORIENTATION_RATE`          | Orientation sensor rate (Hz)                | `50`    | `100`                      |
+| `TAP_DETECTOR_RATE`         | Tap detector rate (Hz)                      | `50`    | `100`                      |
+| `LINEAR_ACCELERATION_RATE`  | Linear acceleration rate (Hz)               | `50`    | `100`                      |
+| `GAME_ROTATION_RATE`        | Game rotation rate (Hz)                     | `50`    | `100`                      |
+| `ROTATION_RATE`             | Rotation rate (Hz)                          | `50`    | `100`                      |
+| `ZENOH_ENABLE`              | Enable Zenoh publishing                     | `0`     | `1`                        |
+| `ZENOH_KEY_PREFIX`          | Zenoh key prefix for sensors                | `bsole/sensors` | `bsole/sensors`      |
+| `ZENOH_ATTACH_ALL`          | Attach/publish all enabled sensors          | `1`     | `0`                        |
+
+### Camera
+
+| Variable                | Description                                 | Default   | Example/Values             |
+|-------------------------|---------------------------------------------|-----------|---------------------------|
+| `CAMERA_OUTPUT_DIR`     | Directory to save images                    | -         | `./images`                |
+| `CAMERA_AUTO_PICTURE`   | Continuous capture                          | `0`       | `1`                       |
+| `CAMERA_IMAGE_FORMAT`   | File extension for images                   | `jpg`     | `jpg`, `png`              |
+| `CAMERA_QUALITY`        | Legacy quality setting                      | -         | `80`                      |
+| `CAMERA_RESOLUTION`     | Square frame size (e.g., 300x300)           | -         | `300`                     |
+| `CAMERA_QUALITY_FACTOR` | Quality factor (1..100)                     | -         | `90`                      |
+| `CAMERA_SHUTTER`        | Shutter/exposure setting                    | -         | `auto`, `100`             |
+| `CAMERA_GAIN`           | Overall gain                                | -         | `1.5`                     |
+| `CAMERA_RED_GAIN`       | Red channel gain                            | -         | `1.2`                     |
+| `CAMERA_GREEN_GAIN`     | Green channel gain                          | -         | `1.1`                     |
+| `CAMERA_BLUE_GAIN`      | Blue channel gain                           | -         | `1.3`                     |
+| `CAMERA_VIEW_ENABLE`    | Enable browser viewer                       | `0`       | `1`                       |
+| `CAMERA_VIEW_HOST`      | Viewer host                                 | `127.0.0.1` | `0.0.0.0`               |
+| `CAMERA_VIEW_PORT`      | Viewer port                                 | `8099`    | `8080`                    |
+| `CAMERA_VIEW_MJPEG`     | Use MJPEG stream at /stream.mjpg            | `0`       | `1`                       |
+
+### Display
+
+| Variable         | Description                | Default | Example |
+|------------------|---------------------------|---------|---------|
+| `DISPLAY_TIMING` | Log display timing         | `0`     | `1`     |
+
+For more advanced options, see the comments in each script or the main README.md.
+
+---
+
+For more details, see the README in each subfolder.
