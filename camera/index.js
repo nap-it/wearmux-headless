@@ -3,6 +3,8 @@ const path = require("path");
 const { Config } = require("../utils/config");
 const { DeviceManager } = require("../utils/device-manager");
 const { ZenohManager } = require("../utils/zenoh-manager");
+const { isValidJpeg, hasValidJpegStructure, formatToMime } = require("./lib/image-validator");
+const { ViewerServer } = require("./lib/viewer-server");
 
 async function ensureDir(dir) {
     await fs.promises.mkdir(dir, { recursive: true });
@@ -28,6 +30,16 @@ async function main() {
     const greenGain = config.camera.greenGain;
     const blueGain = config.camera.blueGain;
     const debug = process.env.DEBUG === "1" || process.env.CAMERA_DEBUG === "1";
+    const autoCaptureDelay = parseInt(process.env.CAMERA_AUTO_DELAY || "0", 10);
+    const autoFocus = process.env.CAMERA_AUTO_FOCUS !== "0"; // Enabled by default
+
+    function debugLog(...args) {
+        if (debug) console.log(...args);
+    }
+
+    function debugWarn(...args) {
+        if (debug) console.warn(...args);
+    }
 
     if (outDir) await ensureDir(outDir);
 
@@ -77,9 +89,7 @@ async function main() {
     try {
         if (zenoh) {
             zenoh.on("error", (e) => {
-                if (process.env.DEBUG === "1") {
-                    console.warn("[Camera][Zenoh]", e?.message || e);
-                }
+                debugWarn("[Camera][Zenoh]", e?.message || e);
             });
             await zenoh.start();
         }
@@ -140,15 +150,6 @@ async function main() {
         let pendingImages = [];
         let imageCollectionTimeout = null;
 
-        function isValidJpeg(buffer) {
-            if (!buffer || buffer.length < 2) return false;
-            return buffer[0] === 0xFF && buffer[1] === 0xD8;
-        }
-
-        function debugLog(...args) {
-            if (debug) console.log(...args);
-        }
-
         let isSavingBestImage = false;
         const saveBestImage = async () => {
             if (isSavingBestImage || pendingImages.length === 0 || savedCount >= 1) {
@@ -164,8 +165,6 @@ async function main() {
             
             pendingImages.sort((a, b) => b.size - a.size);
             const bestImage = pendingImages[0];
-            
-            debugLog(`[INFO] Collected ${pendingImages.length} image(s), saving largest (${bestImage.size} bytes)`);
             
             const ts = new Date().toISOString().replace(/[:.]/g, "-");
             const fname = `bsole-${ts}-${(counter++).toString().padStart(4, "0")}.${imgFmt}`;
@@ -190,13 +189,13 @@ async function main() {
                     await zenoh.publish(`${zenoh.keyPrefix}/image`, meta);
                     await publishRawImage(bestImage.buffer, meta);
                 } catch (e) {
-                    if (process.env.DEBUG === "1") console.warn("[Camera][Zenoh] publish failed:", e?.message || e);
+                    debugWarn("[Camera][Zenoh] publish failed:", e?.message || e);
                 }
             }
             
             latestImage = { buffer: bestImage.buffer, mime: formatToMime(imgFmt) };
-            if (viewerServer && typeof viewerServer.pushFrame === 'function') {
-                viewerServer.pushFrame(latestImage);
+            if (viewerServer) {
+                viewerServer.updateImage(bestImage.buffer, formatToMime(imgFmt));
             }
             
             savedCount += 1;
@@ -204,7 +203,6 @@ async function main() {
             pendingImages = [];
             isSavingBestImage = false;
             
-            debugLog("[REMOVE] Removing cameraImage listener (non-auto mode, image saved)");
             device.removeEventListener('cameraImage', imageHandler);
             
             try { firstImageResolve(); } catch {}
@@ -217,16 +215,6 @@ async function main() {
                     console.error("Invalid camera image event:", event);
                     return;
                 }
-
-                debugLog("[IMAGE] Image event received:", {
-                    hasBlob: !!cameraImage.blob,
-                    hasUrl: !!cameraImage.url,
-                    hasArrayBuffer: !!cameraImage.arrayBuffer,
-                    timestamp: cameraImage.timestamp,
-                    latency: cameraImage.latency,
-                    blobSize: cameraImage.blob?.size,
-                    blobType: cameraImage.blob?.type
-                });
 
                 if (!auto && savedCount >= 1) {
                     debugLog("[SKIP] Skipping extra image (non-auto mode, already saved one)");
@@ -241,7 +229,6 @@ async function main() {
                 
                 let buffer;
                 if (cameraImage.url) {
-                    debugLog(`[IMAGE] Image URL: ${cameraImage.url}`);
                     if (cameraImage.blob) {
                         buffer = Buffer.from(await cameraImage.blob.arrayBuffer());
                     } else if (cameraImage.arrayBuffer) {
@@ -261,41 +248,29 @@ async function main() {
                     return;
                 }
 
-                debugLog(`[BUFFER] Buffer extracted: size=${buffer.length} bytes, first 16 bytes: ${buffer.slice(0, 16).toString('hex')}`);
-
                 if (!buffer || buffer.length === 0) {
-                    debugLog("[SKIP] Skipping empty image buffer");
+                    debugLog("[SKIP] Empty image buffer");
                     isProcessingImage = false;
                     return;
                 }
 
                 if (buffer.length < 100) {
-                    debugLog(`[SKIP] Skipping suspiciously small image (${buffer.length} bytes - likely invalid)`);
+                    debugLog(`[SKIP] Suspiciously small image (${buffer.length} bytes)`);
                     isProcessingImage = false;
                     return;
                 }
 
                 if (!isValidJpeg(buffer)) {
-                    debugLog(`[SKIP] Skipping invalid JPEG (size=${buffer.length}, first bytes: ${buffer.slice(0, 4).toString('hex')})`);
+                    debugLog(`[SKIP] Invalid JPEG format`);
                     isProcessingImage = false;
                     return;
                 }
 
-                const hasValidStructure = buffer.length >= 4 && (
-                    (buffer[2] === 0xFF && buffer[3] === 0xE0) ||
-                    (buffer[2] === 0xFF && buffer[3] === 0xE1) ||
-                    (buffer[2] === 0xFF && buffer[3] === 0xDB) ||
-                    (buffer[2] === 0xFF && buffer[3] === 0xC0) ||
-                    (buffer[2] === 0xFF && buffer[3] === 0xC4)
-                );
-                
-                if (!hasValidStructure) {
-                    debugLog(`[SKIP] Skipping JPEG with invalid structure (bytes 2-3: ${buffer.slice(2, 4).toString('hex')})`);
+                if (!hasValidJpegStructure(buffer)) {
+                    debugLog(`[SKIP] JPEG with invalid structure`);
                     isProcessingImage = false;
                     return;
                 }
-                
-                debugLog(`[VALID] Valid image: size=${buffer.length} bytes, blob type=${cameraImage.blob?.type || 'N/A'}, timestamp=${cameraImage.timestamp || 'N/A'}, latency=${cameraImage.latency || 'N/A'}ms`);
                 
                 // Device sends two images per takePicture() - collect and save the largest
                 if (!auto) {
@@ -311,8 +286,6 @@ async function main() {
                         timestamp: cameraImage.timestamp,
                         latency: cameraImage.latency
                     });
-                    
-                    debugLog(`[COLLECT] Collected image ${pendingImages.length} (${buffer.length} bytes). Waiting for more...`);
                     
                     if (imageCollectionTimeout) {
                         clearTimeout(imageCollectionTimeout);
@@ -333,13 +306,11 @@ async function main() {
                         const file = path.join(outDir, fname);
                         await fs.promises.writeFile(file, buffer);
                         console.log("[SAVED]", file, buffer.length, "bytes");
-                    } else {
-                        debugLog("[RECEIVED] image received:", buffer.length, "bytes");
                     }
                     
                     latestImage = { buffer, mime: formatToMime(imgFmt) };
-                    if (viewerServer && typeof viewerServer.pushFrame === 'function') {
-                        viewerServer.pushFrame(latestImage);
+                    if (viewerServer) {
+                        viewerServer.updateImage(buffer, formatToMime(imgFmt));
                     }
 
                     if (zenoh) {
@@ -356,13 +327,32 @@ async function main() {
                             await zenoh.publish(`${zenoh.keyPrefix}/image`, meta);
                             await publishRawImage(buffer, meta);
                         } catch (e) {
-                            if (process.env.DEBUG === "1") console.warn("[Camera][Zenoh] publish failed:", e?.message || e);
+                            debugWarn("[Camera][Zenoh] publish failed:", e?.message || e);
                         }
                     }
                     
                     savedCount += 1;
                     lastSavedTimestamp = cameraImage.timestamp || null;
                     isProcessingImage = false;
+                    
+                    // SDK's autoPicture mechanism doesn't trigger in Node.js environment
+                    // Manually trigger next picture.
+                    if (auto && device.autoPicture) {
+                        const triggerNext = async () => {
+                            try {
+                                if (autoCaptureDelay > 0) {
+                                    await new Promise(r => setTimeout(r, autoCaptureDelay));
+                                }
+                                if (autoFocus) {
+                                    await device.focusCamera();
+                                }
+                                await device.takePicture();
+                            } catch (e) {
+                                console.error("[ERROR] Failed to take next picture:", e);
+                            }
+                        };
+                        setImmediate(triggerNext);
+                    }
                 }
             } catch (e) {
                 console.error("[ERROR] Failed to save image:", e);
@@ -371,12 +361,17 @@ async function main() {
         };
 
         device.addEventListener('cameraImage', imageHandler);
+        
+        device.addEventListener('cameraStatus', (event) => {
+            console.log("[STATUS] Camera:", event.message.cameraStatus);
+        });
 
         console.log(`Camera ready. Auto=${auto}. ${outDir ? `Output -> ${outDir}` : 'No file output (set CAMERA_OUTPUT_DIR to save images)'}`);
 
         if (viewEnable) {
-            viewerServer = startViewerServer(viewHost, viewPort, () => latestImage, { mjpeg: viewMjpeg });
-            console.log(`Viewer at http://${viewHost}:${viewPort}`);
+            viewerServer = new ViewerServer({ mjpeg: viewMjpeg });
+            viewerServer.start(viewHost, viewPort, () => latestImage);
+            console.log(`Viewer at ${viewerServer.url}`);
         }
 
         if (!auto) {
@@ -394,12 +389,27 @@ async function main() {
             
             setTimeout(async () => {
                 await device.disconnect();
-                if (viewerServer) try { viewerServer.close(); } catch {}
+                if (viewerServer) try { viewerServer.stop(); } catch {}
                 process.exit(0);
             }, 500);
         } else {
             console.log("Starting auto-capture mode (Ctrl+C to stop)...");
             device.autoPicture = true;
+            
+            // Show auto-capture configuration
+            const config_info = [];
+            if (autoFocus) config_info.push("focus enabled");
+            if (autoCaptureDelay > 0) config_info.push(`${autoCaptureDelay}ms delay`);
+            if (config_info.length > 0) {
+                console.log(`[CONFIG] Auto-capture: ${config_info.join(", ")}`);
+            }
+            
+            // Trigger the first picture to start the auto-capture loop
+            console.log("Taking first picture...");
+            if (autoFocus) {
+                await device.focusCamera();
+            }
+            await device.takePicture();
 
             process.on("SIGINT", async () => {
                 console.log("\nShutting down camera...");
@@ -408,7 +418,7 @@ async function main() {
                     try { await zenoh.stop(); } catch {}
                 }
                 await device.disconnect();
-                if (viewerServer) try { viewerServer.close(); } catch {}
+                if (viewerServer) try { viewerServer.stop(); } catch {}
                 process.exit(0);
             });
         }
@@ -426,80 +436,3 @@ if (require.main === module) {
 }
 
 module.exports = main;
-
-function formatToMime(fmt) {
-    const f = String(fmt || "").toLowerCase();
-    if (f === "jpg" || f === "jpeg") return "image/jpeg";
-    if (f === "png") return "image/png";
-    if (f === "bmp") return "image/bmp";
-    return "application/octet-stream";
-}
-
-function startViewerServer(host, port, getLatest, opts = {}) {
-    const http = require("http");
-    const clients = new Set();
-    const server = http.createServer((req, res) => {
-        if (req.url === "/" || req.url === "/index.html") {
-            const html = `<!doctype html><html><head><meta charset="utf-8"><title>Camera</title></head><body style="margin:0;background:#111;color:#eee;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:8px;">
-            <div style="font:12px sans-serif;opacity:.7;">${opts.mjpeg ? 'Using MJPEG stream' : 'Using polling /latest'}</div>
-            <img id="img" style="max-width:100%;max-height:100vh;image-rendering:auto;display:none;"/>
-            <div id="status" style="font:14px sans-serif;opacity:.6;">Waiting for first image…</div><script>
-            const img=document.getElementById('img');
-            const status=document.getElementById('status');
-            ${opts.mjpeg ? `img.src='/stream.mjpg'; img.style.display='block'; status.style.display='none';` : `
-            async function tick(){
-              try{
-                const r=await fetch('/latest?_=' + Date.now());
-                if(r.status===200){
-                  const b=await r.blob(); const url=URL.createObjectURL(b);
-                  img.src=url; img.style.display='block'; status.style.display='none';
-                }
-              }catch(e){}
-            }
-            setInterval(tick, 200); tick();`}
-            </script></body></html>`;
-            res.writeHead(200, { "Content-Type": "text/html" });
-            res.end(html);
-            return;
-        }
-        if (opts.mjpeg && req.url === "/stream.mjpg") {
-            const boundary = "--bsoleboundary";
-            res.writeHead(200, {
-                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
-                "Pragma": "no-cache",
-                "Content-Type": "multipart/x-mixed-replace; boundary=" + boundary
-            });
-            clients.add(res);
-            req.on('close', () => { try { res.end(); } catch {}; clients.delete(res); });
-            return;
-        }
-        if (req.url && req.url.startsWith("/latest")) {
-            const cur = getLatest && getLatest();
-            if (!cur) {
-                res.writeHead(204);
-                res.end();
-                return;
-            }
-            res.writeHead(200, { "Content-Type": cur.mime, "Cache-Control": "no-store" });
-            res.end(cur.buffer);
-            return;
-        }
-        res.writeHead(404);
-        res.end();
-    });
-    
-    server.pushFrame = (img) => {
-        if (!opts.mjpeg || !img) return;
-        const boundary = "--bsoleboundary";
-        for (const res of clients) {
-            try {
-                res.write(`${boundary}\r\nContent-Type: ${img.mime}\r\nContent-Length: ${img.buffer.length}\r\n\r\n`);
-                res.write(img.buffer);
-                res.write("\r\n");
-            } catch { clients.delete(res); }
-        }
-    };
-    
-    server.listen(port, host);
-    return server;
-}

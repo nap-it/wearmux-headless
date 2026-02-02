@@ -31,8 +31,10 @@ bsole-connector/
 │       ├── ml-gesture-detector.js  # ML gesture detection
 │       └── ei-classifier.js        # Edge Impulse classifier wrapper
 ├── camera/
-│   ├── index.js                    # Camera capture utility
-│   └── lib/camera-manager.js       # Camera connection & capture
+│   ├── index.js                    # Camera capture CLI
+│   └── lib/
+│       ├── image-validator.js      # Image validation utilities
+│       └── viewer-server.js        # HTTP/MJPEG browser viewer
 ├── tools/
 │   ├── launcher.js                 # Config parser and script launcher
 │   ├── zenoh_py_publisher.py       # Python sidecar: UDS→Zenoh publisher
@@ -89,10 +91,12 @@ npm run camera
 - Real-time data publishing via Zenoh
 
 ### 📷 Camera Integration
-- Capture images from device camera
-- Browser-based viewer interface
-- Automatic continuous capture mode
-- Configurable output directory
+- Single capture or continuous auto-capture mode
+- Optional auto-focus before each capture (enabled by default)
+- Configurable delay between captures in auto mode
+- Browser-based viewer interface (refresh or MJPEG stream)
+- Adjustable resolution, quality, exposure, and gain settings
+- Save images to disk with timestamps
 
 ### 🖼️ Display Control
 - Render images to device display
@@ -209,11 +213,13 @@ Below is a comprehensive list of environment variables, grouped by function. For
 | Variable                | Description                                 | Default   | Example/Values             |
 |-------------------------|---------------------------------------------|-----------|---------------------------|
 | `CAMERA_OUTPUT_DIR`     | Directory to save images                    | -         | `./images`                |
-| `CAMERA_AUTO_PICTURE`   | Continuous capture                          | `0`       | `1`                       |
+| `CAMERA_AUTO_PICTURE`   | Enable continuous capture mode              | `0`       | `1`                       |
+| `CAMERA_AUTO_DELAY`     | Delay between captures in auto mode (ms)    | `0`       | `1000`, `2000`            |
+| `CAMERA_AUTO_FOCUS`     | Auto-focus before each capture              | `1`       | `0` (disable)             |
 | `CAMERA_IMAGE_FORMAT`   | File extension for images                   | `jpg`     | `jpg`, `png`              |
 | `CAMERA_QUALITY`        | Legacy quality setting                      | -         | `80`                      |
-| `CAMERA_RESOLUTION`     | Square frame size (e.g., 300x300)           | -         | `300`                     |
-| `CAMERA_QUALITY_FACTOR` | Quality factor (1..100)                     | -         | `90`                      |
+| `CAMERA_RESOLUTION`     | Square frame size (e.g., 300x300)           | `640`     | `300`, `1280`             |
+| `CAMERA_QUALITY_FACTOR` | Quality factor (1..100)                     | `95`      | `80`, `100`               |
 | `CAMERA_SHUTTER`        | Shutter/exposure setting                    | -         | `auto`, `100`             |
 | `CAMERA_GAIN`           | Overall gain                                | -         | `1.5`                     |
 | `CAMERA_RED_GAIN`       | Red channel gain                            | -         | `1.2`                     |
@@ -223,6 +229,7 @@ Below is a comprehensive list of environment variables, grouped by function. For
 | `CAMERA_VIEW_HOST`      | Viewer host                                 | `127.0.0.1` | `0.0.0.0`               |
 | `CAMERA_VIEW_PORT`      | Viewer port                                 | `8099`    | `8080`                    |
 | `CAMERA_VIEW_MJPEG`     | Use MJPEG stream at /stream.mjpg            | `0`       | `1`                       |
+| `CAMERA_DEBUG`          | Enable verbose camera logging               | `0`       | `1`                       |
 
 ### Display
 
