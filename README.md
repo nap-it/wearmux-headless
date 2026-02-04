@@ -106,9 +106,58 @@ npm run camera
 
 
 ## Zenoh Integration
-- Enable Zenoh by setting `ZENOH_ENABLE=1` in your environment
-- Publishes data to keys like `bsole/sensors/<sensor>`, `bsole/microphone/level`, etc.
-- See tools/zenoh_py_publisher.py and tools/zenoh_py_subscriber.py for Python helpers
+
+Enable Zenoh by setting `ZENOH_ENABLE=1` in your environment. The connector uses a Python sidecar process (`tools/zenoh_py_publisher.py`) to publish data via Unix Domain Sockets (UDS) with MessagePack encoding.
+
+### Published Topics
+
+#### Sensors (`bsole/sensors/`)
+When `ZENOH_ENABLE=1`, all enabled sensors are automatically published:
+- **`bsole/sensors/acceleration`** - 3-axis acceleration data (x, y, z in m/s²)
+- **`bsole/sensors/gyroscope`** - 3-axis gyroscope data (x, y, z in rad/s)
+- **`bsole/sensors/magnetometer`** - 3-axis magnetometer data (x, y, z in μT)
+- **`bsole/sensors/orientation`** - Euler angles (heading, pitch, roll in degrees)
+- **`bsole/sensors/linearAcceleration`** - Linear acceleration without gravity
+- **`bsole/sensors/gameRotation`** - Game rotation quaternion
+- **`bsole/sensors/rotation`** - Rotation quaternion
+- **`bsole/sensors/tapDetector`** - Tap detection events
+
+Each message includes:
+```json
+{
+  "ts": 1234567890,
+  "sensor": "acceleration",
+  "device": { "id": "CE:59:C3:0F:4D:C9", "name": "BrilliantFrame" },
+  "message": { "timestamp": 1234567890, "sensorType": "acceleration", "acceleration": { "x": 0.1, "y": 0.2, "z": 9.8 } }
+}
+```
+
+#### Microphone (`bsole/microphone/`)
+When `ZENOH_ENABLE=1` and `ZENOH_MIC_ENABLE` is not `0`:
+- **`bsole/microphone/status`** - Microphone connection status
+- **`bsole/microphone/level`** - Real-time audio level (RMS, peak, timestamp)
+- **`bsole/microphone/raw/meta`** - Raw audio metadata (when `ZENOH_MIC_RAW_ENABLE=1`)
+- **`bsole/microphone/raw/chunk`** - Raw audio data chunks in base64 (when `ZENOH_MIC_RAW_ENABLE=1`)
+
+#### Camera (`bsole/camera/`)
+When `ZENOH_ENABLE=1` and `ZENOH_CAMERA_ENABLE` is not `0`:
+- **`bsole/camera/image`** - Image metadata (timestamp, filename, dimensions, etc.)
+- **`bsole/camera/raw/meta`** - Raw image metadata (when `ZENOH_CAMERA_RAW_ENABLE=1`)
+- **`bsole/camera/raw/chunk`** - Raw image data chunks in base64 (when `ZENOH_CAMERA_RAW_ENABLE=1`)
+
+### Configuration
+
+See the [Zenoh](#zenoh) subsection in [Environment Variables](#environment-variables) for all configuration options.
+
+### Python Helpers
+
+- **`tools/zenoh_py_publisher.py`** - Sidecar process that receives data via UDS and publishes to Zenoh
+- **`tools/zenoh_py_subscriber.py`** - Example subscriber to receive published data
+
+Example subscriber usage:
+```bash
+python3 tools/zenoh_py_subscriber.py --key "bsole/sensors/**"
+```
 
 
 ## Docker
@@ -145,7 +194,6 @@ This project provides a `docker-compose.yml` for running the connector in a cont
   rfkill unblock bluetooth
   sudo hciconfig hci0 up
   ```
-- If you do not need BLE in Docker, you can use the default compose file which avoids extra privileges.
 
 See the Troubleshooting section below for more details on BLE and device access issues.
 
@@ -204,9 +252,23 @@ Below is a comprehensive list of environment variables, grouped by function. For
 | `LINEAR_ACCELERATION_RATE`  | Linear acceleration rate (Hz)               | `50`    | `100`                      |
 | `GAME_ROTATION_RATE`        | Game rotation rate (Hz)                     | `50`    | `100`                      |
 | `ROTATION_RATE`             | Rotation rate (Hz)                          | `50`    | `100`                      |
-| `ZENOH_ENABLE`              | Enable Zenoh publishing                     | `0`     | `1`                        |
-| `ZENOH_KEY_PREFIX`          | Zenoh key prefix for sensors                | `bsole/sensors` | `bsole/sensors`      |
-| `ZENOH_ATTACH_ALL`          | Attach/publish all enabled sensors          | `1`     | `0`                        |
+
+### Zenoh
+
+| Variable | Description | Default |
+|----------|-------------|---------||
+| `ZENOH_ENABLE` | Enable Zenoh publishing | `0` |
+| `ZENOH_KEY_PREFIX` | Sensor topic prefix | `bsole/sensors` |
+| `ZENOH_ATTACH_ALL` | Publish all enabled sensors | `1` |
+| `ZENOH_MIC_ENABLE` | Enable microphone publishing | `1` (if ZENOH_ENABLE=1) |
+| `ZENOH_MIC_KEY_PREFIX` | Microphone topic prefix | `bsole/microphone` |
+| `ZENOH_MIC_RAW_ENABLE` | Publish raw audio data | `0` |
+| `ZENOH_MIC_RAW_THROTTLE_MS` | Throttle raw audio (ms) | `200` |
+| `ZENOH_CAMERA_ENABLE` | Enable camera publishing | `1` (if ZENOH_ENABLE=1) |
+| `ZENOH_CAMERA_KEY_PREFIX` | Camera topic prefix | `bsole/camera` |
+| `ZENOH_CAMERA_RAW_ENABLE` | Publish raw image data | `0` |
+| `ZENOH_RAW_CHUNK_SIZE` | Chunk size for raw data | `30000` |
+| `ZENOH_UDS_PATH` | Unix socket path for sidecar | `/tmp/bsole-zenoh.sock` |
 
 ### Camera
 

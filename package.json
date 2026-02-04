@@ -3,7 +3,7 @@
         "@msgpack/msgpack": "^3.0.0",
         "@stoprocent/noble": "^2.3.10",
         "auto-bind": "^5.0.1",
-        "brilliantsole": "^0.0.32",
+        "brilliantsole": "^0.0.66",
         "dgram": "^1.0.1",
         "opentype.js": "^1.3.4",
         "rgbquant": "^1.1.2",
