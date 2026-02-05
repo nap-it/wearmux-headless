@@ -162,25 +162,40 @@ python3 tools/zenoh_py_subscriber.py --key "bsole/sensors/**"
 
 ## Docker
 
-This project provides a `docker-compose.yml` for running the connector in a containerized environment.
+This project provides a `docker-compose.yml` for running the connector in a containerized environment. All configuration is managed through `config/config.ini`.
 
 ### Quick Start
 
-1. **Build and start the container:**
+1. **Configure your settings:**
+  - Edit `config/config.ini` to set environment variables and scripts to run
+  - See the [Environment Variables](#environment-variables) section for all available options
+
+2. **Build and start the container:**
   ```bash
   docker-compose up --build
   ```
 
-2. **Stop the container:**
+3. **Stop the container:**
   ```bash
   docker-compose down
   ```
 
-3. **Run with custom environment variables:**
-  - You can pass environment variables via a `.env` file or with `-e` flags:
-  ```bash
-  ZENOH_ENABLE=1 docker-compose up
-  ```
+### Configuration
+
+All settings are defined in `config/config.ini`:
+- **`[env]` section**: Environment variables (device ID, sensors, Zenoh settings, etc.)
+- **`[scripts]` section**: Scripts to run on startup (e.g., `sensors`, `camera`, `microphone:rtsp`)
+
+Example `config/config.ini`:
+```ini
+[env]
+ZENOH_ENABLE=1
+ENABLED_SENSORS=acceleration,magnetometer,orientation
+DEVICE_ID=CE:59:C3:0F:4D:C9
+
+[scripts]
+run=sensors
+```
 
 ### Permissions & Troubleshooting
 
@@ -211,7 +226,10 @@ See the Troubleshooting section below for more details on BLE and device access 
 
 ## Environment Variables
 
-Below is a comprehensive list of environment variables, grouped by function. For more advanced options, see comments in each script or the main README.md.
+Below is a comprehensive list of environment variables, grouped by function. 
+
+**For Docker usage:** All variables should be set in `config/config.ini` under the `[env]` section.  
+**For local development:** Set variables in your shell or use npm scripts with inline variables (e.g., `ZENOH_ENABLE=1 npm run sensors`).
 
 ### Audio / RTSP
 

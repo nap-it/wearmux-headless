@@ -1,5 +1,5 @@
 services:
-  # Zenoh Router - Message broker for sensor data
+  # Zenoh Router - Message broker
   zenoh-router:
     image: eclipse/zenoh:1.6.1
     container_name: zenoh-router
@@ -30,7 +30,6 @@ services:
       zenoh-router:
         condition: service_healthy
     volumes:
-      # Configuration
       - ./config/config.ini:/config/config.ini:ro
       - ./config/peer.docker.json5:/app/zenoh/peer.json5:ro
       # Data persistence (optional)
@@ -38,28 +37,6 @@ services:
       - ./logs:/app/logs
       # Display assets (if using display module)
       - ./display/assets:/app/display/assets:ro
-    environment:
-      # Core settings
-      - NODE_ENV=${NODE_ENV:-production}
-      - DEBUG=${DEBUG:-0}
-
-      # BLE device configuration
-      - DEVICE_NAME=${DEVICE_NAME:-}
-      - DEVICE_ID=${DEVICE_ID:-}
-      - USE_CUSTOM_NOBLE=${USE_CUSTOM_NOBLE:-true}
-
-      # Zenoh configuration
-      - ZENOH_ENABLE=${ZENOH_ENABLE:-1}
-      - ZENOH_DOCKER_ROUTER=1
-
-      # Sensor configuration
-      - ENABLED_SENSORS=${ENABLED_SENSORS:-acceleration,magnetometer,orientation,tapDetector}
-
-      # Display configuration (if using display module)
-      - DISPLAY_TIMING=${DISPLAY_TIMING:-0}
-
-      # ML configuration (if using ML features)
-      - ML_CONFIDENCE_THRESHOLD=${ML_CONFIDENCE_THRESHOLD:-0.6}
 
     # BLE access requires special permissions
     privileged: ${PRIVILEGED:-true}
@@ -91,7 +68,6 @@ networks:
       config:
         - subnet: 172.20.0.0/16
 
-# Volume definitions (optional, for named volumes)
 volumes:
   training-data:
   logs:
