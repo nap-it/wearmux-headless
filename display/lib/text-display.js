@@ -1,7 +1,5 @@
-// Text display utilities using SVG + sharp (Node.js compatible, no browser APIs)
+// Text display utilities using SVG + sharp
 const sharp = require("sharp");
-const fs = require("fs");
-const path = require("path");
 const { DisplayManager } = require("./display-manager");
 const { Config } = require("../../utils/config");
 
@@ -20,8 +18,9 @@ class TextDisplay {
         }
 
         this.device = device;
-        this.fontPath = options.fontPath || null;
         this.currentFontSize = options.fontSize || 24;
+        this.fontFamily = options.fontFamily || "sans-serif";
+        this.fontWeight = options.fontWeight || "normal";
         this.defaultColor = options.color ?? "#FFFFFF";
         this.displayManager = null;
         this.initialized = false;
@@ -37,10 +36,7 @@ class TextDisplay {
      * @param {string} fontPath - Path to TTF/OTF font file
      * @param {number} fontSize - Font size in points
      */
-    async loadFont(fontPath, fontSize = null, name = null) {
-        if (fontPath && typeof fontPath === "string" && fs.existsSync(fontPath)) {
-            this.fontPath = fontPath;
-        }
+    async loadFont(fontSize = null) {
         if (fontSize) {
             this.currentFontSize = fontSize;
         }
@@ -56,9 +52,9 @@ class TextDisplay {
             align: "center",
         });
 
+        this.cache = new Map();
         this.initialized = true;
-        console.log(`✓ Text display ready (${this.currentFontSize}pt)`);
-        return fontPath ? path.basename(fontPath, path.extname(fontPath)) : "default";
+        console.log(`Text display ready (${this.currentFontSize}pt)`);
     }
 
     /**
@@ -71,20 +67,42 @@ class TextDisplay {
         const padding = 16;
         const svgWidth = Math.min(this.width, 600);
         const svgHeight = Math.min(this.height, Math.max(200, lines.length * lineHeight + padding * 2));
-
-        // Use system sans-serif - SDK fontToSpriteSheet requries browser DOM;
-        // embedding fonts in SVG can be large/slow; system font works reliably
-        const fontFamily = "sans-serif";
+        const fontFamily = this.fontFamily;
+        const fontWeightProp = `font-weight: ${this.fontWeight};`;
         const lineSpacing = lineHeight;
         const startY = padding + this.currentFontSize;
 
-        const textElements = lines
-            .map(
-                (line, i) =>
-                    `    <text x="${svgWidth / 2}" y="${startY + i * lineSpacing}" text-anchor="middle" font-size="${this.currentFontSize}" font-family="${fontFamily}" fill="${color}">${this._escapeXml(line)}</text>`
-            )
-            .join("\n");
-
+const maxLineWidth = svgWidth * 0.85;
+    
+    const wrappedLines = [];
+    
+    for (const line of lines) {
+        if (line.length * 8 < maxLineWidth) { // Rough char width est
+            wrappedLines.push(line);
+        } else {
+            // Simple word wrap
+            const words = line.split(" ");
+            let currentLine = "";
+            for (const word of words) {
+                const testLine = currentLine ? currentLine + " " + word : word;
+                if (testLine.length * 8 > maxLineWidth) {
+                    if (currentLine) wrappedLines.push(currentLine);
+                    currentLine = word;
+                } else {
+                    currentLine = testLine;
+                }
+            }
+            if (currentLine) wrappedLines.push(currentLine);
+        }
+    }
+    const textLines = wrappedLines;
+    const textElements = textLines
+        .map(
+            (line, i) =>
+                `    <text x="${svgWidth / 2}" y="${startY + i * lineSpacing}" text-anchor="middle" font-size="${this.currentFontSize}" font-family="${fontFamily}" ${fontWeightProp} fill="${color}">${this._escapeXml(line)}</text>`
+        )
+        .join("\n");
+        
         const svg = `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${svgWidth}" height="${svgHeight}" viewBox="0 0 ${svgWidth} ${svgHeight}">
   <rect width="100%" height="100%" fill="#000000"/>
@@ -114,11 +132,29 @@ ${textElements}
      */
     async showText(text, options = {}) {
         if (!this.initialized) {
-            throw new Error("No font loaded. Call loadFont() first.");
+            throw new Error("TextDisplay not initialized. Call loadFont() first.");
         }
 
         const color = options.color || this.defaultColor;
-        const buffer = await this._textToImageBuffer(text, color);
+        const fontSize = options.fontSize || this.currentFontSize;
+        const fontFamily = options.fontFamily || this.fontFamily;
+        const fontWeight = options.fontWeight || this.fontWeight;
+        const key = `${text}:${color}:${fontSize}:${fontFamily}:${fontWeight}`;
+
+        let buffer = this.cache.get(key);
+        if (!buffer) {
+            try {
+                buffer = await this._textToImageBuffer(text, color);
+                if (this.cache.size >= 10) {
+                    const firstKey = this.cache.keys().next().value;
+                    this.cache.delete(firstKey);
+                }
+                this.cache.set(key, buffer);
+            } catch (err) {
+                console.error("Text render error:", err.message);
+                throw err;
+            }
+        }
 
         await this.displayManager.showImageBuffer(buffer, "image/png", {
             fit: "contain",
