@@ -88,9 +88,7 @@ class CarSimulator {
 
     async _simulateApproach() {
         this.approachCount++;
-        console.log(`\n${"=".repeat(60)}`);
-        console.log(`Approach #${this.approachCount}: Car is approaching...`);
-        console.log("=".repeat(60));
+        console.log(`\nApproach #${this.approachCount}: Car is approaching...`);
         
         // Send approach message to glasses
         this.approachSentTime = Date.now(); // Track latency
@@ -171,7 +169,7 @@ class CarSimulator {
             case "timeout":
             default:
                 message = "No response\nCar will proceed";
-                action = "➡️  PROCEEDING (no response)";
+                action = "PROCEEDING (no response)";
                 break;
         }
         

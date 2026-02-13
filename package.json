@@ -10,22 +10,29 @@
         "sharp": "^0.34.4",
         "woff2-encoder": "^2.0.0"
     },
+    "devDependencies": {
+        "jest": "^29.7.0"
+    },
     "scripts": {
         "start": "node index.js",
         "help": "echo 'Available scripts: start, microphone:rtsp, microphone:record, clean:recordings, sensors, display, camera'",
-
+        
         "microphone:rtsp": "node microphone/index.js",
         "microphone:record": "node microphone/record-audio.js",
-
+        
         "sensors": "node sensors/index.js",
         "sensors:ml-gesture": "node sensors/real-time-ml-gesture.js",
         "sensors:inference": "node sensors/run-inference.js",
         "sensors:collect-training": "node sensors/collect-training-data.js",
-
+        
         "display": "node display/index.js",
-
+        
         "camera": "node camera/index.js",
         
+        "examples:car-help": "echo 'Car demo (examples/car-interaction):\n  npm run examples:car-demo   # Glasses (demo mode)\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
+        "examples:car-demo": "cd examples/car-interaction && DEMO_MODE=1 node glasses-controller.js\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
+        "examples:car": "cd examples/car-interaction && node car-simulator.js",
+        "examples:test": "jest examples/car-interaction/__tests__",
         "clean:recordings": "rm -rf microphone/recordings/*",
         "clean:training-data": "rm -rf sensors/model/*"
     }

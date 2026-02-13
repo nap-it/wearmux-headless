@@ -126,7 +126,15 @@ class GlassesController {
         // Set brightness for visibility
         await this.device.setDisplayBrightness("high", true);
         
-        // Initialize text display\n        console.log("Initializing text display...");\n        this.textDisplay = new TextDisplay(this.device, {\n            fontSize: this.config.fontSize,\n        });\n        \n        await this.textDisplay.loadFont(this.config.fontSize);\n        console.log("Text display ready");\n        
+        // Initialize text display
+        console.log("Initializing text display...");
+        this.textDisplay = new TextDisplay(this.device, {
+            fontSize: this.config.fontSize,
+        });
+        
+        await this.textDisplay.loadFont(this.config.fontSize);
+        console.log("Text display ready");
+        
         // Initialize ML gesture detector
         console.log("Initializing ML gesture detector...");
         this.mlDetector = new MLGestureDetector(30); // 30 samples = 1.5s at 20Hz
