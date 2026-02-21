@@ -21,12 +21,69 @@ const { SensorManager } = require("../../sensors/lib/sensor-manager");
 const MLGestureDetector = require("../../sensors/lib/ml-gesture-detector");
 const { TextDisplay } = require("../../display/lib/text-display");
 
+const CONSTANTS = {
+    // Socket paths (templates - combine with process.pid)
+    UDS_PUB_PATH_PREFIX: "/tmp/bsole-zenoh-glasses-pub-",
+    UDS_SUB_PATH_PREFIX: "/tmp/bsole-zenoh-glasses-sub-",
+    UDS_PATH_SUFFIX: ".sock",
+
+    // Zenoh topics
+    ZENOH_PUB_KEY_PREFIX: "gesture",
+    ZENOH_SUB_KEY_EXPRESSION: "car/**",
+    ZENOH_GESTURE_RESPONSE_TOPIC: "gesture/response",
+    ZENOH_CAR_APPROACHING_KEY: "car/approaching",
+    ZENOH_CAR_CONFIRMATION_KEY: "car/confirmation",
+
+    // Display colors
+    COLOR_ATTENTION: "#FFFF00",
+    COLOR_CONFIRM: "#00FF00",
+    COLOR_WARNING: "#FF8800",
+
+    // Delays (ms)
+    ML_INIT_POLL_INTERVAL_MS: 50,
+    FEEDBACK_DISPLAY_MS: 1000,
+    TIMEOUT_DISPLAY_MS: 2000,
+    CONFIRMATION_DISPLAY_MS: 3000,
+
+    // ML detector
+    ML_WINDOW_SIZE: 30, // 30 samples = 1.5s at 20Hz
+
+    // Sensor config defaults
+    DEFAULT_SENSOR_RATE: 20,
+    DEFAULT_FONT_SIZE: 24,
+    DEFAULT_GESTURE_CONFIDENCE: 0.5,
+    DEFAULT_NOD_CONFIDENCE: 0.8,
+    DEFAULT_SHAKE_CONFIDENCE: 0.8,
+    DEFAULT_GESTURE_TIMEOUT_MS: 8000,
+
+    // Display messages
+    MSG_READY: "Ready\nWaiting for car...",
+    MSG_TIMEOUT: "No response\nCar will proceed",
+    MSG_DEFAULT_APPROACH: "Car approaching\nAllow to stop?",
+    MSG_DEFAULT_CONFIRMATION: "Car confirmed",
+};
+
 // State machine states
 const STATE = {
     IDLE: "idle",
     WAITING_FOR_GESTURE: "waiting_for_gesture",
     SHOWING_CONFIRMATION: "showing_confirmation",
 };
+
+/**
+ * Build a UDS socket path from prefix, pid, and suffix.
+ */
+function _buildUdsPath(prefix, pid) {
+    return `${prefix}${pid}${CONSTANTS.UDS_PATH_SUFFIX}`;
+}
+
+/**
+ * Block the event loop indefinitely. The process stays alive until
+ * SIGINT or SIGTERM triggers the cleanup handler registered in main().
+ */
+function _keepAlive() {
+    return new Promise(() => {});
+}
 
 class GlassesController {
     constructor() {
@@ -40,17 +97,18 @@ class GlassesController {
         this.state = STATE.IDLE;
         this.currentQuestion = null;
         this.gestureTimeout = null;
+        this.clearDisplayTimeout = null;
         
         this.demoMode = process.env.DEMO_MODE === "1" || process.env.DEMO_MODE === "true";
         
         // Configuration
         this.config = {
-            sensorRate: 20, // Hz
-            gestureConfidenceThreshold: 0.5, // General threshold for any recognized gesture
-            nodConfidenceThreshold: 0.8, // Specific threshold for 'nod' gesture
-            shakeConfidenceThreshold: 0.8, // Specific threshold for 'shake' gesture
-            gestureTimeoutMs: 8000, // 8 seconds to respond (more time for gesture)
-            fontSize: 24,
+            sensorRate: CONSTANTS.DEFAULT_SENSOR_RATE,
+            gestureConfidenceThreshold: CONSTANTS.DEFAULT_GESTURE_CONFIDENCE,
+            nodConfidenceThreshold: CONSTANTS.DEFAULT_NOD_CONFIDENCE,
+            shakeConfidenceThreshold: CONSTANTS.DEFAULT_SHAKE_CONFIDENCE,
+            gestureTimeoutMs: CONSTANTS.DEFAULT_GESTURE_TIMEOUT_MS,
+            fontSize: CONSTANTS.DEFAULT_FONT_SIZE,
         };
 
         // Latency tracking
@@ -77,8 +135,8 @@ class GlassesController {
         
         console.log("Initializing Zenoh publisher...");
         this.zenohPublisher = new ZenohManager({
-            keyPrefix: "gesture",
-            udsPath: `/tmp/bsole-zenoh-glasses-pub-${process.pid}.sock`,
+            keyPrefix: CONSTANTS.ZENOH_PUB_KEY_PREFIX,
+            udsPath: _buildUdsPath(CONSTANTS.UDS_PUB_PATH_PREFIX, process.pid),
         });
         
         await this.zenohPublisher.start();
@@ -87,8 +145,8 @@ class GlassesController {
         
         console.log("Initializing Zenoh subscriber...");
         this.zenohSubscriber = new ZenohSubscriber({
-            keyExpression: "car/**",
-            udsPath: `/tmp/bsole-zenoh-glasses-sub-${process.pid}.sock`,
+            keyExpression: CONSTANTS.ZENOH_SUB_KEY_EXPRESSION,
+            udsPath: _buildUdsPath(CONSTANTS.UDS_SUB_PATH_PREFIX, process.pid),
         });
         
         this.zenohSubscriber.on("message", (msg) => this._handleZenohMessage(msg));
@@ -137,10 +195,10 @@ class GlassesController {
         
         // Initialize ML gesture detector
         console.log("Initializing ML gesture detector...");
-        this.mlDetector = new MLGestureDetector(30); // 30 samples = 1.5s at 20Hz
+        this.mlDetector = new MLGestureDetector(CONSTANTS.ML_WINDOW_SIZE);
         
         while (!this.mlDetector.initialized) {
-            await new Promise(r => setTimeout(r, 50));
+            await new Promise(r => setTimeout(r, CONSTANTS.ML_INIT_POLL_INTERVAL_MS));
         }
         console.log("ML gesture detector ready");
         
@@ -162,8 +220,8 @@ class GlassesController {
         // Initialize Zenoh publisher for gesture responses
         console.log("Initializing Zenoh publisher...");
         this.zenohPublisher = new ZenohManager({
-            keyPrefix: "gesture",
-            udsPath: `/tmp/bsole-zenoh-glasses-pub-${process.pid}.sock`,
+            keyPrefix: CONSTANTS.ZENOH_PUB_KEY_PREFIX,
+            udsPath: _buildUdsPath(CONSTANTS.UDS_PUB_PATH_PREFIX, process.pid),
         });
         
         await this.zenohPublisher.start();
@@ -176,8 +234,8 @@ class GlassesController {
         // Initialize Zenoh subscriber for car messages
         console.log("Initializing Zenoh subscriber...");
         this.zenohSubscriber = new ZenohSubscriber({
-            keyExpression: "car/**",
-            udsPath: `/tmp/bsole-zenoh-glasses-sub-${process.pid}.sock`,
+            keyExpression: CONSTANTS.ZENOH_SUB_KEY_EXPRESSION,
+            udsPath: _buildUdsPath(CONSTANTS.UDS_SUB_PATH_PREFIX, process.pid),
         });
         
         this.zenohSubscriber.on("message", (msg) => this._handleZenohMessage(msg));
@@ -192,7 +250,7 @@ class GlassesController {
         this.mlDetector.on("ml-gesture", (result) => this._handleGesture(result));
         
         // Show ready message
-        await this.textDisplay.showText("Ready\nWaiting for car...", {
+        await this.textDisplay.showText(CONSTANTS.MSG_READY, {
             align: "center",
             valign: "middle",
         });
@@ -287,10 +345,10 @@ class GlassesController {
 
         console.log(`Received message: ${key}`);
 
-        if (key === "car/approaching") {
+        if (key === CONSTANTS.ZENOH_CAR_APPROACHING_KEY) {
             this.approachReceiveTime = Date.now(); // Track latency
             this._handleCarApproaching(parsedPayload);
-        } else if (key === "car/confirmation") {
+        } else if (key === CONSTANTS.ZENOH_CAR_CONFIRMATION_KEY) {
             const confirmationReceiveTime = Date.now(); // Track latency
             if (parsedPayload.gestureSentTime) {
                 const latency = confirmationReceiveTime - parsedPayload.gestureSentTime;
@@ -306,7 +364,7 @@ class GlassesController {
             return;
         }
         
-        const message = payload.message || "Car approaching\nAllow to stop?";
+        const message = payload.message || CONSTANTS.MSG_DEFAULT_APPROACH;
         console.log(`Car approaching: "${message}"`);
         
         // Change state to wait for gesture
@@ -325,7 +383,7 @@ class GlassesController {
             await this.textDisplay.showText(message, {
                 align: "center",
                 valign: "middle",
-                color: "#FFFF00", // Yellow for attention
+                color: CONSTANTS.COLOR_ATTENTION,
             });
         } catch (err) {
             console.error("Display error:", err.message);
@@ -412,30 +470,37 @@ class GlassesController {
             this.gestureTimeout = null;
         }
         
-        // Send response to car
-        await this._sendGestureResponse(gesture);
-        
-        // Show feedback
-        const feedbackMessage = gesture === "nod"
-            ? "Response: YES"
-            : gesture === "shake"
-            ? "Response: NO"
-            : "Response: " + gesture;
-        
-        await this.textDisplay.showText(feedbackMessage, {
-            align: "center",
-            valign: "middle",
-            color: "#00FF00", // Green for confirmation
-        });
-        
-        // Wait a bit before going back to idle
-        await new Promise(r => setTimeout(r, 1000));
-        
-        this.state = STATE.IDLE;
+         // Display immediate feedback before sending
+         const feedbackMessage = gesture === "nod"
+             ? "Sent: YES"
+             : gesture === "shake"
+             ? "Sent: NO"
+             : "Sent: " + gesture;
+         
+          if (!this.demoMode && this.textDisplay) {
+              try {
+                  await this.textDisplay.showText(feedbackMessage, {
+                      align: "center",
+                      valign: "middle",
+                      color: CONSTANTS.COLOR_CONFIRM,
+                      clearBefore: true,
+                  });
+              } catch (err) {
+                  console.error("Display error:", err.message);
+              }
+          }
+         
+         // Send response to car
+         await this._sendGestureResponse(gesture);
+         
+         // Wait a bit before going back to idle
+         await new Promise(r => setTimeout(r, CONSTANTS.FEEDBACK_DISPLAY_MS));
+         
+         this.state = STATE.IDLE;
     }
 
     async _sendGestureResponse(gesture) {
-        this.gestureResponseSendTime = Date.now(); // Track when gesture response is sent
+        this.gestureResponseSendTime = Date.now();
         const response = {
             ts: this.gestureResponseSendTime,
             gesture: gesture,
@@ -443,11 +508,10 @@ class GlassesController {
                 id: this.device.bluetoothId || this.device.id,
                 name: this.device.name,
             },
-            // Add timestamp for latency tracking in car simulator
             gestureSentTime: this.gestureResponseSendTime,
         };
         
-        await this.zenohPublisher.publish("gesture/response", response);
+        await this.zenohPublisher.publish(CONSTANTS.ZENOH_GESTURE_RESPONSE_TOPIC, response);
         console.log(`Sent gesture response: ${gesture}`);
     }
 
@@ -462,17 +526,17 @@ class GlassesController {
         await this._sendGestureResponse("timeout");
         
         // Show timeout message
-        await this.textDisplay.showText("No response\nCar will proceed", {
+        await this.textDisplay.showText(CONSTANTS.MSG_TIMEOUT, {
             align: "center",
             valign: "middle",
-            color: "#FF8800", // Orange for warning
+            color: CONSTANTS.COLOR_WARNING,
         });
         
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, CONSTANTS.TIMEOUT_DISPLAY_MS));
         
         // Return to idle
         this.state = STATE.IDLE;
-        await this.textDisplay.showText("Ready\nWaiting for car...", {
+        await this.textDisplay.showText(CONSTANTS.MSG_READY, {
             align: "center",
             valign: "middle",
         });
@@ -487,7 +551,7 @@ class GlassesController {
             }
         }
         
-        const message = payload.message || "Car confirmed";
+        const message = payload.message || CONSTANTS.MSG_DEFAULT_CONFIRMATION;
         console.log(`Car confirmation: "${message}"`);
         
         this.state = STATE.SHOWING_CONFIRMATION;
@@ -496,10 +560,30 @@ class GlassesController {
             await this.textDisplay.showText(message, {
                 align: "center",
                 valign: "middle",
-                color: "#00FF00", // Green
+                color: CONSTANTS.COLOR_CONFIRM,
             });
-            await new Promise(r => setTimeout(r, 3000));
-            await this.textDisplay.showText("Ready\nWaiting for car...", {
+            await new Promise(r => setTimeout(r, CONSTANTS.CONFIRMATION_DISPLAY_MS));
+            
+            // Schedule display cleanup (clear after 5 seconds if no new message arrives)
+            if (this.clearDisplayTimeout) {
+                clearTimeout(this.clearDisplayTimeout);
+            }
+            
+            this.clearDisplayTimeout = setTimeout(async () => {
+                // Only clear if still in idle state (no new message arrived)
+                if (this.state === STATE.IDLE) {
+                    try {
+                        await this.textDisplay.clear();
+                        console.log("Display cleared after confirmation");
+                    } catch (err) {
+                        console.error("Display clear error:", err.message);
+                    }
+                }
+                this.clearDisplayTimeout = null;
+            }, 5000);
+            
+            // Show ready message instead of leaving confirmation up
+            await this.textDisplay.showText(CONSTANTS.MSG_READY, {
                 align: "center",
                 valign: "middle",
             });
@@ -515,6 +599,10 @@ class GlassesController {
         try {
             if (this.gestureTimeout) {
                 clearTimeout(this.gestureTimeout);
+            }
+            
+            if (this.clearDisplayTimeout) {
+                clearTimeout(this.clearDisplayTimeout);
             }
             
             if (this.textDisplay && !this.demoMode) {
@@ -555,7 +643,7 @@ async function main() {
     await controller.initialize();
     
     // Keep running
-    await new Promise(() => {}); // Run forever
+    await _keepAlive();
 }
 
 if (require.main === module) {
@@ -566,4 +654,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { GlassesController };
+module.exports = { GlassesController, CONSTANTS, STATE };
