@@ -16,9 +16,9 @@ describe('CarSimulator', () => {
   });
 
   test('has required config', () => {
-    expect(sim.config.minApproachDelay).toBe(5000);
-    expect(sim.config.maxApproachDelay).toBe(15000);
-    expect(sim.config.responseTimeoutMs).toBe(8000);
+    expect(sim.config.MIN_APPROACH_DELAY).toBe(5000);
+    expect(sim.config.MAX_APPROACH_DELAY).toBe(15000);
+    expect(sim.config.RESPONSE_TIMEOUT).toBe(8000);
   });
 
   test('cleanup method exists', () => {

@@ -1,4 +1,5 @@
-const { GlassesController, CONSTANTS, STATE } = require('../glasses-controller');
+const { GlassesController } = require('../glasses-controller');
+const { STATE, GLASSES_CONFIG, ZENOH_TOPICS } = require('../constants');
 
 describe('GlassesController', () => {
   let ctrl;
@@ -19,12 +20,12 @@ describe('GlassesController', () => {
   });
 
   test('has default config from CONSTANTS', () => {
-    expect(ctrl.config.sensorRate).toBe(CONSTANTS.DEFAULT_SENSOR_RATE);
-    expect(ctrl.config.gestureTimeoutMs).toBe(CONSTANTS.DEFAULT_GESTURE_TIMEOUT_MS);
-    expect(ctrl.config.fontSize).toBe(CONSTANTS.DEFAULT_FONT_SIZE);
-    expect(ctrl.config.gestureConfidenceThreshold).toBe(CONSTANTS.DEFAULT_GESTURE_CONFIDENCE);
-    expect(ctrl.config.nodConfidenceThreshold).toBe(CONSTANTS.DEFAULT_NOD_CONFIDENCE);
-    expect(ctrl.config.shakeConfidenceThreshold).toBe(CONSTANTS.DEFAULT_SHAKE_CONFIDENCE);
+    expect(ctrl.config.DEFAULT_SENSOR_RATE).toBe(GLASSES_CONFIG.DEFAULT_SENSOR_RATE);
+    expect(ctrl.config.DEFAULT_GESTURE_TIMEOUT_MS).toBe(GLASSES_CONFIG.DEFAULT_GESTURE_TIMEOUT_MS);
+    expect(ctrl.config.DEFAULT_FONT_SIZE).toBe(GLASSES_CONFIG.DEFAULT_FONT_SIZE);
+    expect(ctrl.config.DEFAULT_GESTURE_CONFIDENCE).toBe(GLASSES_CONFIG.DEFAULT_GESTURE_CONFIDENCE);
+    expect(ctrl.config.DEFAULT_NOD_CONFIDENCE).toBe(GLASSES_CONFIG.DEFAULT_NOD_CONFIDENCE);
+    expect(ctrl.config.DEFAULT_SHAKE_CONFIDENCE).toBe(GLASSES_CONFIG.DEFAULT_SHAKE_CONFIDENCE);
   });
 
   test('state constants are exported and correct', () => {
@@ -34,12 +35,12 @@ describe('GlassesController', () => {
   });
 
   test('CONSTANTS exports expected keys', () => {
-    expect(CONSTANTS.COLOR_ATTENTION).toBe('#FFFF00');
-    expect(CONSTANTS.COLOR_CONFIRM).toBe('#00FF00');
-    expect(CONSTANTS.COLOR_WARNING).toBe('#FF8800');
-    expect(CONSTANTS.ZENOH_CAR_APPROACHING_KEY).toBe('car/approaching');
-    expect(CONSTANTS.ZENOH_CAR_CONFIRMATION_KEY).toBe('car/confirmation');
-    expect(CONSTANTS.ZENOH_GESTURE_RESPONSE_TOPIC).toBe('gesture/response');
+    expect(GLASSES_CONFIG.COLOR_ATTENTION).toBe('#FFFF00');
+    expect(GLASSES_CONFIG.COLOR_CONFIRM).toBe('#00FF00');
+    expect(GLASSES_CONFIG.COLOR_WARNING).toBe('#FF8800');
+    expect(ZENOH_TOPICS.CAR_APPROACHING).toBe('car/approaching');
+    expect(ZENOH_TOPICS.CAR_CONFIRMATION).toBe('car/confirmation');
+    expect(ZENOH_TOPICS.GESTURE_RESPONSE).toBe('gesture/response');
   });
 
   test('cleanup method exists', () => {

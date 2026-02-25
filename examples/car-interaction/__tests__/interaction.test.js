@@ -7,9 +7,9 @@ jest.mock('../../../utils/zenoh-manager', () => ({
     constructor() {
       this.messages = [];
     }
-    async start() {}
-    async stop() {}
-    setDeviceInfo() {}
+    async start() { }
+    async stop() { }
+    setDeviceInfo() { }
     async publish(topic, data) {
       this.messages.push({ topic, data });
       // Simulate message delivery
@@ -25,8 +25,8 @@ jest.mock('../../../utils/zenoh-subscriber', () => ({
     constructor() {
       this.handlers = {};
     }
-    async start() {}
-    async stop() {}
+    async start() { }
+    async stop() { }
     on(event, handler) {
       this.handlers[event] = handler;
     }
@@ -40,11 +40,11 @@ jest.mock('../../../utils/zenoh-subscriber', () => ({
 
 // Mock other dependencies that glasses controller needs
 jest.mock('../../../utils/device-manager', () => ({
-  DeviceManager: class MockDeviceManager {}
+  DeviceManager: class MockDeviceManager { }
 }));
 
 jest.mock('../../../sensors/lib/sensor-manager', () => ({
-  SensorManager: class MockSensorManager {}
+  SensorManager: class MockSensorManager { }
 }));
 
 jest.mock('../../../sensors/lib/ml-gesture-detector', () => {
@@ -76,56 +76,60 @@ describe('Car-Glasses Interaction', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    
+
     // Create instances
     car = new CarSimulator();
     glasses = new GlassesController();
-    
+
     // Set glasses to demo mode to avoid complex display operations
     glasses.demoMode = true;
-    
+
     // Mock console to avoid noise
     jest.spyOn(console, 'log').mockImplementation();
     jest.spyOn(console, 'error').mockImplementation();
-    
+
     // Initialize car simulator (this sets up zenohPublisher)
     await car.initialize();
-    
+
     // Mock dependencies for glasses that are set during initialization
-    glasses.mlDetector = { reset: jest.fn(), on: jest.fn(), addSample: jest.fn() };
-    glasses.textDisplay = { 
-      showText: jest.fn().mockResolvedValue(undefined), 
-      clear: jest.fn().mockResolvedValue(undefined), 
-      loadFont: jest.fn().mockResolvedValue(undefined) 
+    glasses.glasses = {
+      stopWaitingForGesture: jest.fn(),
+      startWaitingForGesture: jest.fn(),
+      showMessage: jest.fn().mockResolvedValue(undefined),
+      clearDisplay: jest.fn().mockResolvedValue(undefined),
+      waitForDemoGesture: jest.fn().mockReturnValue(new Promise(() => { })),
+      device: { bluetoothId: 'test-id', name: 'Test Device' }
     };
-    glasses.zenohPublisher = { 
-      publish: jest.fn().mockResolvedValue(undefined), 
-      start: jest.fn().mockResolvedValue(undefined), 
-      setDeviceInfo: jest.fn() 
+    glasses.network = {
+      publish: jest.fn().mockResolvedValue(undefined),
+      start: jest.fn().mockResolvedValue(undefined),
+      setDeviceInfo: jest.fn(),
+      onMessage: jest.fn(),
+      cleanup: jest.fn()
     };
-    glasses.zenohSubscriber = { 
-      on: jest.fn(), 
-      start: jest.fn().mockResolvedValue(undefined), 
-      stop: jest.fn().mockResolvedValue(undefined) 
+
+    // Set up mock network client for car
+    car.network = {
+      publish: jest.fn(),
+      onMessage: jest.fn(),
+      start: jest.fn(),
+      cleanup: jest.fn()
     };
-    glasses.device = { bluetoothId: 'test-id', name: 'Test Device' };
-    
-    // Set up mock zenoh publisher for car too (override the real one created in initialize)
-    car.zenohPublisher = { publish: jest.fn() };
-    car.zenohSubscriber = { on: jest.fn(), start: jest.fn(), stop: jest.fn() };
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     jest.clearAllTimers();
     console.log.mockRestore();
     console.error.mockRestore();
+    if (glasses && glasses.cleanup) await glasses.cleanup();
+    if (car && car.cleanup) await car.cleanup();
   });
 
   test('full interaction: car approaches, user nods, car stops', async () => {
     // Setup initial states
     car.isWaitingForResponse = false;
     glasses.state = 'idle';
-    
+
     // Simulate approach message sent
     const approachData = {
       ts: Date.now(),
@@ -133,48 +137,48 @@ describe('Car-Glasses Interaction', () => {
       type: "question",
       approachId: 1
     };
-    
+
     // Glasses receives approach
-    glasses._handleZenohMessage({ 
-      key: 'car/approaching', 
-      payload: approachData 
-    });
-    
+    glasses._handleZenohMessage(
+      'car/approaching',
+      approachData
+    );
+
     // Verify glasses state changed
     expect(glasses.state).toBe('waiting_for_gesture');
     expect(glasses.currentQuestion).toBe("Car approaching. Allow to stop?");
-    
+
     // User nods (gesture detected) - simulate car waiting for response
     car.isWaitingForResponse = true;
-    
+
     // Set up the promise mechanism that _handleGestureResponse expects
     const mockResolve = jest.fn();
     car._responseResolve = mockResolve;
-    
+
     const gestureData = {
       ts: Date.now(),
       gesture: 'nod',
       device: { id: 'test-glasses', name: 'Test' }
     };
-    
+
     // Car receives gesture
-    car._handleGestureResponse({ payload: gestureData });
-    
+    car._handleGestureResponse(gestureData);
+
     // Verify promise was resolved
     expect(mockResolve).toHaveBeenCalledWith(true);
-    
+
     // Manually set the flag since we're not running the full async flow
     car.isWaitingForResponse = false;
-    
+
     // Verify car publishes confirmation (should have been called by _sendConfirmation)
-    expect(car.zenohPublisher.publish).toHaveBeenCalledWith(
-      'car/confirmation', 
+    expect(car.network.publish).toHaveBeenCalledWith(
+      'car/confirmation',
       expect.objectContaining({
         gesture: 'nod',
         action: 'STOPPING'
       })
     );
-    
+
     // Car sends confirmation
     const confirmData = {
       ts: Date.now(),
@@ -182,17 +186,20 @@ describe('Car-Glasses Interaction', () => {
       gesture: 'nod',
       action: 'STOPPING'
     };
-    
+
     // Glasses receives confirmation
-    const confirmPromise = glasses._handleZenohMessage({
-      key: 'car/confirmation',
-      payload: confirmData
-    });
-    
+    const confirmPromise = glasses._handleZenohMessage(
+      'car/confirmation',
+      confirmData
+    );
+
     // Fast-forward timers to complete the async operations in _handleCarConfirmation
-    jest.runAllTimers();
+    for (let i = 0; i < 5; i++) {
+      jest.runAllTimers();
+      await Promise.resolve();
+    }
     await confirmPromise;
-    
+
     // Verify final state
     expect(glasses.state).toBe('idle');
     expect(car.isWaitingForResponse).toBe(false);
@@ -201,32 +208,32 @@ describe('Car-Glasses Interaction', () => {
   test('timeout scenario: car approaches, no response, car proceeds', async () => {
     // Use real timers for this test to avoid hanging
     jest.useRealTimers();
-    
+
     // Setup initial states
     car.isWaitingForResponse = true;
     glasses.state = 'waiting_for_gesture';
-    
+
     // Simulate timeout (no gesture within 8 seconds)
     await glasses._handleGestureTimeout();
-    
+
     // Verify timeout response sent
-    expect(glasses.zenohPublisher.publish).toHaveBeenCalledWith(
+    expect(glasses.network.publish).toHaveBeenCalledWith(
       'gesture/response',
       expect.objectContaining({ gesture: 'timeout' })
     );
-    
+
     expect(glasses.state).toBe('idle');
-    
+
     // Car handles timeout - set up promise mechanism
     const mockResolve = jest.fn();
     car._responseResolve = mockResolve;
-    car._handleGestureResponse({ payload: { gesture: 'timeout' } });
-    
+    car._handleGestureResponse({ gesture: 'timeout' });
+
     // Verify promise resolved and manually set state
     expect(mockResolve).toHaveBeenCalledWith(true);
     car.isWaitingForResponse = false;
     expect(car.isWaitingForResponse).toBe(false);
-    
+
     // Restore fake timers for other tests
     jest.useFakeTimers();
   }, 10000);
@@ -235,61 +242,64 @@ describe('Car-Glasses Interaction', () => {
     // Setup interaction
     glasses.state = 'waiting_for_gesture';
     car.isWaitingForResponse = true;
-    
+
     // Set up promise mechanism
     const mockResolve = jest.fn();
     car._responseResolve = mockResolve;
-    
+
     // User shakes head (no)
     const shakeData = {
       gesture: 'shake',
       ts: Date.now(),
       device: { id: 'test-glasses' }
     };
-    
+
     // Car receives shake
-    car._handleGestureResponse({ payload: shakeData });
-    
+    car._handleGestureResponse(shakeData);
+
     // Verify promise resolved and manually set state
     expect(mockResolve).toHaveBeenCalledWith(true);
     car.isWaitingForResponse = false;
-    
+
     // Car sends proceeding confirmation
     const confirmData = {
       message: "Car will proceed. Stay safe!",
       gesture: 'shake',
       action: 'PROCEEDING'
     };
-    
-    const confirmPromise = glasses._handleZenohMessage({
-      key: 'car/confirmation',
-      payload: confirmData
-    });
-    
+
+    const confirmPromise = glasses._handleZenohMessage(
+      'car/confirmation',
+      confirmData
+    );
+
     // Fast-forward timers to complete async operations
-    jest.runAllTimers();
+    for (let i = 0; i < 5; i++) {
+      jest.runAllTimers();
+      await Promise.resolve();
+    }
     await confirmPromise;
-    
+
     expect(glasses.state).toBe('idle');
   });
 
   test('busy state: glasses ignore second car while handling first', async () => {
     // First car approaches
     glasses.state = 'idle';
-    glasses._handleZenohMessage({
-      key: 'car/approaching',
-      payload: { message: "First car approaching" }
-    });
-    
+    glasses._handleZenohMessage(
+      'car/approaching',
+      { message: "First car approaching" }
+    );
+
     expect(glasses.state).toBe('waiting_for_gesture');
     expect(glasses.currentQuestion).toBe("First car approaching");
-    
+
     // Second car tries to approach
     glasses._handleZenohMessage({
-      key: 'car/approaching', 
+      key: 'car/approaching',
       payload: { message: "Second car approaching" }
     });
-    
+
     // Should ignore second approach
     expect(glasses.state).toBe('waiting_for_gesture');
     expect(glasses.currentQuestion).toBe("First car approaching"); // unchanged
@@ -298,20 +308,20 @@ describe('Car-Glasses Interaction', () => {
   test('malformed message handling', () => {
     // Invalid JSON payload
     expect(() => {
-      glasses._handleZenohMessage({
-        key: 'car/approaching',
-        payload: '{"invalid": json}'
-      });
+      glasses._handleZenohMessage(
+        'car/approaching',
+        '{"invalid": json}'
+      );
     }).not.toThrow();
-    
+
     // Missing gesture field
     expect(() => {
-      car._handleGestureResponse({ payload: { ts: Date.now() } });
+      car._handleGestureResponse({ ts: Date.now() });
     }).not.toThrow();
-    
+
     // Car should still be waiting (invalid response ignored)
     car.isWaitingForResponse = true;
-    car._handleGestureResponse({ payload: {} });
+    car._handleGestureResponse({});
     expect(car.isWaitingForResponse).toBe(true);
   });
 });

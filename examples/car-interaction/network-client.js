@@ -1,0 +1,115 @@
+const { ZenohManager } = require("../../utils/zenoh-manager");
+const { ZenohSubscriber } = require("../../utils/zenoh-subscriber");
+const fs = require('fs');
+
+/**
+ * Wraps Zenoh Publisher and Subscriber logic into a single Network Client
+ */
+class NetworkClient {
+  /**
+   * @param {Object} options 
+   * @param {string} options.pubPrefix - The prefix for the Zenoh Publisher (e.g. "car", "gesture")
+   * @param {string} options.subExpression - The expression for the Zenoh Subscriber (e.g. "car/**", "gesture/response")
+   * @param {string} options.pubUdsPath - Internal Unix Domain Socket path for the publisher
+   * @param {string} options.subUdsPath - Internal Unix Domain Socket path for the subscriber
+   */
+  constructor(options) {
+    this.options = options;
+    this.publisher = null;
+    this.subscriber = null;
+    this.onMessageCallback = null;
+  }
+
+  /**
+   * Set the message handler callback
+   * @param {Function} callback (topic, payload) => void
+   */
+  onMessage(callback) {
+    this.onMessageCallback = callback;
+  }
+
+  async start() {
+    // Initialize Zenoh publisher
+    this.publisher = new ZenohManager({
+      keyPrefix: this.options.pubPrefix,
+      udsPath: this.options.pubUdsPath,
+    });
+
+    await this.publisher.start();
+
+    // Initialize Zenoh subscriber
+    this.subscriber = new ZenohSubscriber({
+      keyExpression: this.options.subExpression,
+      udsPath: this.options.subUdsPath,
+    });
+
+    this.subscriber.on("message", (msg) => {
+      if (this.onMessageCallback) {
+        const { key, payload } = msg;
+        let parsedPayload = payload;
+
+        // Validate & Parse JSON Payload safely
+        if (typeof payload === 'string') {
+          try {
+            parsedPayload = JSON.parse(payload);
+          } catch (e) {
+            console.error(`[NetworkClient] Error parsing Zenoh payload for key ${key}:`, e.message);
+            return;
+          }
+        }
+        this.onMessageCallback(key, parsedPayload);
+      }
+    });
+
+    this.subscriber.on("error", (err) => {
+      console.error("[NetworkClient] Zenoh subscriber error:", err.message);
+    });
+
+    await this.subscriber.start();
+  }
+
+  /**
+   * Used for wearable devices to assert identification metadata
+   * @param {Object} deviceInfo {id, name}
+   */
+  setDeviceInfo(deviceInfo) {
+    if (this.publisher) {
+      this.publisher.setDeviceInfo(deviceInfo);
+    }
+  }
+
+  /**
+   * Publish a message
+   * @param {string} topic 
+   * @param {Object} data 
+   */
+  async publish(topic, data) {
+    if (!this.publisher) {
+      throw new Error("Publisher not initialized");
+    }
+    await this.publisher.publish(topic, data);
+  }
+
+  async cleanup() {
+    try {
+      if (this.subscriber) {
+        await this.subscriber.stop();
+      }
+      if (this.publisher) {
+        await this.publisher.stop();
+      }
+
+      // Cleanup potential orphaned socket files
+      if (fs.existsSync(this.options.pubUdsPath)) {
+        fs.unlinkSync(this.options.pubUdsPath);
+      }
+      if (fs.existsSync(this.options.subUdsPath)) {
+        fs.unlinkSync(this.options.subUdsPath);
+      }
+    } catch (e) {
+      console.error("[NetworkClient] Cleanup error:", e.message);
+    }
+  }
+}
+
+module.exports = { NetworkClient };
