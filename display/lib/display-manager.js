@@ -360,13 +360,30 @@ class DisplayManager {
             }
         }
 
-        // Set the display's palette colors (global)
-        const colorSetupStartTime = enableTiming ? performance.now() : 0;
-        for (let i = 0; i < paletteHex.length; i++) {
-            await this.device.setDisplayColor(i, paletteHex[i]);
+        // Map bitmap colors to the device's 16-color global palette to prevent color shifting
+        if (!this._devicePaletteCache) {
+            this._devicePaletteCache = new Array(16).fill(null);
+            this._devicePaletteNext = 0;
         }
-        // Map bitmap indices to display color indices (identity mapping)
-        const bitmapColorPairs = paletteHex.map((_, i) => ({ bitmapColorIndex: i, colorIndex: i }));
+
+        const colorSetupStartTime = enableTiming ? performance.now() : 0;
+        const bitmapColorPairs = [];
+
+        for (let i = 0; i < paletteHex.length; i++) {
+            const hex = paletteHex[i];
+            let colorIndex = this._devicePaletteCache.indexOf(hex);
+
+            if (colorIndex === -1) {
+                // Color not in cache, allocate a new index (0-15)
+                colorIndex = this._devicePaletteNext;
+                this._devicePaletteCache[colorIndex] = hex;
+                this._devicePaletteNext = (this._devicePaletteNext + 1) % 16;
+                // Update the hardware's global palette at this index
+                await this.device.setDisplayColor(colorIndex, hex);
+            }
+            bitmapColorPairs.push({ bitmapColorIndex: i, colorIndex });
+        }
+
         if (bitmapColorPairs.length) {
             await this.device.selectDisplayBitmapColors(bitmapColorPairs);
         }

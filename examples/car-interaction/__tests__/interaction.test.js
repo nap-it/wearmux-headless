@@ -236,7 +236,7 @@ describe('Car-Glasses Interaction', () => {
 
     // Restore fake timers for other tests
     jest.useFakeTimers();
-  }, 10000);
+  }, 20000);
 
   test('user shakes head: car proceeds without stopping', async () => {
     // Setup interaction

@@ -143,8 +143,9 @@ class GlassesController {
 
         this.glasses.stopWaitingForGesture();
 
-        const feedbackMessage = gesture === "nod" ? "Sent: YES" : gesture === "shake" ? "Sent: NO" : "Sent: " + gesture;
-        await this.glasses.showMessage(feedbackMessage, { color: this.config.COLOR_CONFIRM, clearBefore: true });
+        const feedbackMessage = gesture === "nod" ? "\nSent: YES\n" : gesture === "shake" ? "\nSent: NO\n" : "\nSent: " + gesture + "\n";
+        const msgColor = gesture === "nod" ? this.config.COLOR_CONFIRM : gesture === "shake" ? this.config.COLOR_WARNING : this.config.COLOR_CONFIRM;
+        await this.glasses.showMessage(feedbackMessage, { color: msgColor });
 
         await this._sendGestureResponse(gesture);
 
@@ -179,7 +180,7 @@ class GlassesController {
         await new Promise(r => setTimeout(r, this.config.TIMEOUT_DISPLAY_MS));
 
         this.state = STATE.IDLE;
-        await this.glasses.showMessage(this.config.MSG_READY);
+        await this.glasses.clearDisplay();
     }
 
     async _handleCarConfirmation(payload) {
@@ -211,7 +212,7 @@ class GlassesController {
             this.clearDisplayTimeout = null;
         }, 5000);
 
-        await this.glasses.showMessage(this.config.MSG_READY);
+        await this.glasses.clearDisplay();
         this.state = STATE.IDLE;
         console.log("Ready for next interaction\n");
     }

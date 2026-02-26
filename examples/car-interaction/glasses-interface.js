@@ -153,6 +153,7 @@ class GlassesInterface {
       await this.textDisplay.showText(text, {
         align: "center",
         valign: "middle",
+        pixelDepth: 1, // 1-bit color depth reduces BLE payload
         ...options
       });
     } catch (err) {
