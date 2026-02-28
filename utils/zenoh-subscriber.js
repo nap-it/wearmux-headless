@@ -23,13 +23,13 @@ class ZenohSubscriber extends EventEmitter {
 
     async start() {
         if (this._child) return;
-        
+
         // Start UDS server first
         await this._startUDSServer();
-        
+
         // Start Python subscriber sidecar
         await this._startPythonBridge();
-        
+
         this.emit("ready");
     }
 
@@ -37,19 +37,19 @@ class ZenohSubscriber extends EventEmitter {
         return new Promise((resolve, reject) => {
             const server = net.createServer((socket) => {
                 this._udsSocket = socket;
-                
+
                 let buffer = Buffer.alloc(0);
-                
+
                 socket.on("data", (chunk) => {
                     buffer = Buffer.concat([buffer, chunk]);
-                    
+
                     // Try to decode messages
                     while (buffer.length > 0) {
                         try {
                             const decoded = msgpack.decodeMulti(buffer);
                             for (const msg of decoded) {
                                 buffer = Buffer.alloc(0); // Reset buffer after successful decode
-                                
+
                                 if (msg && msg.key && msg.payload) {
                                     // Parse JSON payload
                                     let payload = msg.payload;
@@ -60,7 +60,7 @@ class ZenohSubscriber extends EventEmitter {
                                             // Keep as string if not JSON
                                         }
                                     }
-                                    
+
                                     // Emit message event
                                     this.emit("message", {
                                         key: msg.key,
@@ -74,21 +74,21 @@ class ZenohSubscriber extends EventEmitter {
                         }
                     }
                 });
-                
+
                 socket.on("error", (err) => {
                     this.emit("error", new Error(`UDS socket error: ${err.message}`));
                 });
-                
+
                 socket.on("close", () => {
                     this._udsSocket = null;
                 });
             });
-            
+
             server.listen(this._udsPath, () => {
                 this._udsServer = server;
                 resolve();
             });
-            
+
             server.on("error", (err) => {
                 reject(new Error(`UDS server error: ${err.message}`));
             });
@@ -97,19 +97,24 @@ class ZenohSubscriber extends EventEmitter {
 
     async _startPythonBridge() {
         const script = path.resolve(__dirname, "../tools/zenoh_py_subscriber_bridge.py");
-        const pyBin = "python3";
+        const fs = require("fs");
+        let pyBin = "python3";
+        const venvPyBin = path.resolve(__dirname, "../venv/bin/python3");
+        if (fs.existsSync(venvPyBin)) {
+            pyBin = venvPyBin;
+        }
         const args = ["-u", script, this.keyExpression, this._udsPath];
-        
+
         const child = spawn(pyBin, args, {
             stdio: ["ignore", "pipe", "inherit"],
         });
-        
+
         this._child = child;
-        
+
         child.on("error", (err) => {
             this.emit("error", new Error(`Python subscriber error: ${err.message}`));
         });
-        
+
         child.on("exit", (code, signal) => {
             if (code !== 0) {
                 this.emit("error", new Error(`Python subscriber exited with code ${code}`));
@@ -117,7 +122,7 @@ class ZenohSubscriber extends EventEmitter {
             this._child = null;
             this._childReady = false;
         });
-        
+
         // Wait for readiness
         await new Promise((resolve) => {
             const onData = (chunk) => {
@@ -139,17 +144,17 @@ class ZenohSubscriber extends EventEmitter {
                 this._udsSocket.destroy();
                 this._udsSocket = null;
             }
-            
+
             if (this._udsServer) {
                 this._udsServer.close();
                 this._udsServer = null;
             }
-            
+
             if (this._child) {
                 this._child.kill("SIGTERM");
                 this._child = null;
             }
-            
+
             this._childReady = false;
         } catch (e) {
             this.emit("error", e);

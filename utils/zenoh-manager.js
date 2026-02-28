@@ -41,7 +41,12 @@ class ZenohManager extends EventEmitter {
 
     async _startDenoBridge() { // historical name; starts the Python sidecar
         const script = path.resolve(__dirname, "../tools/zenoh_py_publisher.py");
-        const pyBin = "python3";
+        const fs = require("fs");
+        let pyBin = "python3";
+        const venvPyBin = path.resolve(__dirname, "../venv/bin/python3");
+        if (fs.existsSync(venvPyBin)) {
+            pyBin = venvPyBin;
+        }
         const args = ["-u", script]; // -u = unbuffered stdin/stdout
         const env = { ...process.env };
         env.ZENOH_UDS_PATH = this._udsPath;
@@ -89,17 +94,17 @@ class ZenohManager extends EventEmitter {
     async stop() {
         try {
             await this.detachAll(this._sensorManager);
-        } catch {}
+        } catch { }
         try {
             if (this._udsSocket) {
-                try { this._udsSocket.end(); } catch {}
-                try { this._udsSocket.destroy(); } catch {}
+                try { this._udsSocket.end(); } catch { }
+                try { this._udsSocket.destroy(); } catch { }
                 this._udsSocket = null;
             }
             await new Promise((r) => setTimeout(r, 100));
             try {
                 this._child?.kill("SIGTERM");
-            } catch {}
+            } catch { }
         } catch (e) {
             this.emit("error", e);
         } finally {
@@ -174,7 +179,7 @@ class ZenohManager extends EventEmitter {
                     name: dev.name || undefined,
                 });
             }
-        } catch {}
+        } catch { }
 
         sensors.forEach((sensorType) => {
             const key = this._topicFor(sensorType);
@@ -183,7 +188,7 @@ class ZenohManager extends EventEmitter {
                 if (this._udsSocket) {
                     this._udsSocket.write(Buffer.from(msgpack.encode({ key, declare: true })));
                 }
-            } catch {}
+            } catch { }
             const handler = async (event) => {
                 // Prefer the plain message payload to avoid circular refs
                 const safeMessage = event && typeof event === "object" ? event.message ?? null : null;
@@ -216,10 +221,10 @@ class ZenohManager extends EventEmitter {
             for (const [sensorType, handler] of this._attachedHandlers.entries()) {
                 try {
                     sm.off?.(sensorType, handler);
-                } catch {}
+                } catch { }
                 try {
                     sm.removeListener?.(sensorType, handler);
-                } catch {}
+                } catch { }
             }
         }
         this._attachedHandlers.clear();

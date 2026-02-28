@@ -17,8 +17,14 @@ class DeviceManager extends EventEmitter {
         this._reconnecting = false;
         this._lastFilters = { id: "", name: "" };
 
+        const os = require("os");
+
         // Check if we should use custom Noble implementation
-        this._useCustomNoble = process.env.USE_CUSTOM_NOBLE === 'true' || process.env.USE_CUSTOM_NOBLE === '1';
+        const bEnvVar = process.env.USE_CUSTOM_NOBLE === 'true' || process.env.USE_CUSTOM_NOBLE === '1';
+        this._useCustomNoble = process.env.USE_CUSTOM_NOBLE !== undefined
+            ? bEnvVar
+            : os.platform() === "linux";
+
         if (this._useCustomNoble) {
             const { NobleDeviceManager } = require('./noble-device-manager');
             this._nobleManager = new NobleDeviceManager();
