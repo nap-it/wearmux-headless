@@ -19,10 +19,11 @@ class MLGestureDetector extends EventEmitter {
 
     // Call this with each new sensor reading
     addSample(sensorData) {
-        // sensorData: { accX, accY, accZ, heading, pitch, roll }
+        // sensorData: { accX, accY, accZ } — scaled by 1/4 to match SDK training format
         this.buffer.push([
-            sensorData.accX, sensorData.accY, sensorData.accZ,
-            sensorData.heading, sensorData.pitch, sensorData.roll
+            sensorData.accX / 4,
+            sensorData.accY / 4,
+            sensorData.accZ / 4,
         ]);
         if (this.buffer.length > this.windowSize) {
             this.buffer.shift();

@@ -44,53 +44,14 @@ async function main() {
     console.log('Device connected!');
 
     // Start sensor manager
-    const sensorManager = new SensorManager(device, { enabledSensors: ['acceleration', 'orientation'] });
-    let latestAcc = null;
+    const sensorManager = new SensorManager(device, { enabledSensors: ['acceleration'] });
 
-    // Listen for all events (if supported)
-    if (typeof sensorManager.onAny === 'function') {
-        sensorManager.onAny((eventName, event) => {
-            if (isDebugMode) {
-                console.log(`[DEBUG] Event: ${eventName}`, event);
-            }
-        });
-    } else if (typeof sensorManager.on === 'function') {
-        // Fallback: try wildcard event name if supported
-        try {
-            sensorManager.on('*', (eventName, event) => {
-                if (isDebugMode) {
-                    console.log(`[DEBUG] Event: ${eventName}`, event);
-                }
-            });
-        } catch (e) {
-            if (isDebugMode) {
-                console.log('[DEBUG] Wildcard event listener not supported.');
-            }
-        }
-    }
-
-    // Keep original handlers for acceleration/orientation
     sensorManager.on('acceleration', (event) => {
         if (isDebugMode) {
             console.log('[DEBUG] Acceleration event:', event.message);
         }
-        latestAcc = event.message.acceleration;
-    });
-
-    sensorManager.on('orientation', (event) => {
-        if (isDebugMode) {
-            console.log('[DEBUG] Orientation event:', event.message);
-        }
-        if (latestAcc && event.message.orientation) {
-            detector.addSample({
-                accX: latestAcc.x,
-                accY: latestAcc.y,
-                accZ: latestAcc.z,
-                heading: event.message.orientation.heading,
-                pitch: event.message.orientation.pitch,
-                roll: event.message.orientation.roll
-            });
-        }
+        const { x, y, z } = event.message.acceleration;
+        detector.addSample({ accX: x, accY: y, accZ: z });
     });
 
     // Start sensors and log
