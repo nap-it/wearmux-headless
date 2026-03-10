@@ -1,10 +1,6 @@
 // Edge Impulse Classifier module for programmatic use
-const Module = require('../model/edge-impulse-standalone');
-
+let Module = null;
 let classifierInitialized = false;
-Module.onRuntimeInitialized = function() {
-    classifierInitialized = true;
-};
 
 class EdgeImpulseClassifier {
     _initialized = false;
@@ -13,6 +9,14 @@ class EdgeImpulseClassifier {
         if (classifierInitialized === true) return Promise.resolve();
 
         return new Promise((resolve, reject) => {
+            try {
+                if (!Module) {
+                    Module = require('../model/edge-impulse-standalone');
+                }
+            } catch (err) {
+                return reject(new Error('Edge Impulse model not found: ' + err.message));
+            }
+
             Module.onRuntimeInitialized = () => {
                 classifierInitialized = true;
                 let ret = Module.init();
@@ -21,6 +25,11 @@ class EdgeImpulseClassifier {
                 }
                 resolve();
             };
+
+            // If it's already initialized by someone else or quickly
+            if (Module.calledRun) {
+                 Module.onRuntimeInitialized();
+            }
         });
     }
 

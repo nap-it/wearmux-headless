@@ -9,7 +9,11 @@ class MLGestureDetector extends EventEmitter {
         this.buffer = [];
         this.classifier = new EdgeImpulseClassifier();
         this.initialized = false;
-        this._init();
+        this.initError = null;
+        this._init().catch(err => {
+            this.initError = err;
+            console.warn("ML initialization failed:", err.message);
+        });
     }
 
     async _init() {
