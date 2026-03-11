@@ -31,7 +31,7 @@ FROM node:20-bookworm-slim AS runtime
 
 # Install runtime dependencies only (no build tools)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-venv \
+    python3 python3-venv ffmpeg \
     libudev1 libbluetooth3 bluez libglib2.0-0 \
     ca-certificates tini \
     && rm -rf /var/lib/apt/lists/* \
@@ -78,4 +78,3 @@ ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default command
 CMD ["node", "tools/launcher.js", "--config", "/config/config.ini"]
-

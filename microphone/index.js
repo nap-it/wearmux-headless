@@ -15,12 +15,31 @@
 
 const { DeviceManager } = require('../utils/device-manager');
 const { calculateRMS, calculatePeak, formatLevelBar } = require('./lib/audio-utils');
+const { RtspPublisher } = require("./lib/rtsp-publisher");
 const { ZenohManager } = require("../utils/zenoh-manager");
-const readline = require("readline");
 
 // Configuration
-const SAMPLE_RATE = process.env.SAMPLE_RATE || '16000';
+const SAMPLE_RATE = Number(process.env.SAMPLE_RATE || "16000");
 const BIT_DEPTH = process.env.BIT_DEPTH || '16';
+const CHANNELS = Math.max(1, Number(process.env.CHANNELS || "1"));
+const SAMPLE_FORMAT = process.env.SAMPLE_FORMAT || "s16le";
+const AUDIO_BITRATE = process.env.AUDIO_BITRATE || "64k";
+const RTSP_URL = process.env.RTSP_URL || "";
+const RTSP_ENABLED = process.env.RTSP_ENABLE !== "0" && Boolean(RTSP_URL);
+
+function normalizeRtspPublishUrl(url) {
+  if (!url) return { url, normalized: false };
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "0.0.0.0") {
+      return { url, normalized: false };
+    }
+    parsed.hostname = "0.0.0.0";
+    return { url: parsed.toString(), normalized: true };
+  } catch {
+    return { url, normalized: false };
+  }
+}
 
 async function main() {
   console.log('BrilliantSole Frame - Microphone Streaming\n');
@@ -37,6 +56,22 @@ async function main() {
   const zenohRawChunkSize = Math.max(1024, Number(process.env.ZENOH_RAW_CHUNK_SIZE || 30000));
   const zenohRawThrottleMs = Math.max(0, Number(process.env.ZENOH_MIC_RAW_THROTTLE_MS || 200));
   let lastRawPublishAt = 0;
+  const publishRtsp = normalizeRtspPublishUrl(RTSP_URL);
+  const rtsp = RTSP_ENABLED
+    ? new RtspPublisher({
+        rtspUrl: publishRtsp.url,
+        ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
+        ffmpegLogLevel: process.env.FFMPEG_LOGLEVEL || "error",
+        sampleRate: SAMPLE_RATE,
+        channels: CHANNELS,
+        sampleFormat: SAMPLE_FORMAT,
+        audioBitrate: AUDIO_BITRATE,
+      })
+    : null;
+  let isShuttingDown = false;
+  let sampleCount = 0;
+  let totalDuration = 0;
+  let device = null;
 
   async function publishRawAudio(samples, meta) {
     if (!zenohRawEnabled) return;
@@ -71,10 +106,59 @@ async function main() {
     }
   }
 
+  async function shutdown({ exitCode = 0, error = null } = {}) {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    if (error) {
+      console.error(`\n[RTSP] ${error.message}`);
+    }
+
+    console.log('\n\nStopping microphone...');
+    try {
+      if (device) {
+        await device.stopMicrophone();
+        console.log('Microphone stopped.');
+      }
+      console.log(`\nTotal duration: ${totalDuration.toFixed(1)}s`);
+      console.log(`Total samples: ${sampleCount}`);
+      if (zenoh) {
+        try {
+          await zenoh.publish(`${zenoh.keyPrefix}/status`, {
+            ts: Date.now(),
+            device: { id: device.bluetoothId || device.id, name: device.name },
+            status: exitCode === 0 ? "stopped" : "error",
+            totalDuration,
+            totalSamples: sampleCount,
+            error: error?.message || null,
+          });
+        } catch {}
+      }
+    } catch (stopError) {
+      console.error('Error stopping microphone:', stopError.message);
+    }
+
+    if (rtsp) {
+      try {
+        await rtsp.stop();
+      } catch (rtspError) {
+        console.error('[RTSP] Error stopping publisher:', rtspError.message);
+      }
+    }
+
+    if (zenoh) {
+      try {
+        await zenoh.stop();
+      } catch {}
+    }
+
+    process.exit(exitCode);
+  }
+
   // Connect to device
   console.log('Connecting to device...');
   const deviceManager = new DeviceManager();
-  const device = await deviceManager.connectToDevice();
+  device = await deviceManager.connectToDevice();
   console.log('Device connected.\n');
 
   if (zenoh) {
@@ -100,7 +184,7 @@ async function main() {
   // Configure microphone
   console.log(`Configuring microphone: ${SAMPLE_RATE}Hz, ${BIT_DEPTH}-bit`);
   await device.setMicrophoneConfiguration({
-    sampleRate: SAMPLE_RATE,
+    sampleRate: String(SAMPLE_RATE),
     bitDepth: BIT_DEPTH
   });
 
@@ -109,9 +193,17 @@ async function main() {
 
   console.log('Microphone configured.\n');
 
-  // Audio level tracking
-  let sampleCount = 0;
-  let totalDuration = 0;
+  if (rtsp) {
+    rtsp.on("error", (error) => {
+      shutdown({ exitCode: 1, error }).catch(() => process.exit(1));
+    });
+    if (publishRtsp.normalized) {
+      console.log(`[RTSP] normalized publish target from ${RTSP_URL} to ${publishRtsp.url}`);
+    }
+    console.log(`Starting RTSP publisher: ${publishRtsp.url}`);
+    await rtsp.start();
+    console.log('RTSP publisher ready.\n');
+  }
 
   // Listen for microphone data
   device.addEventListener('microphoneData', (event) => {
@@ -124,7 +216,7 @@ async function main() {
 
     // Update statistics
     sampleCount += samples.length;
-    totalDuration = sampleCount / parseInt(sampleRate);
+    totalDuration = sampleCount / Number(sampleRate);
 
     // Print metrics on the same line, overwriting previous output
     const line =
@@ -153,6 +245,12 @@ async function main() {
         publishRawAudio(samples, meta).catch(() => {});
       }
     }
+
+    if (rtsp && samples) {
+      rtsp.write(samples).catch((error) => {
+        shutdown({ exitCode: 1, error }).catch(() => process.exit(1));
+      });
+    }
   });
 
   // Listen for microphone status changes
@@ -176,29 +274,11 @@ async function main() {
   console.log('Press Ctrl+C to stop\n');
 
   // Handle graceful shutdown
-  process.on('SIGINT', async () => {
-    console.log('\n\nStopping microphone...');
-    try {
-      await device.stopMicrophone();
-      console.log('Microphone stopped.');
-      console.log(`\nTotal duration: ${totalDuration.toFixed(1)}s`);
-      console.log(`Total samples: ${sampleCount}`);
-      if (zenoh) {
-        try {
-          await zenoh.publish(`${zenoh.keyPrefix}/status`, {
-            ts: Date.now(),
-            device: { id: device.bluetoothId || device.id, name: device.name },
-            status: "stopped",
-            totalDuration,
-            totalSamples: sampleCount,
-          });
-        } catch {}
-        try { await zenoh.stop(); } catch {}
-      }
-    } catch (error) {
-      console.error('Error stopping microphone:', error.message);
-    }
-    process.exit(0);
+  process.on('SIGINT', () => {
+    shutdown({ exitCode: 0 }).catch(() => process.exit(0));
+  });
+  process.on('SIGTERM', () => {
+    shutdown({ exitCode: 0 }).catch(() => process.exit(0));
   });
 }
 

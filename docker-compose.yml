@@ -37,6 +37,8 @@ services:
       - ./logs:/app/logs
       # Display assets (if using display module)
       - ./display/assets:/app/display/assets:ro
+      # Camera output (if using camera module)
+      - ./images:/app/images
 
     # BLE access requires special permissions
     privileged: ${PRIVILEGED:-true}
@@ -56,6 +58,18 @@ services:
 
     healthcheck:
       test: [ "CMD", "node", "-e", "console.log('healthy')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+  
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    restart: unless-stopped
+    network_mode: host # Required for RTSP access from host
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8554 || exit 1" ]
       interval: 30s
       timeout: 10s
       retries: 3
