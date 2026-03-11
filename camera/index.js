@@ -10,6 +10,10 @@ async function ensureDir(dir) {
     await fs.promises.mkdir(dir, { recursive: true });
 }
 
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function getDevice() {
     const deviceManager = new DeviceManager();
     const device = await deviceManager.connectToDevice();
@@ -29,9 +33,22 @@ async function main() {
     const redGain = config.camera.redGain;
     const greenGain = config.camera.greenGain;
     const blueGain = config.camera.blueGain;
+    const autoWhiteBalanceEnabled = config.camera.autoWhiteBalanceEnabled;
+    const autoGainEnabled = config.camera.autoGainEnabled;
+    const exposure = config.camera.exposure;
+    const autoExposureEnabled = config.camera.autoExposureEnabled;
+    const autoExposureLevel = config.camera.autoExposureLevel;
+    const brightness = config.camera.brightness;
+    const saturation = config.camera.saturation;
+    const contrast = config.camera.contrast;
+    const sharpness = config.camera.sharpness;
+    const cameraRate = config.camera.rate;
     const debug = process.env.DEBUG === "1" || process.env.CAMERA_DEBUG === "1";
     const autoCaptureDelay = parseInt(process.env.CAMERA_AUTO_DELAY || "0", 10);
     const autoFocus = process.env.CAMERA_AUTO_FOCUS !== "0"; // Enabled by default
+    const cameraCommandTimeoutMs = Math.max(0, parseInt(process.env.CAMERA_COMMAND_TIMEOUT_MS || "1500", 10));
+    const focusIdleTimeoutMs = Math.max(cameraCommandTimeoutMs, parseInt(process.env.CAMERA_FOCUS_IDLE_TIMEOUT_MS || "3000", 10));
+    const captureTimeoutMs = Math.max(1000, parseInt(process.env.CAMERA_CAPTURE_TIMEOUT_MS || "5000", 10));
 
     function debugLog(...args) {
         if (debug) console.log(...args);
@@ -97,6 +114,87 @@ async function main() {
         const device = await getDevice();
         console.log(`Connected to device: ${device.name || device.id}`);
 
+        const waitForDeviceEvent = (eventType, timeoutMs, predicate = () => true) => new Promise((resolve) => {
+            let timeout;
+            const handler = (event) => {
+                let matches = false;
+                try {
+                    matches = predicate(event);
+                } catch (error) {
+                    debugWarn(`[Camera] ${eventType} predicate failed:`, error?.message || error);
+                }
+
+                if (!matches) {
+                    return;
+                }
+
+                cleanup();
+                resolve({ timedOut: false, event });
+            };
+            const cleanup = () => {
+                if (timeout) clearTimeout(timeout);
+                device.removeEventListener(eventType, handler);
+            };
+
+            device.addEventListener(eventType, handler);
+            timeout = setTimeout(() => {
+                cleanup();
+                resolve({ timedOut: true, event: null });
+            }, timeoutMs);
+        });
+
+        const invokeCameraCommand = async (label, invoke) => {
+            const settledPromise = Promise.resolve()
+                .then(() => invoke())
+                .then(
+                    () => ({ status: "resolved" }),
+                    (error) => ({ status: "rejected", error })
+                );
+
+            const result = cameraCommandTimeoutMs > 0
+                ? await Promise.race([
+                    settledPromise,
+                    sleep(cameraCommandTimeoutMs).then(() => ({ status: "timeout" })),
+                ])
+                : await settledPromise;
+
+            if (result.status === "rejected") {
+                throw result.error;
+            }
+
+            if (result.status === "timeout") {
+                console.warn(`[WARN] ${label} did not report a camera status change within ${cameraCommandTimeoutMs}ms. Continuing and waiting for camera data.`);
+                settledPromise.then((lateResult) => {
+                    if (lateResult.status === "rejected") {
+                        console.error(`[ERROR] ${label} failed after timeout:`, lateResult.error);
+                    }
+                });
+            }
+        };
+
+        const focusCameraForCapture = async () => {
+            const focusIdlePromise = waitForDeviceEvent(
+                "cameraStatus",
+                focusIdleTimeoutMs,
+                (event) =>
+                    event?.message?.cameraStatus === "idle" &&
+                    event?.message?.previousCameraStatus === "focusing"
+            );
+
+            console.log("Focusing camera...");
+            await invokeCameraCommand("Focus command", () => device.focusCamera(cameraRate));
+
+            const focusIdle = await focusIdlePromise;
+
+            if (focusIdle.timedOut) {
+                debugWarn(`[Camera] focus did not return to idle within ${focusIdleTimeoutMs}ms; continuing with capture`);
+            }
+        };
+
+        const triggerPicture = async () => {
+            await invokeCameraCommand("Take picture command", () => device.takePicture(cameraRate));
+        };
+
         if (!device.hasCamera) {
             throw new Error("Device does not have a camera");
         }
@@ -115,30 +213,76 @@ async function main() {
         });
 
         console.log("Configuring camera...");
-        
-        const cameraConfig = {
-            resolution: resolution || 640,
-            qualityFactor: qualityFactor !== undefined ? qualityFactor : 95,
+
+        if (debug) {
+            device.addEventListener("cameraImageProgress", (event) => {
+                debugLog("[PROGRESS]", event.message.type, `${Math.round((event.message.progress || 0) * 100)}%`);
+            });
+        }
+
+        const availableCameraConfigTypes = new Set(
+            Array.isArray(device.availableCameraConfigurationTypes) && device.availableCameraConfigurationTypes.length > 0
+                ? device.availableCameraConfigurationTypes
+                : Object.keys(device.cameraConfiguration || {})
+        );
+
+        const requestedCameraConfig = {
+            resolution,
+            qualityFactor,
+            shutter,
+            gain,
+            redGain,
+            greenGain,
+            blueGain,
+            autoWhiteBalanceEnabled,
+            autoGainEnabled,
+            exposure,
+            autoExposureEnabled,
+            autoExposureLevel,
+            brightness,
+            saturation,
+            contrast,
+            sharpness,
         };
-        
-        if (shutter !== undefined) cameraConfig.shutter = shutter;
-        if (gain !== undefined) cameraConfig.gain = gain;
-        if (redGain !== undefined) cameraConfig.redGain = redGain;
-        if (greenGain !== undefined) cameraConfig.greenGain = greenGain;
-        if (blueGain !== undefined) cameraConfig.blueGain = blueGain;
-        
-        console.log("Camera config:", cameraConfig);
-        await device.setCameraConfiguration(cameraConfig);
+
+        const cameraConfig = {};
+        for (const [key, value] of Object.entries(requestedCameraConfig)) {
+            if (value === undefined) continue;
+            if (availableCameraConfigTypes.size > 0 && !availableCameraConfigTypes.has(key)) {
+                debugWarn(`[Camera] Skipping unsupported camera setting "${key}"`);
+                continue;
+            }
+            cameraConfig[key] = value;
+        }
+
+        if (availableCameraConfigTypes.size > 0) {
+            debugLog("[Camera] Available camera settings:", [...availableCameraConfigTypes].join(", "));
+        }
+        debugLog("[Camera] Current device camera config:", device.cameraConfiguration);
+
+        if (Object.keys(cameraConfig).length > 0) {
+            console.log("Applying camera config:", cameraConfig);
+            await device.setCameraConfiguration(cameraConfig);
+        } else {
+            console.log("Using device camera defaults");
+        }
+
+        debugLog("[Camera] Updated device camera config:", device.cameraConfiguration);
 
         console.log("Camera status:", device.cameraStatus);
         if (device.cameraStatus === 'asleep') {
             console.log("Waking camera...");
             await device.wakeCamera();
-            await new Promise(r => setTimeout(r, 1000));
+            await sleep(1000);
+        }
+
+        if (cameraRate !== undefined && device.sensorConfiguration?.camera !== cameraRate) {
+            console.log(`Setting camera sensor rate: ${cameraRate}`);
+            await device.setSensorConfiguration({ camera: cameraRate }, false, true);
         }
 
         console.log("Waiting for camera to stabilize...");
-        await new Promise(r => setTimeout(r, 2000));
+        await sleep(2000);
 
         let counter = 0;
         let savedCount = 0;
@@ -341,12 +485,12 @@ async function main() {
                         const triggerNext = async () => {
                             try {
                                 if (autoCaptureDelay > 0) {
-                                    await new Promise(r => setTimeout(r, autoCaptureDelay));
+                                    await sleep(autoCaptureDelay);
                                 }
                                 if (autoFocus) {
-                                    await device.focusCamera();
+                                    await focusCameraForCapture();
                                 }
-                                await device.takePicture();
+                                await triggerPicture();
                             } catch (e) {
                                 console.error("[ERROR] Failed to take next picture:", e);
                             }
@@ -375,17 +519,20 @@ async function main() {
         }
 
         if (!auto) {
-            console.log("Focusing camera first...");
-            await device.focusCamera();
-            await new Promise(r => setTimeout(r, 2000));
-            
             console.log("Taking picture...");
-            await device.takePicture();
+            if (autoFocus) {
+                await focusCameraForCapture();
+            }
+            await triggerPicture();
             
-            await Promise.race([
-                firstImagePromise,
-                new Promise((r) => setTimeout(r, 5000)),
+            const receivedFirstImage = await Promise.race([
+                firstImagePromise.then(() => true),
+                sleep(captureTimeoutMs).then(() => false),
             ]);
+
+            if (!receivedFirstImage) {
+                console.warn(`[WARN] Timed out waiting for a camera image after ${captureTimeoutMs}ms`);
+            }
             
             setTimeout(async () => {
                 await device.disconnect();
@@ -407,9 +554,9 @@ async function main() {
             // Trigger the first picture to start the auto-capture loop
             console.log("Taking first picture...");
             if (autoFocus) {
-                await device.focusCamera();
+                await focusCameraForCapture();
             }
-            await device.takePicture();
+            await triggerPicture();
 
             process.on("SIGINT", async () => {
                 console.log("\nShutting down camera...");

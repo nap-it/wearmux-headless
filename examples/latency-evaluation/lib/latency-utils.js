@@ -39,25 +39,77 @@ async function buildSolidColorFrame(width, height, color) {
         .toBuffer();
 }
 
-async function detectDominantColor(imageBuffer, options = {}) {
+function extractLikelyJpegPayload(buffer) {
+    if (!Buffer.isBuffer(buffer) || buffer.length < 4) {
+        return buffer;
+    }
+
+    let start = -1;
+    let end = -1;
+
+    for (let index = 0; index < buffer.length - 1; index += 1) {
+        if (buffer[index] === 0xff && buffer[index + 1] === 0xd8) {
+            start = index;
+            break;
+        }
+    }
+
+    for (let index = buffer.length - 2; index >= 0; index -= 1) {
+        if (buffer[index] === 0xff && buffer[index + 1] === 0xd9) {
+            end = index + 2;
+            break;
+        }
+    }
+
+    if (start === -1) {
+        return buffer;
+    }
+
+    if (end === -1 || end <= start) {
+        return buffer.slice(start);
+    }
+
+    return buffer.slice(start, end);
+}
+
+async function decodeImageForAnalysis(imageBuffer, options) {
     const analysisSize = Math.max(16, Math.round(toFiniteNumber(options.analysisSize, 96)));
+    const candidates = [imageBuffer];
+    const extracted = extractLikelyJpegPayload(imageBuffer);
+    if (extracted && extracted !== imageBuffer && extracted.length > 0) {
+        candidates.push(extracted);
+    }
+
+    let lastError = null;
+    for (const candidate of candidates) {
+        try {
+            return await sharp(candidate, { failOn: "none" })
+                .rotate()
+                .resize({
+                    width: analysisSize,
+                    height: analysisSize,
+                    fit: "inside",
+                    withoutEnlargement: true,
+                })
+                .removeAlpha()
+                .raw()
+                .toBuffer({ resolveWithObject: true });
+        } catch (error) {
+            lastError = error;
+        }
+    }
+
+    throw lastError || new Error("Failed to decode image buffer");
+}
+
+async function detectDominantColor(imageBuffer, options = {}) {
     const roiWidthRatio = clamp(toFiniteNumber(options.roiWidthRatio, 0.5), 0.05, 1);
     const roiHeightRatio = clamp(toFiniteNumber(options.roiHeightRatio, 0.5), 0.05, 1);
     const minMeanIntensity = Math.max(0, toFiniteNumber(options.minMeanIntensity, 20));
     const minDominanceRatio = Math.max(1, toFiniteNumber(options.minDominanceRatio, 1.15));
     const minChannelGap = Math.max(0, toFiniteNumber(options.minChannelGap, 12));
 
-    const { data, info } = await sharp(imageBuffer)
-        .rotate()
-        .resize({
-            width: analysisSize,
-            height: analysisSize,
-            fit: "inside",
-            withoutEnlargement: true,
-        })
-        .removeAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
+    const { data, info } = await decodeImageForAnalysis(imageBuffer, options);
 
     const region = getCentralRegion(info.width, info.height, roiWidthRatio, roiHeightRatio);
     let redSum = 0;

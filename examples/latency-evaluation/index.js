@@ -151,6 +151,107 @@ async function getDevice() {
     return new DeviceManager().connectToDevice();
 }
 
+function waitForDeviceEvent(device, eventType, timeoutMs, predicate = () => true) {
+    return new Promise((resolve) => {
+        let timeout;
+        const handler = (event) => {
+            let matches = false;
+            try {
+                matches = predicate(event);
+            } catch {}
+
+            if (!matches) {
+                return;
+            }
+
+            cleanup();
+            resolve({ timedOut: false, event });
+        };
+
+        const cleanup = () => {
+            if (timeout) clearTimeout(timeout);
+            device.removeEventListener(eventType, handler);
+        };
+
+        device.addEventListener(eventType, handler);
+        timeout = setTimeout(() => {
+            cleanup();
+            resolve({ timedOut: true, event: null });
+        }, timeoutMs);
+    });
+}
+
+async function invokeCameraCommand(device, label, invoke, timeoutMs) {
+    const settledPromise = Promise.resolve()
+        .then(() => invoke())
+        .then(
+            () => ({ status: "resolved" }),
+            (error) => ({ status: "rejected", error })
+        );
+
+    const result = timeoutMs > 0
+        ? await Promise.race([
+            settledPromise,
+            sleep(timeoutMs).then(() => ({ status: "timeout" })),
+        ])
+        : await settledPromise;
+
+    if (result.status === "rejected") {
+        throw result.error;
+    }
+
+    if (result.status === "timeout") {
+        console.warn(
+            `[WARN] ${label} did not report a camera status change within ${timeoutMs}ms. ` +
+                "Continuing and waiting for camera data."
+        );
+        settledPromise.then((lateResult) => {
+            if (lateResult.status === "rejected") {
+                console.error(`[ERROR] ${label} failed after timeout:`, lateResult.error);
+            }
+        });
+    }
+}
+
+async function focusCameraForCapture(device, options) {
+    const focusIdlePromise = waitForDeviceEvent(
+        device,
+        "cameraStatus",
+        options.focusIdleTimeoutMs,
+        (event) =>
+            event?.message?.cameraStatus === "idle" &&
+            event?.message?.previousCameraStatus === "focusing"
+    );
+
+    console.log("Focusing camera...");
+    await invokeCameraCommand(
+        device,
+        "Focus command",
+        () => device.focusCamera(options.cameraRate),
+        options.cameraCommandTimeoutMs
+    );
+
+    const focusIdle = await focusIdlePromise;
+    if (focusIdle.timedOut) {
+        console.warn(
+            `[WARN] Camera focus did not return to idle within ${options.focusIdleTimeoutMs}ms; continuing anyway.`
+        );
+    }
+
+    if (options.focusSettleMs > 0) {
+        await sleep(options.focusSettleMs);
+    }
+}
+
+async function triggerPicture(device, options) {
+    await invokeCameraCommand(
+        device,
+        "Take picture command",
+        () => device.takePicture(options.cameraRate),
+        options.cameraCommandTimeoutMs
+    );
+}
+
 async function ensureCameraReady(device, options) {
     if (!device.hasCamera) {
         throw new Error("Device does not have a camera");
@@ -169,29 +270,63 @@ async function ensureCameraReady(device, options) {
         device.addEventListener("connected", handler);
     });
 
-    const cameraConfig = {
+    const availableCameraConfigTypes = new Set(
+        Array.isArray(device.availableCameraConfigurationTypes) && device.availableCameraConfigurationTypes.length > 0
+            ? device.availableCameraConfigurationTypes
+            : Object.keys(device.cameraConfiguration || {})
+    );
+
+    const requestedCameraConfig = {
         resolution: options.cameraResolution,
         qualityFactor: options.cameraQualityFactor,
+        shutter: options.cameraShutter,
+        gain: options.cameraGain,
+        redGain: options.cameraRedGain,
+        greenGain: options.cameraGreenGain,
+        blueGain: options.cameraBlueGain,
+        autoWhiteBalanceEnabled: options.cameraAutoWhiteBalanceEnabled,
+        autoGainEnabled: options.cameraAutoGainEnabled,
+        exposure: options.cameraExposure,
+        autoExposureEnabled: options.cameraAutoExposureEnabled,
+        autoExposureLevel: options.cameraAutoExposureLevel,
+        brightness: options.cameraBrightness,
+        saturation: options.cameraSaturation,
+        contrast: options.cameraContrast,
+        sharpness: options.cameraSharpness,
     };
 
-    if (options.cameraShutter !== undefined) cameraConfig.shutter = options.cameraShutter;
-    if (options.cameraGain !== undefined) cameraConfig.gain = options.cameraGain;
-    if (options.cameraRedGain !== undefined) cameraConfig.redGain = options.cameraRedGain;
-    if (options.cameraGreenGain !== undefined) cameraConfig.greenGain = options.cameraGreenGain;
-    if (options.cameraBlueGain !== undefined) cameraConfig.blueGain = options.cameraBlueGain;
+    const cameraConfig = {};
+    for (const [key, value] of Object.entries(requestedCameraConfig)) {
+        if (value === undefined) continue;
+        if (availableCameraConfigTypes.size > 0 && !availableCameraConfigTypes.has(key)) {
+            continue;
+        }
+        cameraConfig[key] = value;
+    }
 
-    await device.setCameraConfiguration(cameraConfig);
+    if (Object.keys(cameraConfig).length > 0) {
+        console.log("Applying camera config:", cameraConfig);
+        await device.setCameraConfiguration(cameraConfig);
+    }
 
     if (device.cameraStatus === "asleep") {
-        await device.wakeCamera();
+        await invokeCameraCommand(
+            device,
+            "Wake camera command",
+            () => device.wakeCamera(),
+            options.cameraCommandTimeoutMs
+        );
+    }
+
+    if (options.cameraRate !== undefined && device.sensorConfiguration?.camera !== options.cameraRate) {
+        console.log(`Setting camera sensor rate: ${options.cameraRate}`);
+        await device.setSensorConfiguration({ camera: options.cameraRate }, false, true);
     }
 
     await sleep(options.cameraWakeDelayMs);
 
     if (options.focusAtStart) {
-        console.log("Focusing camera...");
-        await device.focusCamera(options.cameraRate);
-        await sleep(options.focusSettleMs);
+        await focusCameraForCapture(device, options);
     }
 }
 
@@ -267,7 +402,7 @@ async function captureBestImage(device, options) {
 
         (async () => {
             try {
-                await device.takePicture(options.cameraRate);
+                await triggerPicture(device, options);
             } catch (error) {
                 finish(reject, error);
             }
@@ -302,6 +437,8 @@ async function main() {
         focusAtStart: envFlag("CAMERA_LATENCY_FOCUS_AT_START", true),
         cameraWakeDelayMs: Math.max(0, envNumber("CAMERA_LATENCY_CAMERA_WAKE_DELAY_MS", 1500)),
         focusSettleMs: Math.max(0, envNumber("CAMERA_LATENCY_FOCUS_SETTLE_MS", 1200)),
+        cameraCommandTimeoutMs: Math.max(0, envNumber("CAMERA_COMMAND_TIMEOUT_MS", 1500)),
+        focusIdleTimeoutMs: Math.max(0, envNumber("CAMERA_FOCUS_IDLE_TIMEOUT_MS", 3000)),
         cameraRate: Math.max(1, envNumber("CAMERA_LATENCY_CAMERA_RATE", config.camera.rate || 10)),
         outputPath: process.env.CAMERA_LATENCY_OUTPUT || "",
         screenHost: process.env.CAMERA_LATENCY_SCREEN_HOST || "0.0.0.0",
@@ -315,6 +452,15 @@ async function main() {
         cameraRedGain: config.camera.redGain,
         cameraGreenGain: config.camera.greenGain,
         cameraBlueGain: config.camera.blueGain,
+        cameraAutoWhiteBalanceEnabled: config.camera.autoWhiteBalanceEnabled,
+        cameraAutoGainEnabled: config.camera.autoGainEnabled,
+        cameraExposure: config.camera.exposure,
+        cameraAutoExposureEnabled: config.camera.autoExposureEnabled,
+        cameraAutoExposureLevel: config.camera.autoExposureLevel,
+        cameraBrightness: config.camera.brightness,
+        cameraSaturation: config.camera.saturation,
+        cameraContrast: config.camera.contrast,
+        cameraSharpness: config.camera.sharpness,
     };
 
     let device = null;

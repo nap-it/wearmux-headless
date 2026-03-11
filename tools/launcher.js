@@ -2,6 +2,66 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const LOCK_PATH = '/tmp/bsole-launcher.lock';
+
+function stripInlineComment(value) {
+  const match = value.match(/\s[;#]/);
+  if (!match || match.index == null) return value;
+  return value.slice(0, match.index);
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function acquireLauncherLock() {
+  try {
+    const fd = fs.openSync(LOCK_PATH, 'wx');
+    fs.writeFileSync(fd, `${process.pid}\n`);
+    fs.closeSync(fd);
+    return true;
+  } catch (error) {
+    if (error.code !== 'EEXIST') {
+      throw error;
+    }
+
+    let existingPid = NaN;
+    try {
+      existingPid = Number.parseInt(fs.readFileSync(LOCK_PATH, 'utf8').trim(), 10);
+    } catch {}
+
+    if (isProcessAlive(existingPid)) {
+      console.error(`[launcher] another launcher is already running (pid=${existingPid})`);
+      return false;
+    }
+
+    try {
+      fs.unlinkSync(LOCK_PATH);
+    } catch {}
+
+    return acquireLauncherLock();
+  }
+}
+
+function releaseLauncherLock() {
+  try {
+    const existingPid = Number.parseInt(fs.readFileSync(LOCK_PATH, 'utf8').trim(), 10);
+    if (existingPid === process.pid) {
+      fs.unlinkSync(LOCK_PATH);
+    }
+  } catch {}
+}
+
+function exitWithCode(code) {
+  releaseLauncherLock();
+  process.exit(code);
+}
 
 function parseIni(content) {
   const lines = content.split(/\r?\n/);
@@ -15,7 +75,7 @@ function parseIni(content) {
     const idx = line.indexOf('=');
     if (idx === -1) continue;
     const key = line.slice(0, idx).trim();
-    const val = line.slice(idx + 1).trim();
+    const val = stripInlineComment(line.slice(idx + 1)).trim();
     if (!section || section === 'env') {
       result._env[key] = val;
     } else if (section === 'scripts') {
@@ -36,6 +96,11 @@ function findArg(flag, def) {
 }
 
 async function main() {
+  if (!acquireLauncherLock()) {
+    process.exit(1);
+  }
+  process.on('exit', releaseLauncherLock);
+
   const iniPath = findArg('--config', '/config/config.ini');
   let parsed = { _env: {}, _scripts: [] };
   if (fs.existsSync(iniPath)) {
@@ -85,7 +150,7 @@ async function main() {
     children.push(child);
     child.on('exit', (code, signal) => {
       console.log(`[launcher] script '${script}' exited code=${code} signal=${signal}`);
-      if (mode === 'sequential' && code !== 0) process.exit(code || 1);
+      if (mode === 'parallel' && code !== 0) exitWithCode(code || 1);
     });
     return child;
   }
@@ -95,19 +160,26 @@ async function main() {
     for (const c of children) {
       try { c.kill('SIGTERM'); } catch {}
     }
-    setTimeout(() => process.exit(0), 200);
+    setTimeout(() => {
+      releaseLauncherLock();
+      process.exit(0);
+    }, 200);
   }
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  if (mode === 'parallel') {
-    scripts.forEach(spawnScript);
-  } else {
-    for (const s of scripts) {
-      const child = spawnScript(s);
-      const code = await new Promise(resolve => child.on('exit', resolve));
-      if (code !== 0) process.exit(code || 1);
+  try {
+    if (mode === 'parallel') {
+      scripts.forEach(spawnScript);
+    } else {
+      for (const s of scripts) {
+        const child = spawnScript(s);
+        const code = await new Promise(resolve => child.on('exit', resolve));
+        if (code !== 0) exitWithCode(code || 1);
+      }
     }
+  } finally {
+    releaseLauncherLock();
   }
 }
 

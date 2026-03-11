@@ -84,29 +84,43 @@ class Config {
     static getCameraConfig() {
         const n = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined);
         const s = (v) => (v !== undefined && v !== null && v !== "" ? String(v) : undefined);
+        const flag = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined);
+        const resolution = (() => {
+            const direct = n(process.env.CAMERA_RESOLUTION);
+            if (direct !== undefined) return direct;
+
+            const width = n(process.env.CAMERA_WIDTH);
+            const height = n(process.env.CAMERA_HEIGHT);
+            if (width !== undefined && height !== undefined) {
+                return width;
+            }
+
+            return width ?? height;
+        })();
+
         return {
             // Output directory is optional; if not set, images won't be saved automatically
             outputDir: (process.env.CAMERA_OUTPUT_DIR && process.env.CAMERA_OUTPUT_DIR.trim()) || undefined,
             autoPicture: process.env.CAMERA_AUTO_PICTURE === "1",
             imageFormat: s(process.env.CAMERA_IMAGE_FORMAT) || "jpg",
             quality: n(process.env.CAMERA_QUALITY), // legacy alias
-            // Extended tuning knobs (if supported by device/SDK)
-            // Prefer a single square resolution: CAMERA_RESOLUTION (e.g., 300 -> 300x300)
-            resolution: (() => {
-                const r = n(process.env.CAMERA_RESOLUTION);
-                if (r) return { width: r, height: r };
-                // Backward-compat: allow explicit width/height if provided
-                const w = n(process.env.CAMERA_WIDTH);
-                const h = n(process.env.CAMERA_HEIGHT);
-                if (w && h) return { width: w, height: h };
-                return undefined;
-            })(),
+            // Camera resolution is a numeric SDK value, not a width/height object.
+            resolution,
             qualityFactor: n(process.env.CAMERA_QUALITY_FACTOR),
-            shutter: s(process.env.CAMERA_SHUTTER) || n(process.env.CAMERA_SHUTTER),
+            shutter: n(process.env.CAMERA_SHUTTER),
             gain: n(process.env.CAMERA_GAIN),
             redGain: n(process.env.CAMERA_RED_GAIN),
             greenGain: n(process.env.CAMERA_GREEN_GAIN),
             blueGain: n(process.env.CAMERA_BLUE_GAIN),
+            autoWhiteBalanceEnabled: flag(process.env.CAMERA_AUTO_WHITE_BALANCE_ENABLED),
+            autoGainEnabled: flag(process.env.CAMERA_AUTO_GAIN_ENABLED),
+            exposure: n(process.env.CAMERA_EXPOSURE),
+            autoExposureEnabled: flag(process.env.CAMERA_AUTO_EXPOSURE_ENABLED),
+            autoExposureLevel: n(process.env.CAMERA_AUTO_EXPOSURE_LEVEL),
+            brightness: n(process.env.CAMERA_BRIGHTNESS),
+            saturation: n(process.env.CAMERA_SATURATION),
+            contrast: n(process.env.CAMERA_CONTRAST),
+            sharpness: n(process.env.CAMERA_SHARPNESS),
             // Optional lightweight viewer
             viewEnable: process.env.CAMERA_VIEW_ENABLE === "1",
             viewHost: s(process.env.CAMERA_VIEW_HOST) || "0.0.0.0",
