@@ -45,7 +45,7 @@ async function main() {
 
     const viewEnable = config.camera.viewEnable;
     const viewPort = config.camera.viewPort || 8099;
-    const viewHost = config.camera.viewHost || "127.0.0.1";
+    const viewHost = config.camera.viewHost || "0.0.0.0";
     const viewMjpeg = config.camera.viewMjpeg;
     let latestImage = null;
     let viewerServer = null;

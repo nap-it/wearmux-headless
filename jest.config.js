@@ -1,5 +1,5 @@
 module.exports = {
   testEnvironment: 'node',
-  roots: ['examples/car-interaction/__tests__'],
+  roots: ['examples'],
   fakeTimers: { enableGlobally: true },
 };

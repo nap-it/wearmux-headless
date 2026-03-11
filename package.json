@@ -15,7 +15,7 @@
     },
     "scripts": {
         "start": "node index.js",
-        "help": "echo 'Available scripts: start, microphone:rtsp, microphone:record, clean:recordings, sensors, display, camera'",
+        "help": "echo 'Available scripts: start, microphone:rtsp, microphone:record, clean:recordings, sensors, display, camera, examples:car, examples:latency, examples:test'",
         
         "microphone:rtsp": "node microphone/index.js",
         "microphone:record": "node microphone/record-audio.js",
@@ -32,7 +32,8 @@
         "examples:car-help": "echo 'Car demo (examples/car-interaction):\n  npm run examples:car-demo   # Glasses (demo mode)\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
         "examples:car-demo": "cd examples/car-interaction && DEMO_MODE=1 node glasses-controller.js\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
         "examples:car": "cd examples/car-interaction && node car-simulator.js",
-        "examples:test": "jest examples/car-interaction/__tests__",
+        "examples:latency": "node examples/latency-evaluation/index.js",
+        "examples:test": "jest examples",
         "clean:recordings": "rm -rf microphone/recordings/*",
         "clean:training-data": "rm -rf sensors/model/*"
     }

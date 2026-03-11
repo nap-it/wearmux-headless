@@ -71,3 +71,11 @@ npm run camera
 - If `CAMERA_OUTPUT_DIR` is not set, images are captured but not saved to disk
 - The browser viewer auto-refreshes or streams via MJPEG depending on `CAMERA_VIEW_MJPEG`
 - Use `DEBUG=1` or `CAMERA_DEBUG=1` for verbose logging
+
+## Related Example
+
+The display-to-camera latency workflow lives under [examples/latency-evaluation](../examples/latency-evaluation/README.md). Run it with:
+
+```bash
+npm run examples:latency
+```

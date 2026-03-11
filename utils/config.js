@@ -109,7 +109,7 @@ class Config {
             blueGain: n(process.env.CAMERA_BLUE_GAIN),
             // Optional lightweight viewer
             viewEnable: process.env.CAMERA_VIEW_ENABLE === "1",
-            viewHost: s(process.env.CAMERA_VIEW_HOST) || "127.0.0.1",
+            viewHost: s(process.env.CAMERA_VIEW_HOST) || "0.0.0.0",
             viewPort: n(process.env.CAMERA_VIEW_PORT) || 8099,
             viewMjpeg: process.env.CAMERA_VIEW_MJPEG === "1",
             // Camera sensor sampling rate (if device uses sensorConfiguration for camera)

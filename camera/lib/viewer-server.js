@@ -25,7 +25,7 @@ class ViewerServer {
      * @param {number} port - Port to listen on (default: 8099)
      * @param {Function} getLatest - Callback to get latest image
      */
-    start(host = "127.0.0.1", port = 8099, getLatest = null) {
+    start(host = "0.0.0.0", port = 8099, getLatest = null) {
         if (this.server) {
             throw new Error("Server is already running");
         }

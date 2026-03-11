@@ -35,6 +35,9 @@ bsole-connector/
 │   └── lib/
 │       ├── image-validator.js      # Image validation utilities
 │       └── viewer-server.js        # HTTP/MJPEG browser viewer
+├── examples/
+│   ├── car-interaction/            # Car interaction example + tests
+│   └── latency-evaluation/         # Display-to-camera latency evaluation example
 ├── tools/
 │   ├── launcher.js                 # Config parser and script launcher
 │   ├── zenoh_py_publisher.py       # Python sidecar: UDS→Zenoh publisher
@@ -73,6 +76,9 @@ npm run display -- path/to/image.png
 
 # Camera capture
 npm run camera
+
+# Display-to-camera latency example
+npm run examples:latency
 ```
 
 
