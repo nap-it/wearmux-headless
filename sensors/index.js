@@ -58,12 +58,15 @@ async function main() {
     };
     const rateEnv = {
         acceleration: process.env.ACCELERATION_RATE,
+        gravity: process.env.GRAVITY_RATE,
+        linearAcceleration: process.env.LINEAR_ACCELERATION_RATE,
         gyroscope: process.env.GYROSCOPE_RATE,
         magnetometer: process.env.MAGNETOMETER_RATE,
-        orientation: process.env.ORIENTATION_RATE,
-        linearAcceleration: process.env.LINEAR_ACCELERATION_RATE,
         gameRotation: process.env.GAME_ROTATION_RATE,
         rotation: process.env.ROTATION_RATE,
+        orientation: process.env.ORIENTATION_RATE,
+        activity: process.env.ACTIVITY_RATE,
+        stepCounter: process.env.STEP_COUNTER_RATE,
         tapDetector: process.env.TAP_DETECTOR_RATE,
         pressure: process.env.PRESSURE_RATE,
     };
@@ -158,9 +161,15 @@ async function main() {
     const sensorLineMap = {};
     let lineIndex = 0;
     if (enabledSensors.includes("acceleration")) sensorLineMap.acceleration = lineIndex++;
+    if (enabledSensors.includes("gravity")) sensorLineMap.gravity = lineIndex++;
+    if (enabledSensors.includes("linearAcceleration")) sensorLineMap.linearAcceleration = lineIndex++;
     if (enabledSensors.includes("gyroscope")) sensorLineMap.gyroscope = lineIndex++;
+    if (enabledSensors.includes("gameRotation")) sensorLineMap.gameRotation = lineIndex++;
+    if (enabledSensors.includes("rotation")) sensorLineMap.rotation = lineIndex++;
     if (enabledSensors.includes("magnetometer")) sensorLineMap.magnetometer = lineIndex++;
     if (enabledSensors.includes("orientation")) sensorLineMap.orientation = lineIndex++;
+    if (enabledSensors.includes("activity")) sensorLineMap.activity = lineIndex++;
+    if (enabledSensors.includes("stepCounter")) sensorLineMap.stepCounter = lineIndex++;
     if (enabledSensors.includes("pressure")) sensorLineMap.pressure = lineIndex++;
 
     const sensorLines = new Array(lineIndex);
@@ -183,6 +192,26 @@ async function main() {
         });
     }
 
+    if (enabledSensors.includes("gravity")) {
+        sensorManager.on("gravity", (event) => {
+            const g = event.message?.gravity;
+            if (!g) return;
+            const line = `🌍 Gravity: x:${g.x.toFixed(3)} y:${g.y.toFixed(3)} z:${g.z.toFixed(3)}`;
+            sensorLines[sensorLineMap.gravity] = line;
+            updateDisplay(sensorLines.filter(Boolean));
+        });
+    }
+
+    if (enabledSensors.includes("linearAcceleration")) {
+        sensorManager.on("linearAcceleration", (event) => {
+            const la = event.message?.linearAcceleration;
+            if (!la) return;
+            const line = `➡️  LinAccel: x:${la.x.toFixed(3)} y:${la.y.toFixed(3)} z:${la.z.toFixed(3)}`;
+            sensorLines[sensorLineMap.linearAcceleration] = line;
+            updateDisplay(sensorLines.filter(Boolean));
+        });
+    }
+
     if (gyroHandler) {
         sensorManager.on("gyroscope", (event) => {
             gyroHandler.updateData(event.message);
@@ -191,6 +220,26 @@ async function main() {
             const g = data.data.gyroscope;
             const line = `🔄 Gyro: x:${g.x.toFixed(3)} y:${g.y.toFixed(3)} z:${g.z.toFixed(3)} | rate:${rate?.toFixed(3)}°/s`;
             sensorLines[sensorLineMap.gyroscope] = line;
+            updateDisplay(sensorLines.filter(Boolean));
+        });
+    }
+
+    if (enabledSensors.includes("gameRotation")) {
+        sensorManager.on("gameRotation", (event) => {
+            const r = event.message?.gameRotation;
+            if (!r) return;
+            const line = `🎮 GameRot: x:${r.x.toFixed(3)} y:${r.y.toFixed(3)} z:${r.z.toFixed(3)} w:${r.w.toFixed(3)}`;
+            sensorLines[sensorLineMap.gameRotation] = line;
+            updateDisplay(sensorLines.filter(Boolean));
+        });
+    }
+
+    if (enabledSensors.includes("rotation")) {
+        sensorManager.on("rotation", (event) => {
+            const r = event.message?.rotation;
+            if (!r) return;
+            const line = `🔃 Rotation: x:${r.x.toFixed(3)} y:${r.y.toFixed(3)} z:${r.z.toFixed(3)} w:${r.w.toFixed(3)}`;
+            sensorLines[sensorLineMap.rotation] = line;
             updateDisplay(sensorLines.filter(Boolean));
         });
     }
@@ -231,6 +280,26 @@ async function main() {
                     roll: roll
                 });
             }
+        });
+    }
+
+    if (enabledSensors.includes("activity")) {
+        sensorManager.on("activity", (event) => {
+            const act = event.message?.activity;
+            if (!act) return;
+            const line = `🏃 Activity: ${act.activity ?? act}`;
+            sensorLines[sensorLineMap.activity] = line;
+            updateDisplay(sensorLines.filter(Boolean));
+        });
+    }
+
+    if (enabledSensors.includes("stepCounter")) {
+        sensorManager.on("stepCounter", (event) => {
+            const sc = event.message?.stepCounter;
+            if (!sc) return;
+            const line = `👟 Steps: ${sc.steps ?? sc}`;
+            sensorLines[sensorLineMap.stepCounter] = line;
+            updateDisplay(sensorLines.filter(Boolean));
         });
     }
 

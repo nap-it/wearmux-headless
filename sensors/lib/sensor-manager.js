@@ -34,20 +34,27 @@ class SensorManager extends EventEmitter {
                 : process.env.ZENOH_ATTACH_ALL !== "0";
         this.zenoh = null;
 
-        // Available sensor types with their default device rates (SDK expects multiples of 5)
+        // Available sensor types with their default device rates (SDK expects multiples of 5).
+        // Rate 0 means disabled by default; non-zero means enabled at that rate when included
+        // in ENABLED_SENSORS. Insoles support the full IMU set; Frame only has the first group.
         this.availableSensors = {
-            // Common (Frame + Insole)
+            // Full IMU (Insole + Frame)
             acceleration: 50,
             magnetometer: 50,
             orientation: 50,
+            // Full IMU (Insole only — Frame lacks these)
+            gravity: 50,
+            linearAcceleration: 50,
+            gyroscope: 50,
+            gameRotation: 50,
+            rotation: 50,
+            // Activity / step sensors (Insole only)
+            activity: 5,
+            stepCounter: 5,
+            // Tap detection
             tapDetector: 5,
-            // Insole only
+            // Pressure (Insole only)
             pressure: 50,
-            // Frame doesn't have these:
-            linearAcceleration: 0,
-            gyroscope: 0,
-            gameRotation: 0,
-            rotation: 0,
         };
 
         // Build per-sensor output throttle (Hz or ms) from environment
@@ -174,7 +181,7 @@ class SensorManager extends EventEmitter {
             "orientation",
         ];
 
-        const allSensors = [...motionSensors, "pressure", "tapDetector"];
+        const allSensors = [...motionSensors, "activity", "stepCounter", "pressure", "tapDetector"];
         allSensors.forEach((sensorType) => {
             if (this.enabledSensors.includes(sensorType)) {
                 this.device.addEventListener(sensorType, (event) => {
