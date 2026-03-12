@@ -32,41 +32,109 @@ class DeviceManager extends EventEmitter {
     }
 
     async connectToDevice() {
+        // WiFi transport path: if DEVICE_IP is set, skip BLE entirely
+        const wifiIp = process.env.DEVICE_IP;
+        if (wifiIp) {
+            debugLog("[DeviceManager] DEVICE_IP set, connecting via WiFi transport");
+            try {
+                if (!BS) BS = await import("brilliantsole/node");
+                await this._connectViaWifi(wifiIp);
+                this._setupEventListeners();
+                await this._waitForConnection();
+                return this.device;
+            } catch (err) {
+                this.emit("error", err);
+                throw err;
+            }
+        }
+
         // If custom Noble is enabled, delegate to NobleDeviceManager
         if (this._useCustomNoble) {
             debugLog("[DeviceManager] Using custom Noble implementation");
             return await this._nobleManager.connectToDevice();
         }
 
-        // Original SDK implementation
         try {
-            if (!BS) {
-                BS = await import("brilliantsole/node");
-                // BS.setAllConsoleLevelFlags({log: true});
-            }
-
-            const { id: filterId, name: filterName } = this._getFilters();
-            this._lastFilters = { id: filterId, name: filterName };
-
-            // 1) Try an existing device from SDK DeviceManager first (no scanning)
-            const existing = this._pickFromDeviceManager(filterId, filterName);
-            if (existing) {
-                if (!existing.isConnected && typeof existing.connect === "function") {
-                    try { await existing.connect(); } catch { }
-                }
-                this.device = existing;
-            } else {
-                // 2) Use scanner-based connection
-                debugLog("[DeviceManager] Starting scanner-based connection...");
-                await this._connectViaScanner(filterId, filterName);
-            }
-
+            await this._connectViaBle();
             this._setupEventListeners();
             await this._waitForConnection();
             return this.device;
         } catch (err) {
             this.emit("error", err);
             throw err;
+        }
+    }
+
+    async _connectViaBle() {
+        if (!BS) BS = await import("brilliantsole/node");
+
+        const { id: filterId, name: filterName } = this._getFilters();
+        this._lastFilters = { id: filterId, name: filterName };
+
+        // 1) Try an existing device from SDK DeviceManager first (no scanning)
+        const existing = this._pickFromDeviceManager(filterId, filterName);
+        if (existing) {
+            if (!existing.isConnected) {
+                try { await existing.connect?.(); } catch { }
+            }
+            this.device = existing;
+        } else {
+            // 2) Use scanner-based connection
+            debugLog("[DeviceManager] Starting scanner-based connection...");
+            await this._connectViaScanner(filterId, filterName);
+        }
+    }
+
+    async _connectViaWifi(ipAddress) {
+        const transport = (process.env.DEVICE_TRANSPORT || "websocket").toLowerCase();
+        const isSecure = process.env.DEVICE_WIFI_SECURE === "1";
+
+        // The SDK expects browser-style message events where event.data is a Blob with
+        // .arrayBuffer(). The ws package provides a plain Buffer instead. Wrap ws to patch this.
+        if (globalThis.WebSocket === undefined) {
+            const WsClass = require("ws");
+            class BlobCompatWebSocket extends WsClass {
+                addEventListener(type, listener, options) {
+                    if (type !== "message") return super.addEventListener(type, listener, options);
+                    const wrapped = (event) => {
+                        const raw = event.data;
+                        if (raw != null && typeof raw.arrayBuffer !== "function") {
+                            // event.data is a read-only getter on MessageEvent — proxy the event
+                            listener(Object.create(event, {
+                                data: {
+                                    value: {
+                                        arrayBuffer() {
+                                            let buf;
+                                            if (Buffer.isBuffer(raw)) buf = raw;
+                                            else if (raw instanceof ArrayBuffer) buf = Buffer.from(raw);
+                                            else buf = Buffer.from(String(raw));
+                                            return Promise.resolve(
+                                                buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
+                                            );
+                                        },
+                                    },
+                                },
+                            }));
+                        } else {
+                            listener(event);
+                        }
+                    };
+                    return super.addEventListener(type, wrapped, options);
+                }
+            }
+            globalThis.WebSocket = BlobCompatWebSocket;
+        }
+
+        const device = new BS.Device();
+        this.device = device;
+
+        if (transport === "udp") {
+            debugLog(`[DeviceManager] Connecting via UDP → ${ipAddress}:3000`);
+            await device.connect({ type: "udp", ipAddress });
+        } else {
+            const proto = isSecure ? "wss" : "ws";
+            debugLog(`[DeviceManager] Connecting via WebSocket → ${proto}://${ipAddress}/ws`);
+            await device.connect({ type: "webSocket", ipAddress, isWifiSecure: isSecure });
         }
     }
 
@@ -80,7 +148,7 @@ class DeviceManager extends EventEmitter {
     _pickFromDeviceManager(filterId, filterName) {
         try {
             const dm = BS?.DeviceManager;
-            const list = dm && Array.isArray(dm.AvailableDevices) ? dm.AvailableDevices : [];
+            const list = Array.isArray(dm?.AvailableDevices) ? dm.AvailableDevices : [];
             if (!list.length) return null;
             if (filterId) return list.find((d) => d.bluetoothId === filterId || d.id === filterId) || null;
             if (filterName) return list.find((d) => d.name === filterName) || list[0] || null;
@@ -123,7 +191,6 @@ class DeviceManager extends EventEmitter {
                 }
             })();
             debugLog("[DeviceManager] discovered:", discoveredDevice?.name || discoveredDevice?.bluetoothId);
-            // scanner.stopScan();
             const id = discoveredDevice.bluetoothId || discoveredDevice.id;
             await scanner.connectToDevice(id);
             // Wait for SDK DeviceManager to expose the connected instance
@@ -142,7 +209,8 @@ class DeviceManager extends EventEmitter {
         return new Promise((resolve) => {
             let done = false;
             const cleanup = () => {
-                if (done) return; done = true;
+                if (done) return;
+                done = true;
                 clearInterval(iv);
                 clearTimeout(to);
                 try { scanner.removeEventListener?.("isScanningAvailable", onEvt); } catch { }

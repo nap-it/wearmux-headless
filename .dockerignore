@@ -1,3 +1,20 @@
+# ============================================================
+# Rules for context: .. (AM2R parent directory)
+# ============================================================
+
+# Exclude heavy/unneeded SDK subdirectories from the build context
+BrilliantSole-JavaScript-SDK/node_modules/
+BrilliantSole-JavaScript-SDK/src/
+BrilliantSole-JavaScript-SDK/docs/
+BrilliantSole-JavaScript-SDK/examples/
+BrilliantSole-JavaScript-SDK/firmware/
+BrilliantSole-JavaScript-SDK/tflite-converter/
+
+# Exclude connector node_modules (installed fresh inside Docker)
+bsole-connector/node_modules/
+
+# ============================================================
+
 .vscode/
 *.md
 
@@ -12,6 +29,7 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+!BrilliantSole-JavaScript-SDK/build/
 develop-eggs/
 dist/
 downloads/
