@@ -43,7 +43,6 @@ async function main() {
     console.log("✓ Connected!\n");
 
     const sensorManager = new SensorManager(device, { enabledSensors: enabledSensors });
-
     // Apply per-sensor device rates from env (supports Hz number or '<ms>ms')
     const roundTo5 = (hz) => Math.max(5, Math.round(hz / 5) * 5);
     const parseRateHz = (raw) => {
