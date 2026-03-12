@@ -1,14 +1,9 @@
 #!/usr/bin/env node
-const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const fs = require('fs');
+const { loadConfigFile } = require('../utils/ini-config');
 const LOCK_PATH = '/tmp/bsole-launcher.lock';
-
-function stripInlineComment(value) {
-  const match = value.match(/\s[;#]/);
-  if (!match || match.index == null) return value;
-  return value.slice(0, match.index);
-}
 
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -63,33 +58,6 @@ function exitWithCode(code) {
   process.exit(code);
 }
 
-function parseIni(content) {
-  const lines = content.split(/\r?\n/);
-  const result = { _env: {}, _scripts: [] };
-  let section = null;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line || line.startsWith(';') || line.startsWith('#')) continue;
-    const mSec = line.match(/^\[(.+)\]$/);
-    if (mSec) { section = mSec[1].toLowerCase(); continue; }
-    const idx = line.indexOf('=');
-    if (idx === -1) continue;
-    const key = line.slice(0, idx).trim();
-    const val = stripInlineComment(line.slice(idx + 1)).trim();
-    if (!section || section === 'env') {
-      result._env[key] = val;
-    } else if (section === 'scripts') {
-      // allow multiple entries; comma-separated or one per line
-      const list = val.split(',').map(s => s.trim()).filter(Boolean);
-      result._scripts.push(...list.map(s => ({ name: key, cmd: s })));
-    } else {
-      // arbitrary sections treated as env namespace
-      result._env[`${section.toUpperCase()}_${key}`] = val;
-    }
-  }
-  return result;
-}
-
 function findArg(flag, def) {
   const i = process.argv.indexOf(flag);
   return i > -1 ? process.argv[i + 1] : def;
@@ -101,18 +69,13 @@ async function main() {
   }
   process.on('exit', releaseLauncherLock);
 
-  const iniPath = findArg('--config', '/config/config.ini');
-  let parsed = { _env: {}, _scripts: [] };
-  if (fs.existsSync(iniPath)) {
-    parsed = parseIni(fs.readFileSync(iniPath, 'utf8'));
-    console.log(`[launcher] loaded config: ${iniPath}`);
+  const explicitConfig = findArg('--config', '/config/config.ini');
+  const loadedConfig = loadConfigFile(explicitConfig, { applyEnv: true });
+  let parsed = loadedConfig.parsed;
+  if (loadedConfig.loaded) {
+    console.log(`[launcher] loaded config: ${loadedConfig.configPath}`);
   } else {
-    console.warn(`[launcher] config not found at ${iniPath}, proceeding with defaults`);
-  }
-
-  // Apply env vars from config
-  for (const [k, v] of Object.entries(parsed._env)) {
-    process.env[k] = v;
+    console.warn(`[launcher] config not found at ${loadedConfig.configPath}, proceeding with defaults`);
   }
 
   // Ensure zenoh peer config points at zenoh-router service when running in Docker (override file if present)

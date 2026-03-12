@@ -14,25 +14,25 @@
         "jest": "^29.7.0"
     },
     "scripts": {
-        "start": "node index.js",
+        "start": "node tools/launcher.js --config ./config/config.ini",
         "help": "echo 'Available scripts: start, microphone:rtsp, microphone:record, clean:recordings, sensors, display, camera, examples:car, examples:latency, examples:test'",
         
-        "microphone:rtsp": "node microphone/index.js",
-        "microphone:record": "node microphone/record-audio.js",
+        "microphone:rtsp": "node tools/run-with-config.js microphone/index.js",
+        "microphone:record": "node tools/run-with-config.js microphone/record-audio.js",
         
-        "sensors": "node sensors/index.js",
-        "sensors:ml-gesture": "node sensors/real-time-ml-gesture.js",
-        "sensors:inference": "node sensors/run-inference.js",
-        "sensors:collect-training": "node sensors/collect-training-data.js",
+        "sensors": "node tools/run-with-config.js sensors/index.js",
+        "sensors:ml-gesture": "node tools/run-with-config.js sensors/real-time-ml-gesture.js",
+        "sensors:inference": "node tools/run-with-config.js sensors/run-inference.js",
+        "sensors:collect-training": "node tools/run-with-config.js sensors/collect-training-data.js",
         
-        "display": "node display/index.js",
+        "display": "node tools/run-with-config.js display/index.js",
         
-        "camera": "node camera/index.js",
+        "camera": "node tools/run-with-config.js camera/index.js",
         
         "examples:car-help": "echo 'Car demo (examples/car-interaction):\n  npm run examples:car-demo   # Glasses (demo mode)\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
         "examples:car-demo": "cd examples/car-interaction && DEMO_MODE=1 node glasses-controller.js\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
         "examples:car": "cd examples/car-interaction && node car-simulator.js",
-        "examples:latency": "node examples/latency-evaluation/index.js",
+        "examples:latency": "node tools/run-with-config.js examples/latency-evaluation/index.js",
         "examples:test": "jest examples",
         "clean:recordings": "rm -rf microphone/recordings/*",
         "clean:training-data": "rm -rf sensors/model/*"

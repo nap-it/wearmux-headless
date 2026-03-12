@@ -74,7 +74,7 @@ npm run camera
 
 ## Related Example
 
-The display-to-camera latency workflow lives under [examples/latency-evaluation](../examples/latency-evaluation/README.md). Run it with:
+The display-to-camera latency workflow lives under [examples/latency-evaluation](../examples/latency-evaluation/README.md). It opens a fullscreen host window instead of using a browser. Run it with:
 
 ```bash
 npm run examples:latency

@@ -1,63 +1,76 @@
 # Latency Evaluation
 
-Hardware latency evaluation example for a host-side browser display and a BrilliantSole camera.
+Display-to-camera latency example for a BrilliantSole camera using a local fullscreen host window.
 
-## What it measures
+## What it does
 
-The example:
-- hosts a fullscreen browser page that flips between `red` and `green`
-- repeatedly triggers camera captures
-- when the camera recognizes the currently displayed color, it immediately flips the page to the other color
-- records both raw wall-clock E2E latency and a browser-adjusted E2E latency that subtracts the browser paint delay
-- records the camera image timestamp reported by the SDK for each recognized frame
-- rejects runs where the browser reports a paint delay above the configured budget
+The example opens a fullscreen red/green window on the host display, then loops like this:
 
-This is a practical end-to-end host-display-to-camera latency check. Run the script on a machine that can host the web page, open the page fullscreen on the display the device camera is pointed at, and then let the example drive the color flips.
+1. The host window shows a solid color.
+2. The glasses capture one image.
+3. The host classifies the image as mostly `red`, `green`, or `unknown`.
+4. When the expected color is recognized, the host flips the window to the opposite color.
+5. The latency timer starts when the host window confirms that the new color has actually been presented.
+6. The timer stops when the host receives the first matching camera image for that new color.
+
+This keeps the measurement focused on:
+
+- host display presentation
+- camera capture and transfer
+- host-side JPEG assembly
+- host-side red/green classification
+
+There is no browser or web server in this flow.
 
 ## Run
 
+Run it on the desktop host that owns the display the camera is watching:
+
 ```bash
 npm run examples:latency
 ```
 
-When it starts, it prints one or more URLs. Open one of them in a browser on the screen the camera is looking at. The page is designed to work on another machine, tablet, or phone if the host itself has no GUI.
+`npm run` now loads [`config/config.ini`](../../config/config.ini) automatically through the wrapper scripts, so you can test directly on the host without rebuilding Docker.
 
-## Useful environment variables
+The example requires:
+
+- `python3`
+- `tkinter` available in that Python
+- a graphical desktop session so the fullscreen window can open
+
+Press `Esc` on the fullscreen window or `Ctrl+C` in the terminal to stop.
+
+## Useful settings
+
+Add these to [`config/config.ini`](../../config/config.ini) or export them inline before `npm run`. Inline environment values win over the INI file:
 
 ```bash
-CAMERA_LATENCY_MEASUREMENTS=20 \
-CAMERA_LATENCY_OUTPUT=./camera-latency.json \
-CAMERA_LATENCY_SCREEN_HOST=0.0.0.0 \
-CAMERA_LATENCY_SCREEN_PORT=8765 \
-CAMERA_RESOLUTION=320 \
-CAMERA_QUALITY_FACTOR=85 \
+CAMERA_LATENCY_MEASUREMENTS=12 \
+CAMERA_LATENCY_TIMEOUT_MS=8000 \
+CAMERA_LATENCY_CAMERA_RATE=10 \
+CAMERA_LATENCY_OUTPUT=./logs/camera-latency.json \
 npm run examples:latency
 ```
 
-- `CAMERA_LATENCY_MEASUREMENTS`: number of recognition-driven latency measurements to collect, default `12`; set to `0` for a continuous test
-- `CAMERA_LATENCY_OUTPUT`: optional JSON path for raw samples and summary
-- `CAMERA_LATENCY_COLOR_RATIO`: red-vs-green dominance ratio threshold, default `1.15`
-- `CAMERA_LATENCY_COLOR_GAP`: minimum average channel gap, default `12`
-- `CAMERA_LATENCY_TIMEOUT_MS`: per-flip timeout in ms, default `8000`
-- `CAMERA_LATENCY_SCREEN_HOST`: bind host for the browser color screen, default `0.0.0.0`
-- `CAMERA_LATENCY_SCREEN_PORT`: bind port for the browser color screen, default `8765`
-- `CAMERA_LATENCY_REQUIRE_VIEWER`: require at least one browser screen connection before starting, default `1`
-- `CAMERA_LATENCY_BROWSER_ACK_TIMEOUT_MS`: how long to wait for each browser paint acknowledgement, default `1000`
+- `CAMERA_LATENCY_MEASUREMENTS`: number of red/green flips to measure; `0` means run until stopped
+- `CAMERA_LATENCY_TIMEOUT_MS`: max time to wait for the camera to see each new color
+- `CAMERA_LATENCY_CAMERA_RATE`: camera sensor rate used for `takePicture()`
+- `CAMERA_LATENCY_WARMUP_ATTEMPTS`: number of startup captures used to lock onto the initial color
+- `CAMERA_LATENCY_OUTPUT`: optional JSON file for raw samples and summary
+- `CAMERA_AUTO_FOCUS=1`: focus once before the test starts
+- `BSOLE_PYTHON_BIN`: override the Python executable if `python3` is not the right one
 
-For faster sampling, lower `CAMERA_RESOLUTION` and `CAMERA_QUALITY_FACTOR`.
+The console prints:
 
-In continuous mode, stop the run with `Ctrl-C`. The script will finish the current capture, print a summary for the collected samples, and then exit.
+- end-to-end latency from host-window presentation to matching camera frame receipt
+- host-window presentation delay
+- device-reported image latency from the SDK
+- color-analysis time
 
-The browser page now removes animated transitions and reports a paint acknowledgement for every color change. The example fails if the browser-reported paint delay exceeds the configured budget.
-The browser paint-delay budget is fixed at `10ms`, the viewer wait timeout is fixed at `120000ms`, the start color is fixed at `green`, and color detection uses a fixed center ROI ratio of `0.5`.
+If you want to compare against the normal camera path, run:
 
-The console output now reports:
-- browser-adjusted E2E latency: raw E2E latency minus browser paint delay
-- raw wall-clock E2E latency: from server-side flip dispatch to image receipt
-- browser paint delay
-- color-analysis time, which is reported separately and is not included in the E2E latency calculation
-- `cameraTimestamp` for each recognized frame
+```bash
+npm run camera
+```
 
-`cameraTimestamp` comes from the SDK camera image metadata. It is useful for frame tracking, but it is not guaranteed to be a true sensor exposure timestamp.
-
-For a strict sub-10ms budget, open the browser on the same machine that is driving the tested display. If you open the page on another device over the network, transport latency and that device's own display pipeline are outside the browser paint-delay check and can still affect the end-to-end result.
+That uses the same host-side config loading, but it is not a latency benchmark.

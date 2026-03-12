@@ -1,28 +1,42 @@
+#!/usr/bin/env node
 const fs = require("fs");
 const path = require("path");
-const { performance } = require("perf_hooks");
+const readline = require("readline");
+const { spawn } = require("child_process");
+
 const { Config } = require("../../utils/config");
 const { DeviceManager } = require("../../utils/device-manager");
-const { ColorScreenServer } = require("./lib/color-screen-server");
-const {
-    detectDominantColor,
-    summarizeLatencySamples,
-} = require("./lib/latency-utils");
+const { isValidJpeg, hasValidJpegStructure } = require("../../camera/lib/image-validator");
+const { detectDominantColor, summarizeLatencySamples } = require("./lib/latency-utils");
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const DEFAULT_START_COLOR = "green";
-const DEFAULT_VIEWER_TIMEOUT_MS = 120000;
-const DEFAULT_BROWSER_PAINT_DELAY_MS = 10;
-const DEFAULT_ROI_RATIO = 0.5;
+const START_COLOR = "green";
+const DEFAULT_ANALYSIS_OPTIONS = Object.freeze({
+    roiWidthRatio: 0.5,
+    roiHeightRatio: 0.5,
+    analysisSize: 96,
+    minMeanIntensity: 20,
+    minDominanceRatio: 1.15,
+    minChannelGap: 12,
+});
 
-function envNumber(name, fallback) {
-    const parsed = Number(process.env[name]);
-    return Number.isFinite(parsed) ? parsed : fallback;
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function envFlag(name, fallback) {
-    if (process.env[name] == null) return fallback;
-    return !["0", "false", "no", "off"].includes(String(process.env[name]).toLowerCase());
+function envNumber(name, fallback, minimum = -Infinity) {
+    const parsed = Number(process.env[name]);
+    if (!Number.isFinite(parsed)) {
+        return fallback;
+    }
+    return Math.max(minimum, parsed);
+}
+
+function normalizeMeasurementCount(value) {
+    const parsed = Number.parseInt(String(value ?? "12"), 10);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return 12;
+    }
+    return parsed;
 }
 
 function oppositeColor(color) {
@@ -30,159 +44,245 @@ function oppositeColor(color) {
 }
 
 function formatMs(value) {
-    return Number.isFinite(value) ? `${value.toFixed(1)}ms` : "n/a";
+    return `${value.toFixed(1)}ms`;
 }
 
-function formatTimestamp(value) {
-    if (!Number.isFinite(value)) return "n/a";
-    try {
-        return new Date(value).toISOString();
-    } catch {
-        return "n/a";
-    }
+function formatTimestamp(unixMs) {
+    return new Date(unixMs).toISOString();
 }
 
-function normalizeMeasurementCount(value) {
-    return Math.max(0, Math.trunc(Number(value) || 0));
-}
-
-function summarizeSamples(samples) {
-    const summary = summarizeLatencySamples(samples.map((sample) => sample.latencyMs));
-    const browserAdjustedSummary = summarizeLatencySamples(
-        samples.map((sample) => sample.browserAdjustedLatencyMs).filter((value) => Number.isFinite(value))
+function summarizeValues(samples, selector) {
+    return summarizeLatencySamples(
+        samples
+            .map(selector)
+            .filter((value) => Number.isFinite(value))
     );
-    const deviceLatencies = samples
-        .map((sample) => sample.deviceReportedLatencyMs)
-        .filter((value) => Number.isFinite(value));
-    const analysisSummary = summarizeLatencySamples(
-        samples.map((sample) => sample.analysisDurationMs).filter((value) => Number.isFinite(value))
-    );
-
-    return {
-        summary,
-        browserAdjustedSummary,
-        deviceSummary: summarizeLatencySamples(deviceLatencies),
-        analysisSummary,
-    };
 }
 
-function printSummaries(samples) {
-    const { summary, browserAdjustedSummary, deviceSummary, analysisSummary } = summarizeSamples(samples);
-    const browserPaintSummary = summarizeLatencySamples(
-        samples.map((sample) => sample.browserPaintDelayMs).filter((value) => Number.isFinite(value))
-    );
-
-    console.log("");
+function printSummary(label, summary) {
     if (!summary) {
-        console.log("No latency samples collected.");
-        return { summary, browserAdjustedSummary, deviceSummary, browserPaintSummary, analysisSummary };
+        console.log(`${label}: no samples`);
+        return;
     }
 
-    if (browserAdjustedSummary) {
-        console.log("Browser-adjusted E2E latency summary:");
-        console.log(`  samples: ${browserAdjustedSummary.count}`);
-        console.log(`  min: ${formatMs(browserAdjustedSummary.minMs)}`);
-        console.log(`  mean: ${formatMs(browserAdjustedSummary.meanMs)}`);
-        console.log(`  median: ${formatMs(browserAdjustedSummary.medianMs)}`);
-        console.log(`  p90: ${formatMs(browserAdjustedSummary.p90Ms)}`);
-        console.log(`  p95: ${formatMs(browserAdjustedSummary.p95Ms)}`);
-        console.log(`  max: ${formatMs(browserAdjustedSummary.maxMs)}`);
-        console.log(`  stddev: ${formatMs(browserAdjustedSummary.stdDevMs)}`);
-    }
-
-    console.log("");
-    console.log("Raw wall-clock E2E latency summary:");
-    console.log(`  samples: ${summary.count}`);
-    console.log(`  min: ${formatMs(summary.minMs)}`);
-    console.log(`  mean: ${formatMs(summary.meanMs)}`);
-    console.log(`  median: ${formatMs(summary.medianMs)}`);
-    console.log(`  p90: ${formatMs(summary.p90Ms)}`);
-    console.log(`  p95: ${formatMs(summary.p95Ms)}`);
-    console.log(`  max: ${formatMs(summary.maxMs)}`);
-    console.log(`  stddev: ${formatMs(summary.stdDevMs)}`);
-
-    if (deviceSummary) {
-        console.log("");
-        console.log("Device-reported camera latency summary:");
-        console.log(`  samples: ${deviceSummary.count}`);
-        console.log(`  mean: ${formatMs(deviceSummary.meanMs)}`);
-        console.log(`  median: ${formatMs(deviceSummary.medianMs)}`);
-        console.log(`  p90: ${formatMs(deviceSummary.p90Ms)}`);
-    }
-
-    if (browserPaintSummary) {
-        console.log("");
-        console.log("Browser paint-delay summary:");
-        console.log(`  samples: ${browserPaintSummary.count}`);
-        console.log(`  mean: ${formatMs(browserPaintSummary.meanMs)}`);
-        console.log(`  median: ${formatMs(browserPaintSummary.medianMs)}`);
-        console.log(`  p90: ${formatMs(browserPaintSummary.p90Ms)}`);
-        console.log(`  max: ${formatMs(browserPaintSummary.maxMs)}`);
-    }
-
-    if (analysisSummary) {
-        console.log("");
-        console.log("Color-analysis time summary (excluded from E2E):");
-        console.log(`  samples: ${analysisSummary.count}`);
-        console.log(`  mean: ${formatMs(analysisSummary.meanMs)}`);
-        console.log(`  median: ${formatMs(analysisSummary.medianMs)}`);
-        console.log(`  p90: ${formatMs(analysisSummary.p90Ms)}`);
-        console.log(`  max: ${formatMs(analysisSummary.maxMs)}`);
-    }
-
-    return { summary, browserAdjustedSummary, deviceSummary, browserPaintSummary, analysisSummary };
+    console.log(
+        `${label}: count=${summary.count} min=${formatMs(summary.minMs)} avg=${formatMs(summary.meanMs)} median=${formatMs(summary.medianMs)} p90=${formatMs(summary.p90Ms)} max=${formatMs(summary.maxMs)}`
+    );
 }
 
-function assertBrowserPaintDelay(presentation, options) {
-    if (!presentation || !Number.isFinite(presentation.clientPaintDelayMs)) {
-        throw new Error("Browser did not report a valid paint acknowledgement");
-    }
-
-    if (presentation.clientPaintDelayMs > options.maxBrowserPaintDelayMs) {
-        throw new Error(
-            `Browser paint delay ${formatMs(presentation.clientPaintDelayMs)} exceeded ` +
-                `${formatMs(options.maxBrowserPaintDelayMs)}. ` +
-                "Use a local browser window or a faster display path."
-        );
-    }
+async function ensureDir(dirPath) {
+    await fs.promises.mkdir(dirPath, { recursive: true });
 }
 
-async function getDevice() {
-    return new DeviceManager().connectToDevice();
+async function writeResults(outputPath, payload) {
+    const resolved = path.resolve(outputPath);
+    await ensureDir(path.dirname(resolved));
+    await fs.promises.writeFile(resolved, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    console.log(`Saved latency results to ${resolved}`);
 }
 
-function waitForDeviceEvent(device, eventType, timeoutMs, predicate = () => true) {
-    return new Promise((resolve) => {
-        let timeout;
-        const handler = (event) => {
-            let matches = false;
-            try {
-                matches = predicate(event);
-            } catch {}
+async function toImageBuffer(cameraImage) {
+    if (!cameraImage) {
+        return null;
+    }
 
-            if (!matches) {
+    if (cameraImage.blob && typeof cameraImage.blob.arrayBuffer === "function") {
+        return Buffer.from(await cameraImage.blob.arrayBuffer());
+    }
+
+    if (cameraImage.arrayBuffer) {
+        return Buffer.from(cameraImage.arrayBuffer);
+    }
+
+    return null;
+}
+
+function createDeferred() {
+    let resolve;
+    let reject;
+    const promise = new Promise((innerResolve, innerReject) => {
+        resolve = innerResolve;
+        reject = innerReject;
+    });
+    return { promise, resolve, reject };
+}
+
+class HostColorWindow {
+    constructor() {
+        this.pythonBin = process.env.BSOLE_PYTHON_BIN || "python3";
+        this.scriptPath = path.join(__dirname, "host_color_window.py");
+        this.child = null;
+        this.stdout = null;
+        this.readyDeferred = createDeferred();
+        this.closed = false;
+        this.nextRevision = 1;
+        this.pendingPresentations = new Map();
+    }
+
+    async start(timeoutMs = 5000) {
+        if (this.child) {
+            return this.readyDeferred.promise;
+        }
+
+        this.child = spawn(this.pythonBin, ["-u", this.scriptPath], {
+            stdio: ["pipe", "pipe", "pipe"],
+            env: process.env,
+        });
+
+        this.child.on("error", (error) => {
+            this.rejectAllPending(error);
+            this.readyDeferred.reject(error);
+        });
+
+        this.child.on("exit", (code, signal) => {
+            const reason = new Error(
+                this.closed
+                    ? "Host color window closed"
+                    : `Host color window exited unexpectedly (code=${code}, signal=${signal || "none"})`
+            );
+            this.closed = true;
+            this.rejectAllPending(reason);
+            this.readyDeferred.reject(reason);
+        });
+
+        const stdout = readline.createInterface({ input: this.child.stdout });
+        stdout.on("line", (line) => {
+            const trimmed = line.trim();
+            if (!trimmed) {
                 return;
             }
+            try {
+                this.handleMessage(JSON.parse(trimmed));
+            } catch (error) {
+                console.warn(`[HostWindow] invalid JSON: ${error.message}`);
+            }
+        });
+        this.stdout = stdout;
 
-            cleanup();
-            resolve({ timedOut: false, event });
-        };
+        const stderr = readline.createInterface({ input: this.child.stderr });
+        stderr.on("line", (line) => {
+            if (line.trim()) {
+                console.warn(`[HostWindow] ${line}`);
+            }
+        });
 
-        const cleanup = () => {
-            if (timeout) clearTimeout(timeout);
-            device.removeEventListener(eventType, handler);
-        };
+        return Promise.race([
+            this.readyDeferred.promise,
+            sleep(timeoutMs).then(() => {
+                throw new Error(
+                    "Timed out waiting for the host color window. Run the example on the desktop host, not inside Docker."
+                );
+            }),
+        ]);
+    }
 
-        device.addEventListener(eventType, handler);
-        timeout = setTimeout(() => {
-            cleanup();
-            resolve({ timedOut: true, event: null });
+    handleMessage(message) {
+        switch (message.type) {
+            case "ready":
+                this.readyDeferred.resolve(message);
+                return;
+            case "presented": {
+                const pending = this.pendingPresentations.get(message.revision);
+                if (!pending) {
+                    return;
+                }
+                clearTimeout(pending.timeoutId);
+                this.pendingPresentations.delete(message.revision);
+                pending.resolve({
+                    ...message,
+                    commandSentAtUnixMs: pending.commandSentAtUnixMs,
+                    presentationDelayMs: message.presentedAtUnixMs - pending.commandSentAtUnixMs,
+                });
+                return;
+            }
+            case "closed":
+                this.closed = true;
+                this.rejectAllPending(new Error("Host color window closed"));
+                return;
+            case "error":
+                console.warn(`[HostWindow] ${message.message}`);
+                return;
+            default:
+                console.warn(`[HostWindow] unexpected message type: ${message.type}`);
+        }
+    }
+
+    rejectAllPending(error) {
+        for (const pending of this.pendingPresentations.values()) {
+            clearTimeout(pending.timeoutId);
+            pending.reject(error);
+        }
+        this.pendingPresentations.clear();
+    }
+
+    sendCommand(command) {
+        if (!this.child || this.closed) {
+            throw new Error("Host color window is not running");
+        }
+        this.child.stdin.write(`${JSON.stringify(command)}\n`);
+    }
+
+    async setColor(color, timeoutMs = 3000) {
+        if (this.closed) {
+            throw new Error("Host color window is closed");
+        }
+
+        const revision = this.nextRevision++;
+        const commandSentAtUnixMs = Date.now();
+        const deferred = createDeferred();
+        const timeoutId = setTimeout(() => {
+            this.pendingPresentations.delete(revision);
+            deferred.reject(new Error(`Timed out waiting for host window to present ${color}`));
         }, timeoutMs);
+
+        this.pendingPresentations.set(revision, {
+            ...deferred,
+            timeoutId,
+            commandSentAtUnixMs,
+        });
+
+        this.sendCommand({ type: "setColor", color, revision });
+        return deferred.promise;
+    }
+
+    async stop(timeoutMs = 1000) {
+        if (!this.child) {
+            return;
+        }
+
+        if (!this.closed) {
+            try {
+                this.sendCommand({ type: "close" });
+            } catch {}
+        }
+
+        await Promise.race([
+            new Promise((resolve) => this.child.once("exit", resolve)),
+            sleep(timeoutMs),
+        ]).catch(() => {});
+
+        if (!this.closed) {
+            this.child.kill("SIGTERM");
+        }
+    }
+}
+
+async function waitForConnected(device) {
+    if (device.connectionStatus === "connected" || device.isConnected) {
+        return;
+    }
+
+    await new Promise((resolve) => {
+        const handler = () => {
+            device.removeEventListener("connected", handler);
+            resolve();
+        };
+        device.addEventListener("connected", handler);
     });
 }
 
 async function invokeCameraCommand(device, label, invoke, timeoutMs) {
-    const settledPromise = Promise.resolve()
+    const operation = Promise.resolve()
         .then(() => invoke())
         .then(
             () => ({ status: "resolved" }),
@@ -191,85 +291,58 @@ async function invokeCameraCommand(device, label, invoke, timeoutMs) {
 
     const result = timeoutMs > 0
         ? await Promise.race([
-            settledPromise,
+            operation,
             sleep(timeoutMs).then(() => ({ status: "timeout" })),
         ])
-        : await settledPromise;
+        : await operation;
 
     if (result.status === "rejected") {
         throw result.error;
     }
 
     if (result.status === "timeout") {
-        console.warn(
-            `[WARN] ${label} did not report a camera status change within ${timeoutMs}ms. ` +
-                "Continuing and waiting for camera data."
-        );
-        settledPromise.then((lateResult) => {
-            if (lateResult.status === "rejected") {
-                console.error(`[ERROR] ${label} failed after timeout:`, lateResult.error);
-            }
-        });
+        console.warn(`[WARN] ${label} did not report a camera status change within ${timeoutMs}ms`);
     }
 }
 
-async function focusCameraForCapture(device, options) {
-    const focusIdlePromise = waitForDeviceEvent(
-        device,
-        "cameraStatus",
-        options.focusIdleTimeoutMs,
-        (event) =>
-            event?.message?.cameraStatus === "idle" &&
-            event?.message?.previousCameraStatus === "focusing"
-    );
+async function focusCamera(device, cameraRate, commandTimeoutMs, idleTimeoutMs) {
+    const idlePromise = new Promise((resolve) => {
+        let timeoutId;
+        const handler = (event) => {
+            const message = event?.message || {};
+            if (message.cameraStatus !== "idle" || message.previousCameraStatus !== "focusing") {
+                return;
+            }
+            cleanup();
+            resolve(true);
+        };
+        const cleanup = () => {
+            clearTimeout(timeoutId);
+            device.removeEventListener("cameraStatus", handler);
+        };
+
+        device.addEventListener("cameraStatus", handler);
+        timeoutId = setTimeout(() => {
+            cleanup();
+            resolve(false);
+        }, idleTimeoutMs);
+    });
 
     console.log("Focusing camera...");
     await invokeCameraCommand(
         device,
         "Focus command",
-        () => device.focusCamera(options.cameraRate),
-        options.cameraCommandTimeoutMs
+        () => device.focusCamera(cameraRate),
+        commandTimeoutMs
     );
 
-    const focusIdle = await focusIdlePromise;
-    if (focusIdle.timedOut) {
-        console.warn(
-            `[WARN] Camera focus did not return to idle within ${options.focusIdleTimeoutMs}ms; continuing anyway.`
-        );
-    }
-
-    if (options.focusSettleMs > 0) {
-        await sleep(options.focusSettleMs);
+    const reachedIdle = await idlePromise;
+    if (!reachedIdle) {
+        console.warn(`[WARN] Focus did not return to idle within ${idleTimeoutMs}ms`);
     }
 }
 
-async function triggerPicture(device, options) {
-    await invokeCameraCommand(
-        device,
-        "Take picture command",
-        () => device.takePicture(options.cameraRate),
-        options.cameraCommandTimeoutMs
-    );
-}
-
-async function ensureCameraReady(device, options) {
-    if (!device.hasCamera) {
-        throw new Error("Device does not have a camera");
-    }
-
-    await new Promise((resolve) => {
-        if (device.connectionStatus === "connected") {
-            resolve();
-            return;
-        }
-
-        const handler = () => {
-            device.removeEventListener("connected", handler);
-            resolve();
-        };
-        device.addEventListener("connected", handler);
-    });
-
+async function applyCameraConfiguration(device, config, debug) {
     const availableCameraConfigTypes = new Set(
         Array.isArray(device.availableCameraConfigurationTypes) && device.availableCameraConfigurationTypes.length > 0
             ? device.availableCameraConfigurationTypes
@@ -277,416 +350,409 @@ async function ensureCameraReady(device, options) {
     );
 
     const requestedCameraConfig = {
-        resolution: options.cameraResolution,
-        qualityFactor: options.cameraQualityFactor,
-        shutter: options.cameraShutter,
-        gain: options.cameraGain,
-        redGain: options.cameraRedGain,
-        greenGain: options.cameraGreenGain,
-        blueGain: options.cameraBlueGain,
-        autoWhiteBalanceEnabled: options.cameraAutoWhiteBalanceEnabled,
-        autoGainEnabled: options.cameraAutoGainEnabled,
-        exposure: options.cameraExposure,
-        autoExposureEnabled: options.cameraAutoExposureEnabled,
-        autoExposureLevel: options.cameraAutoExposureLevel,
-        brightness: options.cameraBrightness,
-        saturation: options.cameraSaturation,
-        contrast: options.cameraContrast,
-        sharpness: options.cameraSharpness,
+        resolution: config.resolution,
+        qualityFactor: config.qualityFactor ?? config.quality,
+        shutter: config.shutter,
+        gain: config.gain,
+        redGain: config.redGain,
+        greenGain: config.greenGain,
+        blueGain: config.blueGain,
+        autoWhiteBalanceEnabled: config.autoWhiteBalanceEnabled,
+        autoGainEnabled: config.autoGainEnabled,
+        exposure: config.exposure,
+        autoExposureEnabled: config.autoExposureEnabled,
+        autoExposureLevel: config.autoExposureLevel,
+        brightness: config.brightness,
+        saturation: config.saturation,
+        contrast: config.contrast,
+        sharpness: config.sharpness,
     };
 
     const cameraConfig = {};
     for (const [key, value] of Object.entries(requestedCameraConfig)) {
-        if (value === undefined) continue;
+        if (value === undefined) {
+            continue;
+        }
         if (availableCameraConfigTypes.size > 0 && !availableCameraConfigTypes.has(key)) {
+            if (debug) {
+                console.warn(`[Camera] Skipping unsupported camera setting "${key}"`);
+            }
             continue;
         }
         cameraConfig[key] = value;
     }
 
+    if (debug && availableCameraConfigTypes.size > 0) {
+        console.log("[Camera] Available camera settings:", [...availableCameraConfigTypes].join(", "));
+        console.log("[Camera] Current device camera config:", device.cameraConfiguration);
+    }
+
     if (Object.keys(cameraConfig).length > 0) {
         console.log("Applying camera config:", cameraConfig);
         await device.setCameraConfiguration(cameraConfig);
+    } else {
+        console.log("Using device camera defaults");
     }
 
+    if (debug) {
+        console.log("[Camera] Updated device camera config:", device.cameraConfiguration);
+    }
+}
+
+async function prepareCamera(device, cameraRate, debug) {
+    const cameraConfig = Config.getAllConfig().camera;
+    await applyCameraConfiguration(device, cameraConfig, debug);
+
+    console.log("Camera status:", device.cameraStatus);
     if (device.cameraStatus === "asleep") {
-        await invokeCameraCommand(
-            device,
-            "Wake camera command",
-            () => device.wakeCamera(),
-            options.cameraCommandTimeoutMs
-        );
+        console.log("Waking camera...");
+        await device.wakeCamera();
+        await sleep(1000);
     }
 
-    if (options.cameraRate !== undefined && device.sensorConfiguration?.camera !== options.cameraRate) {
-        console.log(`Setting camera sensor rate: ${options.cameraRate}`);
-        await device.setSensorConfiguration({ camera: options.cameraRate }, false, true);
+    if (cameraRate !== undefined && device.sensorConfiguration?.camera !== cameraRate) {
+        console.log(`Setting camera sensor rate: ${cameraRate}`);
+        await device.setSensorConfiguration({ camera: cameraRate }, false, true);
     }
 
-    await sleep(options.cameraWakeDelayMs);
-
-    if (options.focusAtStart) {
-        await focusCameraForCapture(device, options);
-    }
+    console.log("Waiting for camera to stabilize...");
+    await sleep(2000);
 }
 
-async function toImageBuffer(cameraImage) {
-    if (!cameraImage) {
-        throw new Error("Missing camera image payload");
-    }
+async function captureFrame(device, options) {
+    const {
+        cameraRate,
+        cameraCommandTimeoutMs,
+        captureTimeoutMs,
+        debug,
+    } = options;
 
-    if (cameraImage.blob) {
-        return Buffer.from(await cameraImage.blob.arrayBuffer());
-    }
-    if (cameraImage.arrayBuffer) {
-        return Buffer.from(cameraImage.arrayBuffer);
-    }
+    const captureStartedAtUnixMs = Date.now();
 
-    throw new Error("Unsupported camera image payload");
-}
-
-async function captureBestImage(device, options) {
     return new Promise((resolve, reject) => {
-        const images = [];
         let settled = false;
-        let settleTimer = null;
-        let timeoutTimer = null;
+        let timeoutId;
 
         const cleanup = () => {
-            if (settleTimer) clearTimeout(settleTimer);
-            if (timeoutTimer) clearTimeout(timeoutTimer);
-            device.removeEventListener("cameraImage", onImage);
+            clearTimeout(timeoutId);
+            device.removeEventListener("cameraImage", onCameraImage);
         };
 
-        const finish = (fn, value) => {
-            if (settled) return;
+        const settle = (fn, value) => {
+            if (settled) {
+                return;
+            }
             settled = true;
             cleanup();
             fn(value);
         };
 
-        const chooseBest = () =>
-            [...images].sort((left, right) => right.size - left.size)[0];
-
-        const onImage = async (event) => {
-            try {
-                const cameraImage = event.message;
-                const buffer = await toImageBuffer(cameraImage);
-                images.push({
-                    buffer,
-                    size: buffer.length,
-                    receivedAtMs: performance.now(),
-                    cameraTimestamp: cameraImage.timestamp ?? null,
-                    deviceLatencyMs: cameraImage.latency ?? null,
-                });
-
-                if (settleTimer) clearTimeout(settleTimer);
-                settleTimer = setTimeout(() => {
-                    const best = chooseBest();
-                    if (!best) {
-                        finish(reject, new Error("Camera returned no image data"));
+        const onCameraImage = (event) => {
+            Promise.resolve()
+                .then(async () => {
+                    const cameraImage = event?.message;
+                    if (!cameraImage) {
                         return;
                     }
-                    finish(resolve, best);
-                }, options.captureSettleMs);
-            } catch (error) {
-                finish(reject, error);
-            }
+
+                    const imageTimestamp = Number(cameraImage.timestamp);
+                    if (Number.isFinite(imageTimestamp) && imageTimestamp < captureStartedAtUnixMs) {
+                        if (debug) {
+                            console.log(
+                                `[Capture] Ignoring stale image ts=${formatTimestamp(imageTimestamp)} expected>=${formatTimestamp(captureStartedAtUnixMs)}`
+                            );
+                        }
+                        return;
+                    }
+
+                    const buffer = await toImageBuffer(cameraImage);
+                    if (!buffer || buffer.length < 100) {
+                        return;
+                    }
+                    if (!isValidJpeg(buffer) || !hasValidJpegStructure(buffer)) {
+                        return;
+                    }
+
+                    settle(resolve, {
+                        buffer,
+                        receivedAtUnixMs: Date.now(),
+                        cameraTimestamp: Number.isFinite(imageTimestamp) ? imageTimestamp : null,
+                        deviceReportedLatencyMs: Number.isFinite(Number(cameraImage.latency))
+                            ? Number(cameraImage.latency)
+                            : null,
+                        bytes: buffer.length,
+                    });
+                })
+                .catch((error) => {
+                    if (debug) {
+                        console.warn("[Capture] Failed to process camera image:", error.message);
+                    }
+                });
         };
 
-        timeoutTimer = setTimeout(() => {
-            finish(reject, new Error(`Timed out waiting for camera image after ${options.captureTimeoutMs}ms`));
-        }, options.captureTimeoutMs);
+        timeoutId = setTimeout(() => {
+            settle(reject, new Error(`Timed out waiting for a valid camera image after ${captureTimeoutMs}ms`));
+        }, captureTimeoutMs);
 
-        device.addEventListener("cameraImage", onImage);
+        device.addEventListener("cameraImage", onCameraImage);
 
-        (async () => {
-            try {
-                await triggerPicture(device, options);
-            } catch (error) {
-                finish(reject, error);
-            }
-        })();
+        invokeCameraCommand(
+            device,
+            "Take picture command",
+            () => device.takePicture(cameraRate),
+            cameraCommandTimeoutMs
+        ).catch((error) => {
+            settle(reject, error);
+        });
     });
 }
 
-async function writeResults(outputPath, payload) {
-    await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
-    await fs.promises.writeFile(outputPath, JSON.stringify(payload, null, 2));
+async function analyzeFrame(buffer, options) {
+    const startedAt = process.hrtime.bigint();
+    const detection = await detectDominantColor(buffer, options);
+    const analysisMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+    return { detection, analysisMs };
+}
+
+async function warmupUntilColor(device, expectedColor, options) {
+    const {
+        warmupAttempts,
+        captureOptions,
+        analysisOptions,
+    } = options;
+
+    console.log(`Warmup: waiting until camera sees ${expectedColor}...`);
+
+    for (let attempt = 1; attempt <= warmupAttempts; attempt += 1) {
+        const frame = await captureFrame(device, captureOptions);
+        const { detection, analysisMs } = await analyzeFrame(frame.buffer, analysisOptions);
+
+        if (detection.color === expectedColor) {
+            console.log(
+                `Warmup locked in on attempt ${attempt}: ${detection.color} (R=${detection.means.red.toFixed(1)} G=${detection.means.green.toFixed(1)} analysis=${formatMs(analysisMs)})`
+            );
+            return;
+        }
+
+        console.log(
+            `Warmup attempt ${attempt}/${warmupAttempts}: saw ${detection.color} (R=${detection.means.red.toFixed(1)} G=${detection.means.green.toFixed(1)} analysis=${formatMs(analysisMs)})`
+        );
+    }
+
+    throw new Error(`Warmup failed: the camera never locked onto ${expectedColor}`);
+}
+
+async function measureTransition(device, targetColor, measurementOptions) {
+    const {
+        hostWindow,
+        timeoutMs,
+        captureOptions,
+        analysisOptions,
+    } = measurementOptions;
+
+    const presentation = await hostWindow.setColor(targetColor);
+    const deadline = Date.now() + timeoutMs;
+    let attempts = 0;
+
+    while (Date.now() < deadline) {
+        attempts += 1;
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+            break;
+        }
+
+        const frame = await captureFrame(device, {
+            ...captureOptions,
+            captureTimeoutMs: Math.min(captureOptions.captureTimeoutMs, remainingMs),
+        });
+        const { detection, analysisMs } = await analyzeFrame(frame.buffer, analysisOptions);
+
+        if (detection.color !== targetColor) {
+            continue;
+        }
+
+        return {
+            ...presentation,
+            attempts,
+            analysisMs,
+            frameReceivedAtUnixMs: frame.receivedAtUnixMs,
+            cameraTimestamp: frame.cameraTimestamp,
+            deviceReportedLatencyMs: frame.deviceReportedLatencyMs,
+            frameBytes: frame.bytes,
+            detection,
+            latencyMs: frame.receivedAtUnixMs - presentation.presentedAtUnixMs,
+        };
+    }
+
+    throw new Error(`Timed out waiting for the camera to see ${targetColor}`);
 }
 
 async function main() {
-    const config = Config.getAllConfig();
-    const startColor = DEFAULT_START_COLOR;
-    const measurementCount = normalizeMeasurementCount(envNumber("CAMERA_LATENCY_MEASUREMENTS", 12));
-    const options = {
-        measurements: measurementCount,
-        continuous: measurementCount === 0,
-        perFlipTimeoutMs: Math.max(500, envNumber("CAMERA_LATENCY_TIMEOUT_MS", 8000)),
-        warmupAttempts: Math.max(1, envNumber("CAMERA_LATENCY_WARMUP_ATTEMPTS", 6)),
-        browserAckTimeoutMs: Math.max(50, envNumber("CAMERA_LATENCY_BROWSER_ACK_TIMEOUT_MS", 1000)),
-        maxBrowserPaintDelayMs: DEFAULT_BROWSER_PAINT_DELAY_MS,
-        captureTimeoutMs: Math.max(1000, envNumber("CAMERA_LATENCY_CAPTURE_TIMEOUT_MS", 6000)),
-        captureSettleMs: Math.max(50, envNumber("CAMERA_LATENCY_CAPTURE_SETTLE_MS", 300)),
-        analysisSize: Math.max(16, envNumber("CAMERA_LATENCY_ANALYSIS_SIZE", 96)),
-        roiWidthRatio: DEFAULT_ROI_RATIO,
-        roiHeightRatio: DEFAULT_ROI_RATIO,
-        minDominanceRatio: envNumber("CAMERA_LATENCY_COLOR_RATIO", 1.15),
-        minChannelGap: envNumber("CAMERA_LATENCY_COLOR_GAP", 12),
-        minMeanIntensity: envNumber("CAMERA_LATENCY_MIN_INTENSITY", 20),
-        focusAtStart: envFlag("CAMERA_LATENCY_FOCUS_AT_START", true),
-        cameraWakeDelayMs: Math.max(0, envNumber("CAMERA_LATENCY_CAMERA_WAKE_DELAY_MS", 1500)),
-        focusSettleMs: Math.max(0, envNumber("CAMERA_LATENCY_FOCUS_SETTLE_MS", 1200)),
-        cameraCommandTimeoutMs: Math.max(0, envNumber("CAMERA_COMMAND_TIMEOUT_MS", 1500)),
-        focusIdleTimeoutMs: Math.max(0, envNumber("CAMERA_FOCUS_IDLE_TIMEOUT_MS", 3000)),
-        cameraRate: Math.max(1, envNumber("CAMERA_LATENCY_CAMERA_RATE", config.camera.rate || 10)),
-        outputPath: process.env.CAMERA_LATENCY_OUTPUT || "",
-        screenHost: process.env.CAMERA_LATENCY_SCREEN_HOST || "0.0.0.0",
-        screenPort: Math.max(1, envNumber("CAMERA_LATENCY_SCREEN_PORT", 8765)),
-        viewerTimeoutMs: DEFAULT_VIEWER_TIMEOUT_MS,
-        requireViewer: envFlag("CAMERA_LATENCY_REQUIRE_VIEWER", true),
-        cameraResolution: config.camera.resolution || 640,
-        cameraQualityFactor: config.camera.qualityFactor !== undefined ? config.camera.qualityFactor : 95,
-        cameraShutter: config.camera.shutter,
-        cameraGain: config.camera.gain,
-        cameraRedGain: config.camera.redGain,
-        cameraGreenGain: config.camera.greenGain,
-        cameraBlueGain: config.camera.blueGain,
-        cameraAutoWhiteBalanceEnabled: config.camera.autoWhiteBalanceEnabled,
-        cameraAutoGainEnabled: config.camera.autoGainEnabled,
-        cameraExposure: config.camera.exposure,
-        cameraAutoExposureEnabled: config.camera.autoExposureEnabled,
-        cameraAutoExposureLevel: config.camera.autoExposureLevel,
-        cameraBrightness: config.camera.brightness,
-        cameraSaturation: config.camera.saturation,
-        cameraContrast: config.camera.contrast,
-        cameraSharpness: config.camera.sharpness,
+    const debug = process.env.DEBUG === "1" || process.env.CAMERA_DEBUG === "1";
+    const measurementsTarget = normalizeMeasurementCount(process.env.CAMERA_LATENCY_MEASUREMENTS || "12");
+    const timeoutMs = envNumber("CAMERA_LATENCY_TIMEOUT_MS", 8000, 1000);
+    const warmupAttempts = envNumber("CAMERA_LATENCY_WARMUP_ATTEMPTS", 6, 1);
+    const outputPath = process.env.CAMERA_LATENCY_OUTPUT;
+    const autoFocus = process.env.CAMERA_AUTO_FOCUS === "1";
+    const cameraRate = envNumber(
+        "CAMERA_LATENCY_CAMERA_RATE",
+        Config.getAllConfig().camera.rate ?? 10,
+        1
+    );
+    const cameraCommandTimeoutMs = envNumber("CAMERA_COMMAND_TIMEOUT_MS", 1500, 0);
+    const focusIdleTimeoutMs = envNumber("CAMERA_FOCUS_IDLE_TIMEOUT_MS", 3000, 1000);
+    const captureTimeoutMs = envNumber("CAMERA_CAPTURE_TIMEOUT_MS", 5000, 1000);
+    const analysisOptions = {
+        ...DEFAULT_ANALYSIS_OPTIONS,
+        analysisSize: envNumber("CAMERA_LATENCY_ANALYSIS_SIZE", DEFAULT_ANALYSIS_OPTIONS.analysisSize, 16),
+        minMeanIntensity: envNumber("CAMERA_LATENCY_MIN_INTENSITY", DEFAULT_ANALYSIS_OPTIONS.minMeanIntensity, 0),
+        minDominanceRatio: envNumber("CAMERA_LATENCY_COLOR_RATIO", DEFAULT_ANALYSIS_OPTIONS.minDominanceRatio, 1),
+        minChannelGap: envNumber("CAMERA_LATENCY_COLOR_GAP", DEFAULT_ANALYSIS_OPTIONS.minChannelGap, 0),
     };
 
-    let device = null;
-    const screenServer = new ColorScreenServer();
-    let stopping = false;
     let stopRequested = false;
-    const cleanup = async () => {
-        if (stopping) return;
-        stopping = true;
-        try {
-            screenServer.stop();
-        } catch {}
-        try {
-            if (device) {
-                await device.disconnect();
-            }
-        } catch {}
-    };
-
-    const onSigint = async () => {
+    const requestStop = (message) => {
         if (stopRequested) {
-            console.log("\nForce stopping latency test...");
-            await cleanup();
-            process.exit(130);
+            return;
         }
         stopRequested = true;
-        process.exitCode = 130;
-        console.log("\nStopping latency test after the current capture...");
+        console.log(message);
     };
-    process.on("SIGINT", onSigint);
+
+    process.on("SIGINT", () => requestStop("Stopping after the current capture..."));
+    process.on("SIGTERM", () => requestStop("Stopping after the current capture..."));
+
+    const hostWindow = new HostColorWindow();
+    let deviceManager;
+    let device;
+    const samples = [];
 
     try {
-        await screenServer.start(options.screenHost, options.screenPort);
-        console.log("Open the latency color screen in a browser on the display the camera watches:");
-        for (const url of screenServer.urls) {
-            console.log(`  ${url}`);
-        }
-        if (options.requireViewer) {
-            console.log(`Waiting for a browser viewer (${options.viewerTimeoutMs}ms timeout)...`);
-            await screenServer.waitForViewer(options.viewerTimeoutMs);
-            console.log("Browser viewer connected.");
-        }
+        console.log("Opening fullscreen host color window...");
+        const ready = await hostWindow.start();
+        console.log(
+            `Host color window ready on ${ready.width}x${ready.height}. Press Escape on that window or Ctrl+C here to stop.`
+        );
 
         console.log("Connecting to device...");
-        device = await getDevice();
+        deviceManager = new DeviceManager();
+        device = await deviceManager.connectToDevice();
+
+        await waitForConnected(device);
+
         console.log(`Connected to device: ${device.name || device.id}`);
-
-        await ensureCameraReady(device, options);
-
-        function showColor(color) {
-            const state = screenServer.setColor(color);
-            const presentationPromise = screenServer.waitForPresentation(state.revision, options.browserAckTimeoutMs);
-            return { state, presentationPromise };
+        if (!device.hasCamera) {
+            throw new Error("Device does not have a camera");
         }
 
-        const samples = [];
-        let currentColor = startColor;
+        await prepareCamera(device, cameraRate, debug);
 
+        if (autoFocus) {
+            await focusCamera(device, cameraRate, cameraCommandTimeoutMs, focusIdleTimeoutMs);
+        }
+
+        const initialPresentation = await hostWindow.setColor(START_COLOR);
         console.log(
-            `Starting camera latency test: measurements=${options.continuous ? "continuous" : options.measurements}, start=${currentColor}, ` +
-                `roi=${options.roiWidthRatio}x${options.roiHeightRatio}, resolution=${
-                    typeof options.cameraResolution === "number"
-                        ? options.cameraResolution
-                        : `${options.cameraResolution.width}x${options.cameraResolution.height}`
-                }`
+            `Starting camera latency test: measurements=${measurementsTarget || "continuous"}, start=${START_COLOR}, timeout=${timeoutMs}ms, cameraRate=${cameraRate}`
         );
-        if (options.continuous) {
-            console.log("Continuous mode enabled. Press Ctrl-C to stop and print the summary.");
-        }
         console.log(
-            `Browser paint-delay budget: ${formatMs(options.maxBrowserPaintDelayMs)} ` +
-                `(ack timeout ${formatMs(options.browserAckTimeoutMs)})`
+            `Host window presentation delay: ${formatMs(initialPresentation.presentationDelayMs)}`
         );
 
-        const initialDisplay = showColor(currentColor);
-        assertBrowserPaintDelay(await initialDisplay.presentationPromise, options);
-        console.log(`Warmup: waiting until camera sees ${currentColor}...`);
+        const captureOptions = {
+            cameraRate,
+            cameraCommandTimeoutMs,
+            captureTimeoutMs,
+            debug,
+        };
 
-        let warmupSuccess = false;
-        for (let attempt = 1; attempt <= options.warmupAttempts && !stopRequested; attempt += 1) {
-            const capture = await captureBestImage(device, options);
-            const analysisStartedAtMs = performance.now();
-            const detection = await detectDominantColor(capture.buffer, options);
-            const analysisDurationMs = performance.now() - analysisStartedAtMs;
-            if (detection.color === currentColor) {
-                warmupSuccess = true;
-                console.log(
-                    `Warmup locked in on attempt ${attempt}: ${detection.color} ` +
-                        `(R=${detection.means.red.toFixed(1)} G=${detection.means.green.toFixed(1)} ` +
-                        `analysis=${formatMs(analysisDurationMs)})`
-                );
-                break;
-            }
+        await warmupUntilColor(device, START_COLOR, {
+            warmupAttempts,
+            captureOptions,
+            analysisOptions,
+        });
 
-            console.log(
-                `Warmup attempt ${attempt}/${options.warmupAttempts}: saw ${detection.color} ` +
-                    `(R=${detection.means.red.toFixed(1)} G=${detection.means.green.toFixed(1)} ` +
-                    `analysis=${formatMs(analysisDurationMs)})`
-            );
-        }
+        let currentColor = START_COLOR;
+        let index = 0;
 
-        if (!warmupSuccess) {
-            if (stopRequested) {
-                console.log("Latency test stopped during warmup.");
-            } else {
-                throw new Error(`Camera never locked onto the initial ${currentColor} frame`);
-            }
-        }
+        while (!stopRequested && (measurementsTarget === 0 || index < measurementsTarget)) {
+            const targetColor = oppositeColor(currentColor);
+            const sample = await measureTransition(device, targetColor, {
+                hostWindow,
+                timeoutMs,
+                captureOptions,
+                analysisOptions,
+            });
 
-        if (warmupSuccess && !stopRequested) {
-            let previousColor = currentColor;
-            currentColor = oppositeColor(currentColor);
-            let flipState = showColor(currentColor);
-            let attemptsSinceFlip = 0;
+            index += 1;
+            currentColor = targetColor;
 
-            while (!stopRequested && (options.continuous || samples.length < options.measurements)) {
-                attemptsSinceFlip += 1;
-                const capture = await captureBestImage(device, options);
-                const analysisStartedAtMs = performance.now();
-                const detection = await detectDominantColor(capture.buffer, options);
-                const analysisDurationMs = performance.now() - analysisStartedAtMs;
-
-                if (detection.color !== currentColor) {
-                    const elapsedMs = performance.now() - flipState.state.changedAtMs;
-                    if (elapsedMs > options.perFlipTimeoutMs) {
-                        throw new Error(
-                            `Timed out waiting for ${currentColor} after ${options.perFlipTimeoutMs}ms ` +
-                                `(last seen=${detection.color} R=${detection.means.red.toFixed(1)} G=${detection.means.green.toFixed(1)})`
-                        );
-                    }
-                    continue;
-                }
-
-                const presentation = await flipState.presentationPromise;
-                assertBrowserPaintDelay(presentation, options);
-
-                const latencyMs = capture.receivedAtMs - (flipState.state.changedAtMs || performance.now());
-                const browserAdjustedLatencyMs = Math.max(0, latencyMs - presentation.clientPaintDelayMs);
-                const sample = {
-                    index: samples.length + 1,
-                    fromColor: previousColor,
-                    toColor: currentColor,
-                    attempts: attemptsSinceFlip,
-                    latencyMs,
-                    browserAdjustedLatencyMs,
-                    browserPaintDelayMs: presentation.clientPaintDelayMs,
-                    browserAckLatencyMs: presentation.receivedAtServerMs - flipState.state.changedAtMs,
-                    analysisDurationMs,
-                    wallClockDetectedAtMs: capture.receivedAtMs,
-                    cameraTimestamp: capture.cameraTimestamp,
-                    deviceReportedLatencyMs: capture.deviceLatencyMs,
-                    means: detection.means,
-                    confidence: detection.confidence,
-                };
-
-                samples.push(sample);
-                console.log(
-                    `#${sample.index} ${sample.fromColor}->${sample.toColor} ` +
-                        `adj=${formatMs(sample.browserAdjustedLatencyMs)} raw=${formatMs(sample.latencyMs)} ` +
-                        `(attempts=${sample.attempts}, browser=${formatMs(sample.browserPaintDelayMs)}, ` +
-                        `analysis=${formatMs(sample.analysisDurationMs)}, frameTs=${formatTimestamp(sample.cameraTimestamp)}, seen=${currentColor}, ` +
-                        `R=${sample.means.red.toFixed(1)} G=${sample.means.green.toFixed(1)})`
-                );
-
-                previousColor = currentColor;
-                currentColor = oppositeColor(currentColor);
-                flipState = showColor(currentColor);
-                attemptsSinceFlip = 0;
-            }
-        }
-
-        if (stopRequested && options.continuous) {
-            console.log(`Collected ${samples.length} measurement${samples.length === 1 ? "" : "s"} before stopping.`);
-        } else if (stopRequested) {
-            console.log(
-                `Collected ${samples.length} of ${options.measurements} requested measurements before stopping.`
-            );
-        }
-
-        const { summary, browserAdjustedSummary, deviceSummary, browserPaintSummary, analysisSummary } =
-            printSummaries(samples);
-
-        if (options.outputPath) {
-            const results = {
-                createdAt: new Date().toISOString(),
-                interrupted: stopRequested,
-                completed: !stopRequested && !options.continuous,
-                config: {
-                    measurements: options.measurements,
-                    continuous: options.continuous,
-                    startColor,
-                    browserAckTimeoutMs: options.browserAckTimeoutMs,
-                    maxBrowserPaintDelayMs: options.maxBrowserPaintDelayMs,
-                    screenHost: options.screenHost,
-                    screenPort: options.screenPort,
-                    cameraRate: options.cameraRate,
-                    cameraResolution: options.cameraResolution,
-                    cameraQualityFactor: options.cameraQualityFactor,
-                    analysisSize: options.analysisSize,
-                    roiWidthRatio: options.roiWidthRatio,
-                    roiHeightRatio: options.roiHeightRatio,
-                    minDominanceRatio: options.minDominanceRatio,
-                    minChannelGap: options.minChannelGap,
-                    minMeanIntensity: options.minMeanIntensity,
+            const record = {
+                index,
+                fromColor: oppositeColor(targetColor),
+                toColor: targetColor,
+                latencyMs: sample.latencyMs,
+                presentationDelayMs: sample.presentationDelayMs,
+                attempts: sample.attempts,
+                analysisMs: sample.analysisMs,
+                frameReceivedAtUnixMs: sample.frameReceivedAtUnixMs,
+                presentedAtUnixMs: sample.presentedAtUnixMs,
+                cameraTimestamp: sample.cameraTimestamp,
+                deviceReportedLatencyMs: sample.deviceReportedLatencyMs,
+                frameBytes: sample.frameBytes,
+                colorMeans: {
+                    red: sample.detection.means.red,
+                    green: sample.detection.means.green,
+                    blue: sample.detection.means.blue,
                 },
-                summary,
-                browserAdjustedSummary,
-                deviceSummary,
-                browserPaintSummary,
-                analysisSummary,
-                samples,
             };
-            await writeResults(options.outputPath, results);
-            console.log(`Saved results to ${options.outputPath}`);
+            samples.push(record);
+
+            console.log(
+                `#${index} ${record.fromColor}->${record.toColor} lat=${formatMs(record.latencyMs)} (attempts=${record.attempts}, present=${formatMs(record.presentationDelayMs)}, analysis=${formatMs(record.analysisMs)}, received=${formatTimestamp(record.frameReceivedAtUnixMs)}, cameraTs=${record.cameraTimestamp ? formatTimestamp(record.cameraTimestamp) : "n/a"}, device=${record.deviceReportedLatencyMs != null ? formatMs(record.deviceReportedLatencyMs) : "n/a"})`
+            );
+        }
+
+        const payload = {
+            generatedAt: new Date().toISOString(),
+            config: {
+                measurementsTarget,
+                timeoutMs,
+                warmupAttempts,
+                cameraRate,
+                autoFocus,
+                analysisOptions,
+                pythonBin: hostWindow.pythonBin,
+                configPath: process.env.BSOLE_CONFIG_PATH || null,
+            },
+            samples,
+            summaries: {
+                latencyMs: summarizeValues(samples, (sample) => sample.latencyMs),
+                presentationDelayMs: summarizeValues(samples, (sample) => sample.presentationDelayMs),
+                deviceReportedLatencyMs: summarizeValues(samples, (sample) => sample.deviceReportedLatencyMs),
+                analysisMs: summarizeValues(samples, (sample) => sample.analysisMs),
+            },
+        };
+
+        printSummary("E2E latency", payload.summaries.latencyMs);
+        printSummary("Host window presentation delay", payload.summaries.presentationDelayMs);
+        printSummary("Device-reported image latency", payload.summaries.deviceReportedLatencyMs);
+        printSummary("Color-analysis time", payload.summaries.analysisMs);
+
+        if (outputPath) {
+            await writeResults(outputPath, payload);
         }
     } finally {
-        process.removeListener("SIGINT", onSigint);
-        await cleanup();
+        try {
+            await hostWindow.stop();
+        } catch {}
+        try {
+            await deviceManager?.disconnect();
+        } catch {}
     }
 }
 
-if (require.main === module) {
-    main().catch((error) => {
-        console.error("Camera latency test failed:", error);
-        process.exit(1);
-    });
-}
-
-module.exports = main;
+main().catch((error) => {
+    console.error("Camera latency test failed:", error?.stack || error?.message || String(error));
+    process.exit(1);
+});
