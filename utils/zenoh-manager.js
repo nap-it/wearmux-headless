@@ -60,16 +60,30 @@ class ZenohManager extends EventEmitter {
             this._child = null;
             this._childReady = false;
         });
-        // Wait for readiness from sidecar
-        await new Promise((resolve) => {
+        // Wait for readiness from sidecar; reject immediately if the process exits first
+        await new Promise((resolve, reject) => {
+            const cleanup = () => {
+                child.stdout.off("data", onData);
+                child.off("exit", onExit);
+                child.off("error", onProcessError);
+            };
             const onData = (chunk) => {
-                const txt = chunk.toString();
-                if (txt.includes("[PythonSidecar] READY")) {
-                    child.stdout.off("data", onData);
+                if (chunk.toString().includes("[PythonSidecar] READY")) {
+                    cleanup();
                     resolve();
                 }
             };
+            const onExit = (code) => {
+                cleanup();
+                reject(new Error(`Python sidecar exited before READY (code=${code})`));
+            };
+            const onProcessError = (err) => {
+                cleanup();
+                reject(new Error(`Python sidecar error: ${err?.message || err}`));
+            };
             child.stdout.on("data", onData);
+            child.once("exit", onExit);
+            child.once("error", onProcessError);
         });
         // Connect to the UDS socket now (UDS-only)
         if (!msgpack) {

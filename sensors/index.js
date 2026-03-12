@@ -42,7 +42,8 @@ async function main() {
     const device = await getDevice();
     console.log("✓ Connected!\n");
 
-    const sensorManager = new SensorManager(device, { enabledSensors: enabledSensors });
+    const deviceSide = process.env.DEVICE_SIDE || null; // 'left' | 'right' | null
+    const sensorManager = new SensorManager(device, { enabledSensors, side: deviceSide });
     // Apply per-sensor device rates from env (supports Hz number or '<ms>ms')
     const roundTo5 = (hz) => Math.max(5, Math.round(hz / 5) * 5);
     const parseRateHz = (raw) => {
@@ -64,6 +65,7 @@ async function main() {
         gameRotation: process.env.GAME_ROTATION_RATE,
         rotation: process.env.ROTATION_RATE,
         tapDetector: process.env.TAP_DETECTOR_RATE,
+        pressure: process.env.PRESSURE_RATE,
     };
     for (const [sensor, raw] of Object.entries(rateEnv)) {
         const hz = parseRateHz(raw);
@@ -159,6 +161,7 @@ async function main() {
     if (enabledSensors.includes("gyroscope")) sensorLineMap.gyroscope = lineIndex++;
     if (enabledSensors.includes("magnetometer")) sensorLineMap.magnetometer = lineIndex++;
     if (enabledSensors.includes("orientation")) sensorLineMap.orientation = lineIndex++;
+    if (enabledSensors.includes("pressure")) sensorLineMap.pressure = lineIndex++;
 
     const sensorLines = new Array(lineIndex);
 
@@ -228,6 +231,20 @@ async function main() {
                     roll: roll
                 });
             }
+        });
+    }
+
+    if (enabledSensors.includes("pressure")) {
+        sensorManager.on("pressure", (event) => {
+            const p = event.message?.pressure;
+            if (!p) return;
+            const active = p.sensors.filter(s => s.normalizedValue > 0);
+            const cop = p.normalizedCenter;
+            const side = event.side ? `[${event.side}] ` : "";
+            const copStr = cop ? ` | CoP:(${cop.x.toFixed(2)},${cop.y.toFixed(2)})` : "";
+            const line = `${side}Pressure: sum:${p.normalizedSum.toFixed(3)} active:${active.length}/${p.sensors.length}${copStr}`;
+            sensorLines[sensorLineMap.pressure] = line;
+            updateDisplay(sensorLines.filter(Boolean));
         });
     }
 

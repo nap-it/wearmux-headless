@@ -54,19 +54,43 @@ function resolveConfigPath(explicitPath) {
         return path.resolve(process.env.BSOLE_CONFIG_PATH);
     }
 
-    const dockerPath = "/config/config.ini";
-    if (fs.existsSync(dockerPath)) {
-        return dockerPath;
+    const dockerDir = "/config";
+    if (fs.existsSync(dockerDir) && fs.statSync(dockerDir).isDirectory()) {
+        return dockerDir;
     }
 
-    return path.resolve(process.cwd(), "config/config.ini");
+    return path.resolve(process.cwd(), "config");
+}
+
+/**
+ * Collect all *.ini file paths from a directory, sorted alphabetically.
+ * config.ini is always first so its [scripts] and base settings take precedence.
+ */
+function collectIniFiles(dirPath) {
+    if (!fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) {
+        // Legacy: plain file path
+        return fs.existsSync(dirPath) ? [dirPath] : [];
+    }
+
+    const files = fs.readdirSync(dirPath)
+        .filter((f) => f.endsWith(".ini"))
+        .sort((a, b) => {
+            if (a === "config.ini") return -1;
+            if (b === "config.ini") return 1;
+            return a.localeCompare(b);
+        })
+        .map((f) => path.join(dirPath, f));
+
+    return files;
 }
 
 function loadConfigFile(explicitPath, options = {}) {
     const { applyEnv = true, preserveExisting = true } = options;
     const configPath = resolveConfigPath(explicitPath);
 
-    if (!fs.existsSync(configPath)) {
+    const iniFiles = collectIniFiles(configPath);
+
+    if (iniFiles.length === 0) {
         return {
             loaded: false,
             configPath,
@@ -74,10 +98,16 @@ function loadConfigFile(explicitPath, options = {}) {
         };
     }
 
-    const parsed = parseIni(fs.readFileSync(configPath, "utf8"));
+    // Merge all ini files — first file wins for duplicate keys
+    const merged = { _env: {}, _scripts: [] };
+    for (const file of iniFiles) {
+        const parsed = parseIni(fs.readFileSync(file, "utf8"));
+        Object.assign(merged._env, { ...parsed._env, ...merged._env });
+        merged._scripts.push(...parsed._scripts);
+    }
 
     if (applyEnv) {
-        for (const [key, value] of Object.entries(parsed._env)) {
+        for (const [key, value] of Object.entries(merged._env)) {
             if (preserveExisting && process.env[key] !== undefined) {
                 continue;
             }
@@ -89,7 +119,7 @@ function loadConfigFile(explicitPath, options = {}) {
     return {
         loaded: true,
         configPath,
-        parsed,
+        parsed: merged,
     };
 }
 

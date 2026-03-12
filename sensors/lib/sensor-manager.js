@@ -13,6 +13,7 @@ class SensorManager extends EventEmitter {
             throw new Error("SensorManager requires a device instance (use SDK DeviceManager to connect)");
         }
         this.device = device;
+        this.side = options.side || null; // 'left' | 'right' | null
         this.sampleRate = options.sampleRate || 50;
         this.enabledSensors = options.enabledSensors || [];
         this.isMonitoring = false;
@@ -34,13 +35,15 @@ class SensorManager extends EventEmitter {
         this.zenoh = null;
 
         // Available sensor types with their default device rates (SDK expects multiples of 5)
-        // Note: Frame hardware only has: acceleration, magnetometer, orientation, tapDetector
         this.availableSensors = {
+            // Common (Frame + Insole)
             acceleration: 50,
             magnetometer: 50,
             orientation: 50,
             tapDetector: 5,
-            // Frame doesn't have these sensors:
+            // Insole only
+            pressure: 50,
+            // Frame doesn't have these:
             linearAcceleration: 0,
             gyroscope: 0,
             gameRotation: 0,
@@ -171,7 +174,8 @@ class SensorManager extends EventEmitter {
             "orientation",
         ];
 
-        motionSensors.forEach((sensorType) => {
+        const allSensors = [...motionSensors, "pressure", "tapDetector"];
+        allSensors.forEach((sensorType) => {
             if (this.enabledSensors.includes(sensorType)) {
                 this.device.addEventListener(sensorType, (event) => {
                     // Client-side throttle if configured
@@ -182,25 +186,7 @@ class SensorManager extends EventEmitter {
                         if (now - last < interval) return;
                         lastEmitMs[sensorType] = now;
                     }
-                    this.emit(sensorType, event);
-                });
-            }
-        });
-
-        // Event sensor: Tap detector
-        const eventSensors = ["tapDetector"];
-        eventSensors.forEach((sensorType) => {
-            if (this.enabledSensors.includes(sensorType)) {
-                this.device.addEventListener(sensorType, (event) => {
-                    // Client-side throttle if configured
-                    const interval = this.outputThrottleMs[sensorType];
-                    if (interval) {
-                        const now = Date.now();
-                        const last = lastEmitMs[sensorType] || 0;
-                        if (now - last < interval) return;
-                        lastEmitMs[sensorType] = now;
-                    }
-                    this.emit(sensorType, event);
+                    this.emit(sensorType, this.side ? { ...event, side: this.side } : event);
                 });
             }
         });
