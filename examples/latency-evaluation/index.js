@@ -126,7 +126,7 @@ class HostColorWindow {
 
         this.child = spawn(this.pythonBin, ["-u", this.scriptPath], {
             stdio: ["pipe", "pipe", "pipe"],
-            env: process.env,
+            env: { ...process.env, DISPLAY: process.env.DISPLAY || ":0" },
         });
 
         this.child.on("error", (error) => {

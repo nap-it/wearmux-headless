@@ -196,15 +196,18 @@ class NobleDeviceManager extends EventEmitter {
                 if (isMatch) {
                     resolved = true;
                     clearTimeout(timeout);
-                    noble.stopScanning();
                     noble.removeAllListeners('discover');
 
                     if (process.env.DEBUG === '1') {
                         console.log(`[NobleDeviceManager] Matched! Found peripheral`);
                     }
 
-                    // DON'T connect here - let SDK's NobleConnectionManager do it
-                    resolve(peripheral);
+                    // Await scan stop before resolving — on Linux/BlueZ, D-Bus
+                    // operations deadlock if discovery starts while scan is stopping.
+                    noble.stopScanningAsync().then(
+                        () => resolve(peripheral),
+                        () => resolve(peripheral)  // resolve even if stopScan fails
+                    );
                 }
             };
 
