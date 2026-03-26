@@ -30,7 +30,7 @@ services:
       zenoh-router:
         condition: service_healthy
     volumes:
-      - ./config/config.ini:/config/config.ini:ro
+      - ./config:/config:ro
       - ./config/peer.docker.json5:/app/zenoh/peer.json5:ro
       # Data persistence (optional)
       - ./training-data:/app/training-data
