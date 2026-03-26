@@ -14,6 +14,17 @@ function removeArgPair(args, flag) {
     return args.slice(0, idx).concat(args.slice(idx + 2));
 }
 
+function signalToExitCode(signal) {
+    switch (signal) {
+    case "SIGINT":
+        return 130;
+    case "SIGTERM":
+        return 143;
+    default:
+        return 1;
+    }
+}
+
 async function main() {
     const explicitConfig = findArg("--config");
     const args = removeArgPair(process.argv.slice(2), "--config");
@@ -38,9 +49,31 @@ async function main() {
         env: process.env,
     });
 
+    let childExited = false;
+    let sigintCount = 0;
+
+    const forwardSignal = (signal) => {
+        if (childExited || child.killed) return;
+        child.kill(signal);
+    };
+
+    process.on("SIGINT", () => {
+        // Child processes in the foreground group already receive Ctrl+C.
+        // Keep wrapper alive and allow child to handle graceful shutdown first.
+        sigintCount += 1;
+        if (sigintCount >= 2) {
+            forwardSignal("SIGINT");
+        }
+    });
+
+    process.on("SIGTERM", () => {
+        forwardSignal("SIGTERM");
+    });
+
     child.on("exit", (code, signal) => {
+        childExited = true;
         if (signal) {
-            process.kill(process.pid, signal);
+            process.exit(signalToExitCode(signal));
             return;
         }
         process.exit(code || 0);
