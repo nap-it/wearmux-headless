@@ -58,6 +58,8 @@ class DeviceManager extends EventEmitter {
             await this._connectViaBle();
             this._setupEventListeners();
             await this._waitForConnection();
+            // Log the negotiated MTU for debugging purposes
+            console.log(`[DeviceManager] Connected with MTU: ${this.device?.connectionManager?.mtu}`);
             return this.device;
         } catch (err) {
             this.emit("error", err);

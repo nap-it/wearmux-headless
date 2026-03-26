@@ -114,6 +114,8 @@ class NobleDeviceManager extends EventEmitter {
                 console.log(`[NobleDeviceManager] ✓ SDK Device ready`);
             }
 
+            console.log(`[NobleDeviceManager] device MTU is ${connectionManager.mtu}`);
+        
             return this.device;
         } catch (err) {
             this.emit("error", err);
