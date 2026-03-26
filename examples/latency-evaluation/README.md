@@ -44,7 +44,7 @@ CAMERA_LATENCY_OUTPUT=./logs/camera-latency.json \
 npm run examples:latency
 ```
 
-The console prints per-frame capture latency, frame size, and a final summary with min/avg/median/p90/max, frame intervals, and effective FPS.
+The console prints per-frame capture latency, frame size, and a final summary with min/avg/std-dev/median/p90/max, frame intervals, and effective FPS.
 
 If you want to compare against the normal camera path, run:
 

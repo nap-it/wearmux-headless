@@ -8,6 +8,11 @@ const { isValidJpeg, hasValidJpegStructure } = require("../../camera/lib/image-v
 const { ViewerServer } = require("../../camera/lib/viewer-server");
 const { summarizeLatencySamples } = require("./lib/latency-utils");
 
+function isExpectedDisconnectError(error) {
+    const message = String(error?.message || error || "");
+    return message.startsWith("Disconnected ") || message === "Disconnected";
+}
+
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -30,7 +35,7 @@ function printSummary(label, summary) {
         return;
     }
     console.log(
-        `${label}: count=${summary.count} min=${formatMs(summary.minMs)} avg=${formatMs(summary.meanMs)} median=${formatMs(summary.medianMs)} p90=${formatMs(summary.p90Ms)} max=${formatMs(summary.maxMs)}`
+        `${label}: count=${summary.count} min=${formatMs(summary.minMs)} avg=${formatMs(summary.meanMs)} std=${formatMs(summary.stdDevMs)} median=${formatMs(summary.medianMs)} p90=${formatMs(summary.p90Ms)} max=${formatMs(summary.maxMs)}`
     );
 }
 
@@ -63,8 +68,7 @@ async function waitForConnected(device) {
     });
 }
 
-async function prepareCamera(device, config, cameraRate, debug) {
-    // Apply camera configuration from config.ini
+async function prepareCamera(device, config, cameraRate) {
     const availableSettings = new Set(
         Array.isArray(device.availableCameraConfigurationTypes) && device.availableCameraConfigurationTypes.length > 0
             ? device.availableCameraConfigurationTypes
@@ -130,16 +134,47 @@ async function main() {
     const viewMjpeg = config.camera.viewMjpeg;
 
     let stopRequested = false;
+    let shuttingDown = false;
+    let requestStopCapture = null;
+    let summaryPrinted = false;
+
+    process.on("unhandledRejection", (reason) => {
+        if (shuttingDown && isExpectedDisconnectError(reason)) {
+            if (debug) {
+                console.warn("Ignoring expected disconnect rejection during shutdown:", reason?.message || reason);
+            }
+            return;
+        }
+        console.error("Unhandled rejection:", reason?.stack || reason?.message || String(reason));
+        process.exitCode = 1;
+    });
+
+    process.on("uncaughtException", (error) => {
+        if (shuttingDown && isExpectedDisconnectError(error)) {
+            if (debug) {
+                console.warn("Ignoring expected disconnect exception during shutdown:", error?.message || error);
+            }
+            return;
+        }
+        console.error("Uncaught exception:", error?.stack || error?.message || String(error));
+        process.exit(1);
+    });
+
     process.on("SIGINT", () => {
         if (!stopRequested) {
             stopRequested = true;
+            shuttingDown = true;
             console.log("\nStopping after current frame...");
+            requestStopCapture?.();
         }
     });
+
     process.on("SIGTERM", () => {
         if (!stopRequested) {
             stopRequested = true;
+            shuttingDown = true;
             console.log("\nStopping...");
+            requestStopCapture?.();
         }
     });
 
@@ -149,95 +184,19 @@ async function main() {
     let latestImage = null;
     const samples = [];
 
-    try {
-        console.log("Connecting to device...");
-        deviceManager = new DeviceManager();
-        device = await deviceManager.connectToDevice();
-        await waitForConnected(device);
-        console.log(`Connected to device: ${device.name || device.id}`);
+    const printResults = async () => {
+        if (summaryPrinted) return;
+        summaryPrinted = true;
 
-        if (!device.hasCamera) {
-            throw new Error("Device does not have a camera");
-        }
-
-        await prepareCamera(device, config.camera, cameraRate, debug);
-
-        // Start web viewer
-        if (viewEnable) {
-            viewerServer = new ViewerServer({ mjpeg: viewMjpeg });
-            viewerServer.start(viewHost, viewPort, () => latestImage);
-            console.log(`Viewer at http://${viewHost === "0.0.0.0" ? "localhost" : viewHost}:${viewPort}`);
-        }
-
-        // Enable continuous streaming
-        device.autoPicture = true;
-        await device.takePicture(cameraRate);
-
-        console.log(
-            `Camera latency test: ${measurementsTarget || "continuous"} frames, cameraRate=${cameraRate}` +
-            (viewEnable ? `, viewer on port ${viewPort}` : "")
-        );
-        console.log("Capturing frames...\n");
-
-        let index = 0;
-
-        await new Promise((resolve, reject) => {
-            const onImage = async (event) => {
-                if (stopRequested || (measurementsTarget > 0 && index >= measurementsTarget)) {
-                    device.removeEventListener("cameraImage", onImage);
-                    resolve();
-                    return;
-                }
-
-                try {
-                    const cameraImage = event?.message;
-                    if (!cameraImage) return;
-
-                    const buffer = await toImageBuffer(cameraImage);
-                    if (!buffer || buffer.length < 100) return;
-                    if (!isValidJpeg(buffer) || !hasValidJpegStructure(buffer)) return;
-
-                    const receivedAt = Date.now();
-                    const timestamp = Number(cameraImage.timestamp);
-                    const deviceLatencyMs = Number.isFinite(Number(cameraImage.latency))
-                        ? Number(cameraImage.latency) : null;
-
-                    // Update viewer
-                    latestImage = { buffer, mime: "image/jpeg" };
-                    if (viewerServer) {
-                        viewerServer.updateImage(buffer, "image/jpeg");
-                    }
-
-                    index += 1;
-                    samples.push({
-                        index,
-                        deviceLatencyMs,
-                        bytes: buffer.length,
-                        receivedAtUnixMs: receivedAt,
-                        cameraTimestamp: Number.isFinite(timestamp) ? timestamp : null,
-                    });
-
-                    const tsStr = Number.isFinite(timestamp)
-                        ? new Date(timestamp).toISOString() : "n/a";
-                    console.log(
-                        `#${index} latency=${deviceLatencyMs != null ? formatMs(deviceLatencyMs) : "n/a"} size=${buffer.length}B ts=${tsStr}`
-                    );
-                } catch (err) {
-                    if (debug) console.warn("[Capture] Error:", err.message);
-                }
-            };
-
-            device.addEventListener("cameraImage", onImage);
-        });
-
-        // Print results
         console.log("\n--- Results ---");
+
         const latencySummary = summarizeLatencySamples(
             samples.map((s) => s.deviceLatencyMs).filter((v) => Number.isFinite(v))
         );
         const sizeSummary = summarizeLatencySamples(
             samples.map((s) => s.bytes).filter((v) => Number.isFinite(v))
         );
+
         printSummary("Capture latency (command -> image received)", latencySummary);
         if (sizeSummary) {
             console.log(
@@ -265,15 +224,134 @@ async function main() {
                 summaries: { latencyMs: latencySummary, sizeBytes: sizeSummary },
             });
         }
+    };
+
+    try {
+        console.log("Connecting to device...");
+        deviceManager = new DeviceManager();
+        device = await deviceManager.connectToDevice();
+        await waitForConnected(device);
+        console.log(`Connected to device: ${device.name || device.id}`);
+
+        if (!device.hasCamera) {
+            throw new Error("Device does not have a camera");
+        }
+
+        await prepareCamera(device, config.camera, cameraRate);
+
+        if (viewEnable) {
+            viewerServer = new ViewerServer({ mjpeg: viewMjpeg });
+            viewerServer.start(viewHost, viewPort, () => latestImage);
+            console.log(`Viewer at http://${viewHost === "0.0.0.0" ? "localhost" : viewHost}:${viewPort}`);
+        }
+
+        device.autoPicture = true;
+        await device.takePicture(cameraRate);
+
+        console.log(
+            `Camera latency test: ${measurementsTarget || "continuous"} frames, cameraRate=${cameraRate}` +
+            (viewEnable ? `, viewer on port ${viewPort}` : "")
+        );
+        console.log("Capturing frames...\n");
+
+        let index = 0;
+
+        await new Promise((resolve) => {
+            let finished = false;
+            let onImage;
+
+            const finishCapture = () => {
+                if (finished) return;
+                finished = true;
+                if (onImage) {
+                    device.removeEventListener("cameraImage", onImage);
+                }
+                resolve();
+            };
+
+            requestStopCapture = finishCapture;
+
+            onImage = async (event) => {
+                if (stopRequested || (measurementsTarget > 0 && index >= measurementsTarget)) {
+                    finishCapture();
+                    return;
+                }
+
+                try {
+                    const cameraImage = event?.message;
+                    if (!cameraImage) return;
+
+                    const buffer = await toImageBuffer(cameraImage);
+                    if (!buffer || buffer.length < 100) return;
+                    if (!isValidJpeg(buffer) || !hasValidJpegStructure(buffer)) return;
+
+                    const receivedAt = Date.now();
+                    const timestamp = Number(cameraImage.timestamp);
+                    const deviceLatencyMs = Number.isFinite(Number(cameraImage.latency))
+                        ? Number(cameraImage.latency) : null;
+
+                    latestImage = { buffer, mime: "image/jpeg" };
+                    if (viewerServer) {
+                        viewerServer.updateImage(buffer, "image/jpeg");
+                    }
+
+                    index += 1;
+                    samples.push({
+                        index,
+                        deviceLatencyMs,
+                        bytes: buffer.length,
+                        receivedAtUnixMs: receivedAt,
+                        cameraTimestamp: Number.isFinite(timestamp) ? timestamp : null,
+                    });
+
+                    const tsStr = Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : "n/a";
+                    console.log(
+                        `#${index} latency=${deviceLatencyMs != null ? formatMs(deviceLatencyMs) : "n/a"} size=${buffer.length}B ts=${tsStr}`
+                    );
+
+                    if (stopRequested || (measurementsTarget > 0 && index >= measurementsTarget)) {
+                        finishCapture();
+                    }
+                } catch (err) {
+                    if (debug) console.warn("[Capture] Error:", err.message);
+                }
+            };
+
+            device.addEventListener("cameraImage", onImage);
+
+            if (stopRequested) {
+                finishCapture();
+            }
+        });
+
+        requestStopCapture = null;
+        await printResults();
     } finally {
+        shuttingDown = true;
+        if (!summaryPrinted) {
+            try {
+                await printResults();
+            } catch (error) {
+                console.warn("Failed to print final results:", error?.message || error);
+            }
+        }
+
         try {
             if (device && device.isConnected) device.autoPicture = false;
         } catch {}
+
         try {
             viewerServer?.stop();
         } catch {}
+
         try {
+            if (deviceManager && device?.isConnected) {
+                console.log("Disconnecting from device...");
+            }
             await deviceManager?.disconnect();
+            if (deviceManager) {
+                console.log("Disconnected.");
+            }
         } catch {}
     }
 }
