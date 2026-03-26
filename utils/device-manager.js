@@ -16,19 +16,6 @@ class DeviceManager extends EventEmitter {
         this.device = null;
         this._reconnecting = false;
         this._lastFilters = { id: "", name: "" };
-
-        const os = require("os");
-
-        // Check if we should use custom Noble implementation
-        const bEnvVar = process.env.USE_CUSTOM_NOBLE === 'true' || process.env.USE_CUSTOM_NOBLE === '1';
-        this._useCustomNoble = process.env.USE_CUSTOM_NOBLE !== undefined
-            ? bEnvVar
-            : os.platform() === "linux";
-
-        if (this._useCustomNoble) {
-            const { NobleDeviceManager } = require('./noble-device-manager');
-            this._nobleManager = new NobleDeviceManager();
-        }
     }
 
     async connectToDevice() {
@@ -46,12 +33,6 @@ class DeviceManager extends EventEmitter {
                 this.emit("error", err);
                 throw err;
             }
-        }
-
-        // If custom Noble is enabled, delegate to NobleDeviceManager
-        if (this._useCustomNoble) {
-            debugLog("[DeviceManager] Using custom Noble implementation");
-            return await this._nobleManager.connectToDevice();
         }
 
         try {
@@ -194,12 +175,24 @@ class DeviceManager extends EventEmitter {
             })();
             debugLog("[DeviceManager] discovered:", discoveredDevice?.name || discoveredDevice?.bluetoothId);
             const id = discoveredDevice.bluetoothId || discoveredDevice.id;
+            // Register event listener BEFORE connectToDevice to avoid race on fast connections
+            const deviceConnectedPromise = new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    try { BS.DeviceManager.RemoveEventListener("deviceConnected", onConnected); } catch { }
+                    reject(new Error("Timeout waiting for device to connect"));
+                }, 20000);
+                const onConnected = (event) => {
+                    const device = event.message?.device;
+                    if (device?.bluetoothId === id || device?.id === id) {
+                        clearTimeout(timeout);
+                        try { BS.DeviceManager.RemoveEventListener("deviceConnected", onConnected); } catch { }
+                        resolve(device);
+                    }
+                };
+                BS.DeviceManager.AddEventListener("deviceConnected", onConnected);
+            });
             await scanner.connectToDevice(id);
-            // Wait for SDK DeviceManager to expose the connected instance
-            this.device = await this._awaitDeviceById(id, 15000);
-            if (!this.device) {
-                throw new Error("Connected device instance not found after connectToDevice");
-            }
+            this.device = await deviceConnectedPromise;
         } finally {
             try { scanner.stopScan(); } catch { }
         }
@@ -232,19 +225,6 @@ class DeviceManager extends EventEmitter {
                 cleanup(); resolve(false);
             }, timeoutMs);
         });
-    }
-
-    async _awaitDeviceById(id, timeoutMs = 15000) {
-        const dm = BS?.DeviceManager;
-        if (!dm) return null;
-        const end = Date.now() + timeoutMs;
-        while (Date.now() < end) {
-            const list = Array.isArray(dm.AvailableDevices) ? dm.AvailableDevices : [];
-            const found = list.find((d) => d.bluetoothId === id || d.id === id) || null;
-            if (found) return found;
-            await new Promise((r) => setTimeout(r, 200));
-        }
-        return null;
     }
 
     _setupEventListeners() {
@@ -299,17 +279,11 @@ class DeviceManager extends EventEmitter {
     }
 
     getDevice() {
-        if (this._useCustomNoble) {
-            return this._nobleManager.getDevice();
-        }
         return this.device;
     }
 
     async disconnect() {
         try {
-            if (this._useCustomNoble) {
-                return await this._nobleManager.disconnect();
-            }
             if (this.device && typeof this.device.disconnect === "function") {
                 await this.device.disconnect();
             }
