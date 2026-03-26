@@ -127,7 +127,7 @@ class Config {
             viewPort: n(process.env.CAMERA_VIEW_PORT) || 8099,
             viewMjpeg: process.env.CAMERA_VIEW_MJPEG === "1",
             // Camera sensor sampling rate (if device uses sensorConfiguration for camera)
-            rate: n(process.env.CAMERA_RATE) || n(process.env.CAMERA_SENSOR_RATE) || 10,
+            rate: n(process.env.CAMERA_RATE) ?? n(process.env.CAMERA_SENSOR_RATE) ?? 5,
         };
     }
 
