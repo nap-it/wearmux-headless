@@ -100,17 +100,6 @@ async function prepareCamera(device, config, cameraRate) {
         cameraConfig[key] = value;
     }
 
-    if (Object.keys(cameraConfig).length > 0) {
-        console.log("Applying camera config:", cameraConfig);
-        await device.setCameraConfiguration(cameraConfig);
-    }
-
-    if (device.cameraStatus === "asleep") {
-        console.log("Waking camera...");
-        await device.wakeCamera();
-        await sleep(1000);
-    }
-
     if (cameraRate !== undefined && device.sensorConfiguration?.camera !== cameraRate) {
         console.log(`Setting camera sensor rate: ${cameraRate}`);
         await device.setSensorConfiguration({ camera: cameraRate }, false, true);
