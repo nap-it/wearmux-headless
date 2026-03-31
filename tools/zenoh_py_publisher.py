@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, sys, json, signal, socket, atexit
+import os, sys, json, signal, socket, atexit, tempfile
 import zenoh
 import msgpack
 
@@ -36,7 +36,7 @@ def shutdown(*_):
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
-UDS_PATH = os.environ.get("ZENOH_UDS_PATH", "/tmp/bsole-zenoh.sock")
+UDS_PATH = os.environ.get("ZENOH_UDS_PATH", os.path.join(tempfile.gettempdir(), "bsole-zenoh.sock"))
 
 def handle_msg(obj):
     key = str(obj.get("key") or KEY_PREFIX)

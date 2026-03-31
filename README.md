@@ -53,6 +53,25 @@ bsole-connector/
 ```
 
 
+## Prerequisites
+
+### Linux
+- Node.js 18+
+- Python 3.9+ (for Zenoh only)
+- Bluetooth adapter with BlueZ
+
+### Windows
+- Node.js 18+
+- Windows 10 build 15063+ (required for WinRT BLE API)
+- **Visual Studio Build Tools** with "Desktop development with C++" workload and Windows 10 SDK — required to compile the native BLE addon. Install via winget:
+  ```
+  winget install Microsoft.VisualStudio.2022.BuildTools --override "--quiet --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.Windows10SDK.19041 --includeRecommended"
+  ```
+  Or download manually from [visualstudio.microsoft.com/visual-cpp-build-tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+- Python 3.9+ (for Zenoh only) — on Windows, ensure `python` is on your PATH
+- FFmpeg on PATH (for audio streaming only)
+
+
 ## Quick Start
 
 ```bash
