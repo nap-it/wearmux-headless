@@ -337,12 +337,15 @@ async function main() {
 
         console.log("Monitoring active! Press Ctrl+C to stop\n");
 
-        // Handle Ctrl+C
-        process.on("SIGINT", async () => {
-            console.log("\n🛑 Stopping sensor monitoring...");
+        // Handle Ctrl+C and termination
+        const shutdown = async () => {
+            console.log("\n[sensors] Stopping...");
             await sensorManager.stop();
+            try { await device.disconnect(); } catch {}
             process.exit(0);
-        });
+        };
+        process.on("SIGINT", shutdown);
+        process.on("SIGTERM", shutdown);
     } catch (err) {
         console.error("❌ Failed to start sensor monitoring:", err);
         process.exit(1);
