@@ -156,8 +156,21 @@ class DeviceManager extends EventEmitter {
             throw new Error("Scanner not available or not supported in this environment");
         }
         if (!scanner.isScanningAvailable) {
+            console.log("[DeviceManager] Waiting for BLE adapter...");
             const ok = await this._waitForScanningAvailable(scanner, 20000);
-            if (!ok) throw new Error("BLE scanning not available.");
+            if (!ok) {
+                console.error([
+                    "",
+                    "  BLE adapter is not ready. Try the following:",
+                    "    rfkill unblock bluetooth",
+                    "    sudo hciconfig hci0 up",
+                    "",
+                    "  If running as non-root, grant BLE capability to Node:",
+                    "    sudo setcap cap_net_raw+eip $(readlink -f $(which node))",
+                    "",
+                ].join("\n"));
+                throw new Error("BLE adapter unavailable after 20s.");
+            }
         }
 
         debugLog("[DeviceManager] starting BLE scan...");
@@ -180,8 +193,9 @@ class DeviceManager extends EventEmitter {
                 const timeout = setTimeout(() => {
                     try { BS.DeviceManager.RemoveEventListener("deviceConnected", onConnected); } catch { }
                     reject(new Error("Timeout waiting for device to connect"));
-                }, 20000);
+                }, 30000);
                 const onConnected = (event) => {
+                    debugLog("[DeviceManager] deviceConnected event received");
                     const device = event.message?.device;
                     if (device?.bluetoothId === id || device?.id === id) {
                         clearTimeout(timeout);
@@ -191,7 +205,9 @@ class DeviceManager extends EventEmitter {
                 };
                 BS.DeviceManager.AddEventListener("deviceConnected", onConnected);
             });
+            debugLog("[DeviceManager] calling connectToDevice for", id);
             await scanner.connectToDevice(id);
+            debugLog("[DeviceManager] connectToDevice returned, waiting for deviceConnected event...");
             this.device = await deviceConnectedPromise;
         } finally {
             try { scanner.stopScan(); } catch { }

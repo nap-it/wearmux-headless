@@ -70,4 +70,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default command
-CMD ["node", "tools/launcher.js", "--config", "/config/config.ini"]
+CMD ["node", "tools/launcher.js", "--config", "/config"]
