@@ -1,7 +1,23 @@
 // Device connection and management utilities for BrilliantSole devices
 const EventEmitter = require("events");
+const { execSync } = require("node:child_process");
 /** @type {import("brilliantsole/node")?} */
 let BS = null;
+
+// Force kernel-level BLE disconnect on exit so the device starts advertising immediately on the
+// next run. Without this, the kernel holds the connection open for ~2.5 minutes (supervision
+// timeout), during which the device does not advertise and cannot be discovered.
+function forceKernelDisconnect(bluetoothId) {
+    if (!bluetoothId) return;
+    const mac = bluetoothId.includes(":")
+        ? bluetoothId.toUpperCase()
+        : bluetoothId.match(/.{2}/g).join(":").toUpperCase();
+    try {
+        execSync(`bluetoothctl disconnect ${mac}`, { timeout: 2000, stdio: "ignore" });
+    } catch {
+        // Non-fatal — best effort
+    }
+}
 
 // Debug logging helper
 const debugLog = (...args) => {
@@ -16,6 +32,11 @@ class DeviceManager extends EventEmitter {
         this.device = null;
         this._reconnecting = false;
         this._lastFilters = { id: "", name: "" };
+
+        const onExit = () => forceKernelDisconnect(this.device?.bluetoothId || this.device?.id);
+        process.once("exit", onExit);
+        process.once("SIGINT", () => { onExit(); process.exit(130); });
+        process.once("SIGTERM", () => { onExit(); process.exit(143); });
     }
 
     async connectToDevice() {
@@ -299,6 +320,7 @@ class DeviceManager extends EventEmitter {
     }
 
     async disconnect() {
+        const id = this.device?.bluetoothId || this.device?.id;
         try {
             if (this.device && typeof this.device.disconnect === "function") {
                 await this.device.disconnect();
@@ -306,6 +328,7 @@ class DeviceManager extends EventEmitter {
         } catch (error) {
             console.warn("[DeviceManager] Error during disconnect:", error);
         }
+        forceKernelDisconnect(id);
     }
 }
 
