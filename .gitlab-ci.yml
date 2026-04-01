@@ -1,0 +1,228 @@
+# ------------------------------------------------------------------------------
+# Global variables & stages
+# ------------------------------------------------------------------------------
+variables:
+  DOCKER_HOST: "unix:///var/run/docker.sock"
+stages:
+  - build
+  - manifest
+  - release
+  - clean
+# ------------------------------------------------------------------------------
+# Compute DOCKER_TAG: use the tag if set (and not "latest"), else branch name
+# ------------------------------------------------------------------------------
+before_script:
+  - |
+      if [[ -n "$CI_COMMIT_TAG" && "$CI_COMMIT_TAG" != "latest" ]]; then
+        DOCKER_TAG="$CI_COMMIT_TAG"
+      else
+        DOCKER_TAG="$CI_COMMIT_BRANCH"
+      fi
+      echo "→ DOCKER_TAG=$DOCKER_TAG"
+# ------------------------------------------------------------------------------
+# 1) BUILD TEMPLATE
+# ------------------------------------------------------------------------------
+.default_build: &default_build
+  stage: build
+  image: code.nap.av.it.pt:5050/external-tools/misc-docker-images/docker
+  script:
+    - |
+      if [[ -n "$CI_COMMIT_TAG" && "$CI_COMMIT_TAG" != "latest" ]]; then
+        echo "→ Preparing diff against previous tag…"
+        git fetch --unshallow || true            # ensure HEAD^ exists
+        git fetch --tags                         # pull down all tags
+        # Check if there are any tags at all
+        if git tag -l | grep -q .; then
+          # Tags exist, try to find previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [[ -n "$PREV_TAG" ]]; then
+            echo "→ Previous tag is $PREV_TAG"
+            CHANGED=$(git diff --name-only "$PREV_TAG" "$CI_COMMIT_TAG" -- "$DOCKERFILE_PATH" common CMakeLists.txt)
+            if [[ -z "$CHANGED" ]]; then
+              echo "→ No changes in $DOCKERFILE_PATH since $PREV_TAG; skipping build."
+              exit 0
+            fi
+          else
+            echo "→ No previous tag found (this might be the first tag), building anyway."
+          fi
+        else
+          echo "→ No tags exist in repository, building anyway."
+        fi
+      fi
+    - echo "→ Logging in to Docker registry"
+    - echo "$CI_TOKEN" | docker login -u "$CI_USER" --password-stdin code.nap.av.it.pt:5050
+    - |
+      echo "→ Building ${IMAGE_NAME}:${DOCKER_TAG}-${ARCH}"
+      docker build \
+        --build-arg VERSION="$DOCKER_TAG" \
+        --build-arg COMMIT="$CI_COMMIT_SHORT_SHA" \
+        -t code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}-${ARCH} \
+        -f ${DOCKERFILE_PATH}/Dockerfile \
+        .
+    - |
+      echo "→ Pushing ${IMAGE_NAME}:${DOCKER_TAG}-${ARCH}"
+      docker push code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}-${ARCH}
+  rules:
+    # 1) Tag pipelines (except tag "latest")
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
+      changes:
+        - $DOCKERFILE_PATH/**
+    # 2) Non-main branch pipelines
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+
+# ------------------------------------------------------------------------------
+# 2) BUILD JOBS (one per component × arch)
+# ------------------------------------------------------------------------------
+build_ingestion_amd64:
+  <<: *default_build
+  variables: { IMAGE_NAME: ingestion, DOCKERFILE_PATH: ingestion, ARCH: amd64 }
+  tags: [amd64]
+build_ingestion_arm64:
+  <<: *default_build
+  variables: { IMAGE_NAME: ingestion, DOCKERFILE_PATH: ingestion, ARCH: arm64 }
+  tags: [arm64]
+build_core_amd64:
+  <<: *default_build
+  variables: { IMAGE_NAME: core, DOCKERFILE_PATH: core, ARCH: amd64 }
+  tags: [amd64]
+build_core_arm64:
+  <<: *default_build
+  variables: { IMAGE_NAME: core, DOCKERFILE_PATH: core, ARCH: arm64 }
+  tags: [arm64]
+build_query_amd64:
+  <<: *default_build
+  variables: { IMAGE_NAME: query, DOCKERFILE_PATH: query, ARCH: amd64 }
+  tags: [amd64]
+build_query_arm64:
+  <<: *default_build
+  variables: { IMAGE_NAME: query, DOCKERFILE_PATH: query, ARCH: arm64 }
+  tags: [arm64]
+
+# ------------------------------------------------------------------------------
+# 3) MANIFEST TEMPLATE
+# ------------------------------------------------------------------------------
+.create_manifest: &create_manifest
+  stage: manifest
+  image: code.nap.av.it.pt:5050/external-tools/misc-docker-images/docker
+  script:
+    - echo "→ Logging in for manifest"
+    - echo "$CI_TOKEN" | docker login -u "$CI_USER" --password-stdin code.nap.av.it.pt:5050
+    - |
+      # ——— Only run if this folder changed since last tag ———
+      if [[ -n "$CI_COMMIT_TAG" && "$CI_COMMIT_TAG" != "latest" ]]; then
+        echo "→ Checking if ${DOCKERFILE_PATH} changed since last tag…"
+        git fetch --unshallow || true
+        git fetch --tags
+        # Check if there are any tags at all
+        if git tag -l | grep -q .; then
+          # Tags exist, try to find previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [[ -n "$PREV_TAG" ]]; then
+            echo "→ Previous tag is $PREV_TAG"
+            CHANGED=$(git diff --name-only "$PREV_TAG" "$CI_COMMIT_TAG" -- "$DOCKERFILE_PATH" common CMakeLists.txt)
+            if [[ -z "$CHANGED" ]]; then
+              echo "→ No changes in $DOCKERFILE_PATH since $PREV_TAG; skipping manifest."
+              exit 0
+            fi
+          else
+            echo "→ No previous tag found (this might be the first tag), creating manifest anyway."
+          fi
+        else
+          echo "→ No tags exist in repository, creating manifest anyway."
+        fi
+      fi
+    - |
+      echo "→ Creating multi-arch manifest ${IMAGE_NAME}:${DOCKER_TAG}"
+      docker manifest create code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG} \
+        code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}-amd64 \
+        code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}-arm64
+      docker manifest annotate code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG} \
+        code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}-amd64 --arch amd64
+      docker manifest annotate code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG} \
+        code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}-arm64 --arch arm64
+      docker manifest push code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}
+      # Only on tag pipelines, also bump :latest
+      if [[ -n "$CI_COMMIT_TAG" && "$CI_COMMIT_TAG" != "latest" ]]; then
+        echo "→ Also updating multi-arch manifest ${IMAGE_NAME}:latest"
+        docker manifest create code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:latest \
+          code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}-amd64 \
+          code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}-arm64
+        docker manifest annotate code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:latest \
+          code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}-amd64 --arch amd64
+        docker manifest annotate code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:latest \
+          code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:${DOCKER_TAG}-arm64 --arch arm64
+        docker manifest push code.nap.av.it.pt:5050/ar_vr/bsole-connector/${IMAGE_NAME}:latest
+      fi
+  rules:
+    # Tag pipelines only
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
+      changes:
+        - $DOCKERFILE_PATH/**
+    # Non-main branch pipelines
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+
+# ------------------------------------------------------------------------------
+# 4) MANIFEST JOBS (one per component)
+# ------------------------------------------------------------------------------
+create_manifest_ingestion:
+  <<: *create_manifest
+  variables: { IMAGE_NAME: ingestion, DOCKERFILE_PATH: ingestion }
+  dependencies: [build_ingestion_amd64, build_ingestion_arm64]
+  tags: [amd64]
+create_manifest_core:
+  <<: *create_manifest
+  variables: { IMAGE_NAME: core, DOCKERFILE_PATH: core }
+  dependencies: [build_core_amd64, build_core_arm64]
+  tags: [amd64]
+create_manifest_query:
+  <<: *create_manifest
+  variables: { IMAGE_NAME: query, DOCKERFILE_PATH: query }
+  dependencies: [build_query_amd64, build_query_arm64]
+  tags: [amd64]
+
+# ------------------------------------------------------------------------------
+# 5) RELEASE (GitLab Releases) on Tag pipelines only
+# ------------------------------------------------------------------------------
+release:
+  stage: release
+  image: code.nap.av.it.pt:5050/external-tools/misc-docker-images/curlimages/curl:latest
+  tags: [amd64]
+  before_script:
+    - curl --location --output ~/release-cli "https://gitlab.com/api/v4/projects/gitlab-org%2Frelease-cli/packages/generic/release-cli/latest/release-cli-linux-amd64"
+    - chmod +x ~/release-cli
+  script:
+    - echo "→ Creating GitLab Release for $CI_COMMIT_TAG"
+    - ~/release-cli create \
+        --name "Release $CI_COMMIT_TAG" \
+        --description "Multi-image release $CI_COMMIT_TAG" \
+        --tag-name "$CI_COMMIT_TAG" \
+        --ref "$CI_COMMIT_TAG"
+  rules:
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
+# ------------------------------------------------------------------------------
+# 6) CLEANUP (remove all -amd64 / -arm64 tags) on tags & non-main branches
+# ------------------------------------------------------------------------------
+cleanup:
+  stage: clean
+  image: code.nap.av.it.pt:5050/external-tools/misc-docker-images/alpine:latest
+  tags: [amd64]
+  script:
+    - apk add --no-cache curl bash
+    - curl -LO https://github.com/regclient/regclient/releases/download/v0.6.1/regctl-linux-amd64
+    - chmod +x regctl-linux-amd64 && mv regctl-linux-amd64 /usr/local/bin/regctl
+    - regctl registry login code.nap.av.it.pt:5050 -u "${CI_USER}" -p "${CI_TOKEN}"
+    - echo "→ Cleaning up tags for $CI_COMMIT_TAG or non-main branch $CI_COMMIT_BRANCH"
+    - |
+      for IMAGE in ingestion core query; do
+        echo "→ Cleaning up $IMAGE"
+        regctl tag rm code.nap.av.it.pt:5050/ar_vr/bsole-connector/$IMAGE:${DOCKER_TAG}-amd64 || true
+        regctl tag rm code.nap.av.it.pt:5050/ar_vr/bsole-connector/$IMAGE:${DOCKER_TAG}-arm64 || true
+        regctl tag rm code.nap.av.it.pt:5050/ar_vr/bsole-connector/$IMAGE:latest-amd64 || true
+        regctl tag rm code.nap.av.it.pt:5050/ar_vr/bsole-connector/$IMAGE:latest-arm64 || true
+      done
+  rules:
+    # Tag pipelines only
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
+    # Non-main branch pipelines
+    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+

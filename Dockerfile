@@ -1,5 +1,5 @@
 # Stage 1: Build dependencies
-FROM node:20-bookworm-slim AS builder
+FROM code.nap.av.it.pt:5050/external-tools/misc-docker-images/node:20-bookworm-slim AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -27,7 +27,7 @@ RUN python3 -m venv /opt/venv \
     && pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: Runtime image
-FROM node:20-bookworm-slim AS runtime
+FROM code.nap.av.it.pt:5050/external-tools/misc-docker-images/node:20-bookworm-slim AS runtime
 
 # Install runtime dependencies only (no build tools)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -41,13 +41,6 @@ WORKDIR /app
 
 # Copy Node.js dependencies from builder
 COPY --from=builder /app/node_modules ./node_modules
-
-# Patch BrilliantSole SDK to export NobleConnectionManager
-# This is required for Linux kernel 6.x support with custom Noble
-# CRITICAL: Must set noblePeripheral AFTER service discovery but BEFORE emitting events
-RUN sed -i 's/RangeHelper, scanner/RangeHelper, NobleConnectionManager, scanner/' \
-    /app/node_modules/brilliantsole/build/brilliantsole.node.module.js && \
-    echo "✓ Patched SDK to export NobleConnectionManager"
 
 # Copy Python virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
