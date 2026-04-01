@@ -24,7 +24,7 @@ class ZenohManager extends EventEmitter {
         this._child = null; // python sidecar
         this._childReady = false;
         // UDS transport (MessagePack) only
-        this._udsPath = options.udsPath || process.env.ZENOH_UDS_PATH || "/tmp/bsole-zenoh.sock";
+        this._udsPath = options.udsPath || process.env.ZENOH_UDS_PATH || require("path").join(require("os").tmpdir(), "bsole-zenoh.sock");
         this._udsSocket = null;
     }
 
@@ -42,8 +42,9 @@ class ZenohManager extends EventEmitter {
     async _startDenoBridge() { // historical name; starts the Python sidecar
         const script = path.resolve(__dirname, "../tools/zenoh_py_publisher.py");
         const fs = require("fs");
-        let pyBin = "python3";
-        const venvPyBin = path.resolve(__dirname, "../venv/bin/python3");
+        const isWin = process.platform === "win32";
+        let pyBin = isWin ? "python" : "python3";
+        const venvPyBin = path.resolve(__dirname, isWin ? "../venv/Scripts/python.exe" : "../venv/bin/python3");
         if (fs.existsSync(venvPyBin)) {
             pyBin = venvPyBin;
         }

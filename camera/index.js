@@ -558,16 +558,18 @@ async function main() {
             }
             await triggerPicture();
 
-            process.on("SIGINT", async () => {
+            const shutdown = async () => {
                 console.log("\nShutting down camera...");
                 device.autoPicture = false;
                 if (zenoh) {
                     try { await zenoh.stop(); } catch {}
                 }
-                await device.disconnect();
+                try { await device.disconnect(); } catch {}
                 if (viewerServer) try { viewerServer.stop(); } catch {}
                 process.exit(0);
-            });
+            };
+            process.on("SIGINT", shutdown);
+            process.on("SIGTERM", shutdown);
         }
     } catch (err) {
         console.error("Failed to start camera capture:", err);

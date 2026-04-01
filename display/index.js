@@ -119,6 +119,12 @@ async function main() {
         try { await zenoh.stop(); } catch {}
     }
     
+    const shutdown = async () => {
+        try { await device.disconnect(); } catch {}
+        process.exit(0);
+    };
+    process.on("SIGINT", shutdown);
+    process.on("SIGTERM", shutdown);
     console.log("Done. Press Ctrl+C to exit.");
 }
 

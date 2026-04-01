@@ -119,6 +119,7 @@ async function main() {
       if (device) {
         await device.stopMicrophone();
         console.log('Microphone stopped.');
+        try { await device.disconnect(); } catch {}
       }
       console.log(`\nTotal duration: ${totalDuration.toFixed(1)}s`);
       console.log(`Total samples: ${sampleCount}`);
