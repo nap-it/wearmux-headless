@@ -1,12 +1,12 @@
 // On-device TFLite inference runner
 const fs = require("fs");
 const path = require("path");
-const { DeviceManager } = require("../utils/device-manager");
+const { DeviceManager } = require("../../utils/device-manager");
 
 async function main() {
     // --- Configuration from environment ---
     const modelPath = path.resolve(
-        __dirname, "..",
+        __dirname, "../..",
         process.env.TFLITE_MODEL || "sensors/model/model.tflite"
     );
     const modelName = process.env.TFLITE_NAME || path.basename(modelPath, ".tflite");
@@ -40,6 +40,12 @@ async function main() {
     console.log("Connecting to device...");
     const device = await new DeviceManager().connectToDevice();
     console.log("✓ Connected!\n");
+
+    if (!device.isTfliteAvailable) {
+        console.error("❌ Device firmware does not support TFLite inference.");
+        console.error("   Flash a firmware build with TFLite support and try again.");
+        process.exit(1);
+    }
 
     // --- Cursor helpers ---
     const clearLines = (n) => {
@@ -135,7 +141,9 @@ async function main() {
     // --- Graceful shutdown ---
     process.on("SIGINT", async () => {
         console.log("\n🛑 Disabling inferencing...");
-        try { await device.disableTfliteInferencing(); } catch {}
+        try { await device.disableTfliteInferencing(); } catch (err) {
+            console.warn("[tflite-runner] Failed to disable inferencing:", err?.message || err);
+        }
         process.exit(0);
     });
 }

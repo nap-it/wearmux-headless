@@ -1,7 +1,7 @@
 // Real-time ML gesture detection using live sensor data
-const MLGestureDetector = require('./lib/ml-gesture-detector');
-const { SensorManager } = require('./lib/sensor-manager');
-const { DeviceManager } = require('../utils/device-manager');
+const MLGestureDetector = require('../lib/ml/ml-gesture-detector');
+const { SensorManager } = require('../lib/sensor-manager');
+const { DeviceManager } = require('../../utils/device-manager');
 
 async function main() {
     const detector = new MLGestureDetector(30);

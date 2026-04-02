@@ -1,12 +1,6 @@
-// Load the inferencing WebAssembly module
-const Module = require('./model/edge-impulse-standalone');
-const fs = require('fs');
-
-// Classifier module
+// Edge Impulse Classifier module for programmatic use
+let Module = null;
 let classifierInitialized = false;
-Module.onRuntimeInitialized = function() {
-    classifierInitialized = true;
-};
 
 class EdgeImpulseClassifier {
     _initialized = false;
@@ -15,6 +9,14 @@ class EdgeImpulseClassifier {
         if (classifierInitialized === true) return Promise.resolve();
 
         return new Promise((resolve, reject) => {
+            try {
+                if (!Module) {
+                    Module = require('../../model/edge-impulse-standalone');
+                }
+            } catch (err) {
+                return reject(new Error('Edge Impulse model not found: ' + err.message));
+            }
+
             Module.onRuntimeInitialized = () => {
                 classifierInitialized = true;
                 let ret = Module.init();
@@ -23,6 +25,11 @@ class EdgeImpulseClassifier {
                 }
                 resolve();
             };
+
+            // If it's already initialized by someone else or quickly
+            if (Module.calledRun) {
+                 Module.onRuntimeInitialized();
+            }
         });
     }
 
@@ -64,10 +71,6 @@ class EdgeImpulseClassifier {
         return this._convertToOrdinaryJsObject(Module.get_properties(), Module.emcc_classification_properties_t.prototype);
     }
 
-    /**
-     * Override the threshold on a learn block (you can find thresholds via getProperties().thresholds)
-     * @param {*} obj, e.g. { id: 16, min_score: 0.2 } to set min. object detection threshold to 0.2 for block ID 16
-     */
     setThreshold(obj) {
         const ret = Module.set_threshold(obj);
         if (!ret.success) {
@@ -88,9 +91,8 @@ class EdgeImpulseClassifier {
         let newObj = { };
         for (const key of Object.getOwnPropertyNames(prototype)) {
             const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
-
             if (descriptor && typeof descriptor.get === 'function') {
-                newObj[key] = emboundObj[key]; // Evaluates the getter and assigns as an own property.
+                newObj[key] = emboundObj[key];
             }
         }
         return newObj;
@@ -98,12 +100,10 @@ class EdgeImpulseClassifier {
 
     _fillResultStruct(ret) {
         let props = Module.get_properties();
-
         let jsResult = {
             anomaly: ret.anomaly,
             results: []
         };
-
         for (let cx = 0; cx < ret.size(); cx++) {
             let c = ret.get(cx);
             if (props.model_type === 'object_detection' || props.model_type === 'constrained_object_detection') {
@@ -114,7 +114,6 @@ class EdgeImpulseClassifier {
             }
             c.delete();
         }
-
         if (props.has_object_tracking) {
             jsResult.object_tracking_results = [];
             for (let cx = 0; cx < ret.object_tracking_size(); cx++) {
@@ -123,7 +122,6 @@ class EdgeImpulseClassifier {
                 c.delete();
             }
         }
-
         if (props.has_visual_anomaly_detection) {
             jsResult.visual_ad_max = ret.visual_ad_max;
             jsResult.visual_ad_mean = ret.visual_ad_mean;
@@ -134,7 +132,6 @@ class EdgeImpulseClassifier {
                 c.delete();
             }
         }
-
         if (ret.freeform) {
             jsResult.freeform = [];
             for (let ix = 0; ix < ret.freeform.size(); ix++) {
@@ -146,31 +143,9 @@ class EdgeImpulseClassifier {
                 jsResult.freeform.push(arr);
             }
         }
-
         ret.delete();
-
         return jsResult;
     }
 }
 
-if (!process.argv[2]) {
-    return console.error('Requires one parameter (a comma-separated list of raw features, or a file pointing at raw features)');
-}
-
-let features = process.argv[2];
-if (fs.existsSync(features)) {
-    features = fs.readFileSync(features, 'utf-8');
-}
-
-// Initialize the classifier, and invoke with the argument passed in
-let classifier = new EdgeImpulseClassifier();
-classifier.init().then(async () => {
-    let project = classifier.getProjectInfo();
-    console.log('Running inference for', project.owner + ' / ' + project.name + ' (version ' + project.deploy_version + ')');
-
-    let result = classifier.classify(features.trim().split(',').map(n => Number(n)));
-
-    console.log(result);
-}).catch(err => {
-    console.error('Failed to initialize classifier', err);
-});
+module.exports = EdgeImpulseClassifier;

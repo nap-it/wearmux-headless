@@ -8,7 +8,7 @@ const {
 } = require("./lib/motion-sensors");
 const { TapDetectorHandler } = require("./lib/activity-sensors");
 const { DeviceManager } = require("../utils/device-manager");
-const MLGestureDetector = require("./lib/ml-gesture-detector");
+const MLGestureDetector = require("./lib/ml/ml-gesture-detector");
 
 async function getDevice() {
     const device = await new DeviceManager().connectToDevice();

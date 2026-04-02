@@ -13,7 +13,7 @@
  * Output: JSON files compatible with Edge Impulse data ingestion
  */
 
-const { DeviceManager } = require("../utils/device-manager");
+const { DeviceManager } = require("../../utils/device-manager");
 const fs = require("fs");
 const path = require("path");
 
@@ -21,7 +21,7 @@ const path = require("path");
 const CONFIG = {
     sampleRate: 20, // Hz - matches Edge Impulse examples
     sensors: ["acceleration", "orientation"], // Sensors to collect
-    outputDir: path.join(__dirname, "../training-data"),
+    outputDir: path.join(__dirname, "../../training-data"),
 };
 
 // Parse command line arguments

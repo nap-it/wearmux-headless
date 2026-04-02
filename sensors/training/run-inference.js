@@ -1,6 +1,6 @@
 // This script demonstrates how to use the Edge Impulse WebAssembly (Node.js, SIMD) model
 
-const ei = require('./model/edge-impulse-standalone.js');
+const ei = require('../model/edge-impulse-standalone.js');
 
 async function runInference(inputFeatures) {
     // inputFeatures: Array of numbers, e.g. [accX, accY, accZ, heading, pitch, roll, ...]

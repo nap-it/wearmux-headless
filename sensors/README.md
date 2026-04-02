@@ -17,16 +17,22 @@ node real-time-ml-gesture.js
 
 ## Available Scripts
 
-**index.js** - Monitor all enabled sensors with real-time display 
+**index.js** - Monitor all enabled sensors with real-time display
 **index-menu.js** - Interactive menu
-**collect-training-data.js** - Collect labeled sensor data for ML training  
-**real-time-ml-gesture.js** - Standalone ML gesture recognition
+**pressure-map.js** - Per-sensor pressure visualization
+
+**inference/real-time-ml-gesture.js** - Real-time ML gesture recognition
+**inference/tflite-runner.js** - On-device TFLite inference
+
+**training/collect-training-data.js** - Collect labeled sensor data for ML training
+**training/run-inference.js** - Test Edge Impulse WASM model inference
+**training/run-impulse.js** - Edge Impulse classifier wrapper
 
 ## ML Gesture Recognition
 
 1. Collect training data:
    ```bash
-   node collect-training-data.js --label nod --duration 60
+   node training/collect-training-data.js --label nod --duration 60
    ```
 
 2. Train model at [Edge Impulse Studio](https://studio.edgeimpulse.com/)
@@ -35,7 +41,7 @@ node real-time-ml-gesture.js
 
 4. Run inference:
    ```bash
-   node real-time-ml-gesture.js
+   node inference/real-time-ml-gesture.js
    ```
 
 ## Configuration
@@ -62,12 +68,24 @@ DEBUG=1 node index.js
 
 ## Directory Structure
 
-```
+```text
 sensors/
-├── index.js                     # Basic monitoring
-├── index-menu.js                # Interactive menu
-├── collect-training-data.js     # ML data collection
-├── real-time-ml-gesture.js      # ML inference
-├── lib/                         # Sensor utilities
-└── model/                       # Edge Impulse models
+├── index.js                        # General sensor monitoring
+├── index-menu.js                   # Interactive menu
+├── pressure-map.js                 # Pressure map visualization
+├── inference/                      # Runtime ML inference scripts
+│   ├── real-time-ml-gesture.js     # Real-time Edge Impulse gesture detection
+│   └── tflite-runner.js            # On-device TFLite inference
+├── training/                       # ML development scripts
+│   ├── collect-training-data.js    # Collect labeled sensor data
+│   ├── run-inference.js            # Test Edge Impulse WASM inference
+│   └── run-impulse.js              # Edge Impulse classifier wrapper
+├── lib/                            # Sensor utilities
+│   ├── sensor-manager.js           # Core sensor management
+│   ├── motion-sensors.js           # Motion sensor handlers
+│   ├── activity-sensors.js         # Activity sensor handlers
+│   └── ml/                         # ML-specific utilities
+│       ├── ml-gesture-detector.js  # Gesture detection logic
+│       └── ei-classifier.js        # Edge Impulse classifier wrapper
+└── model/                          # Model files (.tflite, Edge Impulse WASM)
 ```
