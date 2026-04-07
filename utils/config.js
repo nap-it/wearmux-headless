@@ -1,10 +1,8 @@
-// Configuration utilities for environment variables and settings
-const path = require("path");
 class Config {
     static getAudioConfig() {
         return {
-            sampleRate: parseInt(process.env.SAMPLE_RATE || "16000", 10),
-            channels: parseInt(process.env.CHANNELS || "1", 10),
+            sampleRate: Number.parseInt(process.env.SAMPLE_RATE || "16000", 10),
+            channels: Number.parseInt(process.env.CHANNELS || "1", 10),
             sampleFormat: process.env.SAMPLE_FORMAT || "s16le",
             audioBitrate: process.env.AUDIO_BITRATE || "64k",
         };
@@ -43,18 +41,48 @@ class Config {
 
     static getSensorConfig() {
         return {
-            sampleRate: parseInt(process.env.SENSOR_SAMPLE_RATE || "50", 10),
+            sampleRate: Number.parseInt(process.env.SENSOR_SAMPLE_RATE || "50", 10),
             enabledSensors: process.env.ENABLED_SENSORS
                 ? process.env.ENABLED_SENSORS.split(",").map((s) => s.trim())
                 : [],
+            acceleration: Number.parseInt(process.env.ACCELERATION_RATE || "50", 10),
+            gyroscope: Number.parseInt(process.env.GYROSCOPE_RATE || "50", 10),
+            magnetometer: Number.parseInt(process.env.MAGNETOMETER_RATE || "50", 10),
+            orientation: Number.parseInt(process.env.ORIENTATION_RATE || "50", 10),
+            tapDetector: Number.parseInt(process.env.TAP_DETECTOR_RATE || "5", 10),
+        };
+    }
 
-            // Individual sensor rates
-            acceleration: parseInt(process.env.ACCELERATION_RATE || "50", 10),
-            gyroscope: parseInt(process.env.GYROSCOPE_RATE || "50", 10),
-            magnetometer: parseInt(process.env.MAGNETOMETER_RATE || "50", 10),
-            orientation: parseInt(process.env.ORIENTATION_RATE || "50", 10),
-            // Only include rates actually supported by availableSensors; keep multiples of 5
-            tapDetector: parseInt(process.env.TAP_DETECTOR_RATE || "5", 10),
+    // Returns per-sensor rates (null when env var is not set) with Hz/"Xms" parsing.
+    static getSensorRates() {
+        const parseRateHz = (raw) => {
+            if (!raw) return null;
+            if (/ms$/i.test(raw)) {
+                const v = Number(raw.replace(/ms$/i, ""));
+                if (Number.isFinite(v) && v > 0) return Math.min(200, 1000 / v);
+                return null;
+            }
+            const hz = Number(raw);
+            return Number.isFinite(hz) && hz > 0 ? hz : null;
+        };
+        const rate = (envVar) => {
+            const hz = parseRateHz(process.env[envVar]);
+            if (hz === null) return null;
+            return Math.max(5, Math.round(hz / 5) * 5);
+        };
+        return {
+            acceleration: rate("ACCELERATION_RATE"),
+            gravity: rate("GRAVITY_RATE"),
+            linearAcceleration: rate("LINEAR_ACCELERATION_RATE"),
+            gyroscope: rate("GYROSCOPE_RATE"),
+            magnetometer: rate("MAGNETOMETER_RATE"),
+            gameRotation: rate("GAME_ROTATION_RATE"),
+            rotation: rate("ROTATION_RATE"),
+            orientation: rate("ORIENTATION_RATE"),
+            activity: rate("ACTIVITY_RATE"),
+            stepCounter: rate("STEP_COUNTER_RATE"),
+            tapDetector: rate("TAP_DETECTOR_RATE"),
+            pressure: rate("PRESSURE_RATE"),
         };
     }
 
@@ -100,7 +128,7 @@ class Config {
 
         return {
             // Output directory is optional; if not set, images won't be saved automatically
-            outputDir: (process.env.CAMERA_OUTPUT_DIR && process.env.CAMERA_OUTPUT_DIR.trim()) || undefined,
+            outputDir: process.env.CAMERA_OUTPUT_DIR?.trim() || undefined,
             autoPicture: process.env.CAMERA_AUTO_PICTURE === "1",
             imageFormat: s(process.env.CAMERA_IMAGE_FORMAT) || "jpg",
             quality: n(process.env.CAMERA_QUALITY), // legacy alias

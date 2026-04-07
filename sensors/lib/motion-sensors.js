@@ -122,40 +122,15 @@ class OrientationHandler extends MotionSensorHandler {
         super("orientation");
     }
 
-    // Get pitch, roll, yaw from orientation data
-    getEulerAngles() {
-        if (!this.data || !this.data.orientation) return null;
-
-        const { pitch, roll, yaw } = this.data.orientation;
-        return { pitch, roll, yaw };
-    }
-
-    // Convert to degrees
-    getEulerAnglesDegrees() {
-        const angles = this.getEulerAngles();
-        if (!angles) return null;
-
-        return {
-            pitch: (angles.pitch * 180) / Math.PI,
-            roll: (angles.roll * 180) / Math.PI,
-            yaw: (angles.yaw * 180) / Math.PI,
-        };
-    }
-
-    // Check if device is in portrait orientation
+    // SDK orientation event already delivers { heading, pitch, roll } in degrees
     isPortrait(threshold = 45) {
-        const angles = this.getEulerAnglesDegrees();
-        if (!angles) return null;
-
-        return Math.abs(angles.pitch) < threshold;
+        if (!this.data?.orientation) return null;
+        return Math.abs(this.data.orientation.pitch) < threshold;
     }
 
-    // Check if device is in landscape orientation
     isLandscape(threshold = 45) {
-        const angles = this.getEulerAnglesDegrees();
-        if (!angles) return null;
-
-        return Math.abs(angles.roll) < threshold;
+        if (!this.data?.orientation) return null;
+        return Math.abs(this.data.orientation.roll) < threshold;
     }
 }
 
