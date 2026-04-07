@@ -1,4 +1,5 @@
 // Simple sensor monitoring
+const { Config } = require("../utils/config");
 const { SensorManager } = require("./lib/sensor-manager");
 const {
     AccelerometerHandler,
@@ -32,7 +33,7 @@ async function main() {
                 await new Promise(r => setTimeout(r, 50));
             }
             console.log('✓ ML gesture detector ready\n');
-        } catch (error) {
+        } catch {
             console.log('⚠ ML model not found, gesture detection disabled\n');
             mlDetector = null;
         }
@@ -44,40 +45,12 @@ async function main() {
 
     const deviceSide = process.env.DEVICE_SIDE || null; // 'left' | 'right' | null
     const sensorManager = new SensorManager(device, { enabledSensors, side: deviceSide });
-    // Apply per-sensor device rates from env (supports Hz number or '<ms>ms')
-    const roundTo5 = (hz) => Math.max(5, Math.round(hz / 5) * 5);
-    const parseRateHz = (raw) => {
-        if (!raw) return null;
-        if (/ms$/i.test(raw)) {
-            const v = Number(raw.replace(/ms$/i, ""));
-            if (!Number.isNaN(v) && v > 0) return Math.min(200, 1000 / v);
-            return null;
-        }
-        const hz = Number(raw);
-        return !Number.isNaN(hz) && hz > 0 ? hz : null;
-    };
-    const rateEnv = {
-        acceleration: process.env.ACCELERATION_RATE,
-        gravity: process.env.GRAVITY_RATE,
-        linearAcceleration: process.env.LINEAR_ACCELERATION_RATE,
-        gyroscope: process.env.GYROSCOPE_RATE,
-        magnetometer: process.env.MAGNETOMETER_RATE,
-        gameRotation: process.env.GAME_ROTATION_RATE,
-        rotation: process.env.ROTATION_RATE,
-        orientation: process.env.ORIENTATION_RATE,
-        activity: process.env.ACTIVITY_RATE,
-        stepCounter: process.env.STEP_COUNTER_RATE,
-        tapDetector: process.env.TAP_DETECTOR_RATE,
-        pressure: process.env.PRESSURE_RATE,
-    };
-    for (const [sensor, raw] of Object.entries(rateEnv)) {
-        const hz = parseRateHz(raw);
-        if (!hz) continue;
-        const rate = roundTo5(hz);
-        if (!enabledSensors.includes(sensor)) {
-            try { sensorManager.enableSensor(sensor, rate); } catch { }
-        } else {
+    for (const [sensor, rate] of Object.entries(Config.getSensorRates())) {
+        if (rate === null) continue;
+        if (enabledSensors.includes(sensor)) {
             try { sensorManager.setSensorRate(sensor, rate); } catch { }
+        } else {
+            try { sensorManager.enableSensor(sensor, rate); } catch { }
         }
     }
 
@@ -105,7 +78,7 @@ async function main() {
     let latestAcc = null;
     if (mlDetector) {
         mlDetector.on('ml-gesture', (result) => {
-            if (result && result.results && result.results.length > 0) {
+            if (result?.results?.length > 0) {
                 const top = result.results.reduce((a, b) => (a.value > b.value ? a : b));
                 if (top.value > 0.7) { // Only show high-confidence gestures
                     showGesture(`🤖 ML: ${top.label} (${(top.value * 100).toFixed(1)}%)`);
@@ -130,8 +103,7 @@ async function main() {
         // Add gesture line if present
         const allLines = [...lines];
         if (gestureMessage) {
-            allLines.push(''); // Empty line separator
-            allLines.push(gestureMessage);
+            allLines.push('', gestureMessage);
         }
         // Print new lines
         process.stdout.write(allLines.join('\n') + '\n');
@@ -265,7 +237,10 @@ async function main() {
             const { heading, pitch, roll } = data.data.orientation;
             const isPortrait = orientHandler.isPortrait();
             const isLandscape = orientHandler.isLandscape();
-            const line = `🧭 Orient: H:${heading.toFixed(1)}° P:${pitch.toFixed(1)}° R:${roll.toFixed(1)}° | ${isPortrait ? "Portrait" : isLandscape ? "Landscape" : "Tilted"}`;
+            let orientation = "Tilted";
+            if (isPortrait) orientation = "Portrait";
+            else if (isLandscape) orientation = "Landscape";
+            const line = `🧭 Orient: H:${heading.toFixed(1)}° P:${pitch.toFixed(1)}° R:${roll.toFixed(1)}° | ${orientation}`;
             sensorLines[sensorLineMap.orientation] = line;
             updateDisplay(sensorLines.filter(Boolean));
 

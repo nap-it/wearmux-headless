@@ -104,7 +104,6 @@ class SensorManager extends EventEmitter {
             );
         }
 
-        // Configure ONLY the enabled sensors (device rates remain at defaults to satisfy SDK)
         this.enabledSensors.forEach((sensorType) => {
             if (this.availableSensors.hasOwnProperty(sensorType)) {
                 this.sensorConfiguration[sensorType] =
@@ -114,22 +113,14 @@ class SensorManager extends EventEmitter {
             }
         });
 
-        // Set all other sensors to 0 (disabled)
-        Object.keys(this.availableSensors).forEach((sensorType) => {
-            if (!this.enabledSensors.includes(sensorType)) {
-                this.sensorConfiguration[sensorType] = 0; // Disable sensor
-            }
-        });
-
         console.log(
             "[SensorManager] Configuring sensors:",
             this.sensorConfiguration
         );
         console.log("[SensorManager] Enabled sensors:", this.enabledSensors);
 
-        // Apply sensor configuration to device
         if (typeof this.device.setSensorConfiguration === "function") {
-            this.device.setSensorConfiguration(this.sensorConfiguration);
+            this.device.setSensorConfiguration(this.sensorConfiguration, true);
         } else {
             console.warn(
                 "[SensorManager] Device does not support setSensorConfiguration"
@@ -199,9 +190,9 @@ class SensorManager extends EventEmitter {
         });
 
         if (process.env.DEBUG === '1') {
-            console.log("[SensorManager] Adding listener for sensorData (DEBUG mode)");
             this.device.addEventListener("sensorData", (event) => {
-                console.log("[SensorManager] Generic sensorData received:", event);
+                const { sensorType, timestamp, isLast } = event.message || {};
+                console.log(`[SensorManager] sensorData: ${sensorType} t=${timestamp} last=${isLast}`);
                 this.emit("sensorData", event);
             });
         }
