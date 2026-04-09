@@ -1,6 +1,6 @@
 const { DeviceManager } = require("../../utils/device-manager");
 const { SensorManager } = require("../../sensors/lib/sensor-manager");
-const MLGestureDetector = require("../../sensors/lib/ml-gesture-detector");
+const MLGestureDetector = require("../../sensors/lib/ml/ml-gesture-detector");
 const { TextDisplay } = require("../../display/lib/text-display");
 const { GLASSES_CONFIG } = require("./constants");
 

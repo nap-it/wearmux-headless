@@ -47,7 +47,7 @@ jest.mock('../../../sensors/lib/sensor-manager', () => ({
   SensorManager: class MockSensorManager { }
 }));
 
-jest.mock('../../../sensors/lib/ml-gesture-detector', () => {
+jest.mock('../../../sensors/lib/ml/ml-gesture-detector', () => {
   return class MockMLGestureDetector {
     constructor() {
       this.initialized = true;
