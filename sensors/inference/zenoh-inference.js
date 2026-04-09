@@ -14,110 +14,148 @@ const { ZenohSubscriber } = require("../../utils/zenoh-subscriber");
 const { ZenohManager } = require("../../utils/zenoh-manager");
 const MLGestureDetector = require("../lib/ml/ml-gesture-detector");
 
-const SUB_EXPRESSION = process.env.ZENOH_SUB_EXPRESSION || "bsole/sensors/acceleration";
-const PUB_PREFIX = process.env.ZENOH_PUB_PREFIX || "bsole/inference";
-const WINDOW_SIZE = Number(process.env.ML_WINDOW_SIZE) || 30;
-const CONFIDENCE_THRESHOLD = Number(process.env.ML_CONFIDENCE) || 0.7;
-const DEBUG = process.env.DEBUG === "1";
-
-const RESULT_TOPIC = `${PUB_PREFIX}/gesture`;
-
-async function main() {
-    // --- Init ML model ---
-    console.log("Loading ML gesture detector...");
-    const detector = new MLGestureDetector(WINDOW_SIZE);
-    while (!detector.initialized && !detector.initError) {
-        await new Promise((r) => setTimeout(r, 50));
+// Extract acceleration from a Zenoh sensor message payload.
+// Returns null if the payload doesn't carry acceleration data.
+function extractAcceleration(payload) {
+    const acc = payload?.message?.acceleration;
+    if (!acc || typeof acc.x !== "number" || typeof acc.y !== "number" || typeof acc.z !== "number") {
+        return null;
     }
-    if (detector.initError) {
-        console.error("Failed to load ML model:", detector.initError.message);
-        process.exit(1);
+    return acc;
+}
+
+// Pick the highest-scoring label from inference results.
+// Returns null on empty/missing results.
+function topResult(results) {
+    if (!results?.length) return null;
+    return results.reduce((a, b) => (a.value > b.value ? a : b));
+}
+
+// Build the payload published to bsole/inference/gesture.
+function buildInferencePayload(top, results) {
+    return {
+        ts: Date.now(),
+        gesture: top.label,
+        confidence: top.value,
+        results,
+    };
+}
+
+class ZenohInferencePipeline {
+    constructor(options = {}) {
+        this.pubPrefix = options.pubPrefix || "bsole/inference";
+        this.subExpression = options.subExpression || "bsole/sensors/acceleration";
+        this.windowSize = options.windowSize || 30;
+        this.confidenceThreshold = options.confidenceThreshold || 0.7;
+        this.debug = options.debug || false;
+
+        this.resultTopic = `${this.pubPrefix}/gesture`;
+        this.sampleCount = 0;
+        this._lastResultLines = 0;
+
+        this.detector = options.detector || new MLGestureDetector(this.windowSize);
+        this.publisher = options.publisher || new ZenohManager({ keyPrefix: this.pubPrefix });
+        this.subscriber = options.subscriber || new ZenohSubscriber({ keyExpression: this.subExpression });
     }
-    console.log("ML model ready");
 
-    // --- Init Zenoh publisher ---
-    const publisher = new ZenohManager({ keyPrefix: PUB_PREFIX });
-    publisher.on("error", (e) => console.warn("[publisher]", e?.message || e));
-    await publisher.start();
-    console.log(`Publishing results to '${RESULT_TOPIC}'`);
-
-    // --- Init Zenoh subscriber ---
-    const subscriber = new ZenohSubscriber({ keyExpression: SUB_EXPRESSION });
-    subscriber.on("error", (e) => console.warn("[subscriber]", e?.message || e));
-
-    let sampleCount = 0;
-    let lastResultLines = 0;
-
-    subscriber.on("message", ({ key, payload }) => {
-        // Payload shape from ZenohManager.attachToSensorManager:
-        //   { ts, sensor, device, message: { acceleration: { x, y, z } } }
-        const acc = payload?.message?.acceleration;
+    // Handle one Zenoh message. Extracts acc and feeds detector.
+    handleMessage({ payload }) {
+        const acc = extractAcceleration(payload);
         if (!acc) return;
 
-        sampleCount++;
-        if (DEBUG) {
-            console.log(`[sample #${sampleCount}] acc x=${acc.x?.toFixed(3)} y=${acc.y?.toFixed(3)} z=${acc.z?.toFixed(3)}`);
+        this.sampleCount++;
+        if (this.debug) {
+            console.log(`[sample #${this.sampleCount}] acc x=${acc.x.toFixed(3)} y=${acc.y.toFixed(3)} z=${acc.z.toFixed(3)}`);
         }
 
-        detector.addSample({ accX: acc.x, accY: acc.y, accZ: acc.z });
-    });
+        this.detector.addSample({ accX: acc.x, accY: acc.y, accZ: acc.z });
+    }
 
-    // --- Handle inference results ---
-    detector.on("ml-gesture", async (result) => {
-        if (!result?.results?.length) return;
+    // Handle one ML inference result. Publishes if above threshold.
+    async handleInferenceResult(result) {
+        const top = topResult(result?.results);
+        if (!top) return;
 
-        const top = result.results.reduce((a, b) => (a.value > b.value ? a : b));
-
-        if (DEBUG) {
-            const bar = result.results
+        if (!this.debug) {
+            if (this._lastResultLines > 0) {
+                process.stdout.write(`\x1b[${this._lastResultLines}A\x1b[0J`);
+            }
+            process.stdout.write(`Gesture: ${top.label} (${(top.value * 100).toFixed(1)}%)\n`);
+            this._lastResultLines = 1;
+        } else {
+            const bar = [...result.results]
                 .sort((a, b) => b.value - a.value)
                 .map((r) => `  ${r.label.padEnd(12)} ${(r.value * 100).toFixed(1)}%`)
                 .join("\n");
             console.log(`\n[inference]\n${bar}`);
-        } else {
-            // In-place display
-            if (lastResultLines > 0) {
-                process.stdout.write(`\x1b[${lastResultLines}A\x1b[0J`);
-            }
-            const line = `Gesture: ${top.label} (${(top.value * 100).toFixed(1)}%)`;
-            process.stdout.write(line + "\n");
-            lastResultLines = 1;
         }
 
-        if (top.value < CONFIDENCE_THRESHOLD) return;
+        if (top.value < this.confidenceThreshold) return;
 
-        const inferencePayload = {
-            ts: Date.now(),
-            gesture: top.label,
-            confidence: top.value,
-            results: result.results,
-        };
-
+        const inferencePayload = buildInferencePayload(top, result.results);
         try {
-            await publisher.publish(RESULT_TOPIC, inferencePayload);
-            if (DEBUG) console.log(`Published '${top.label}' to ${RESULT_TOPIC}`);
+            await this.publisher.publish(this.resultTopic, inferencePayload);
+            if (this.debug) console.log(`Published '${top.label}' to ${this.resultTopic}`);
         } catch (e) {
             console.warn("[publish error]", e?.message || e);
         }
+    }
+
+    async start() {
+        console.log("Loading ML gesture detector...");
+        while (!this.detector.initialized && !this.detector.initError) {
+            await new Promise((r) => setTimeout(r, 50));
+        }
+        if (this.detector.initError) {
+            throw new Error(`Failed to load ML model: ${this.detector.initError.message}`);
+        }
+        console.log("ML model ready");
+
+        this.publisher.on("error", (e) => console.warn("[publisher]", e?.message || e));
+        await this.publisher.start();
+        console.log(`Publishing results to '${this.resultTopic}'`);
+
+        this.subscriber.on("error", (e) => console.warn("[subscriber]", e?.message || e));
+        this.subscriber.on("message", (msg) => this.handleMessage(msg));
+        this.detector.on("ml-gesture", (result) => this.handleInferenceResult(result));
+
+        await this.subscriber.start();
+        console.log(`Subscribed to '${this.subExpression}'`);
+        console.log(`Confidence threshold: ${this.confidenceThreshold}`);
+        console.log("Waiting for sensor data... Press Ctrl+C to stop\n");
+    }
+
+    async stop() {
+        try { await this.subscriber.stop(); } catch { }
+        try { await this.publisher.stop(); } catch { }
+    }
+}
+
+async function main() {
+    const pipeline = new ZenohInferencePipeline({
+        pubPrefix: process.env.ZENOH_PUB_PREFIX || "bsole/inference",
+        subExpression: process.env.ZENOH_SUB_EXPRESSION || "bsole/sensors/acceleration",
+        windowSize: Number(process.env.ML_WINDOW_SIZE) || 30,
+        confidenceThreshold: Number(process.env.ML_CONFIDENCE) || 0.7,
+        debug: process.env.DEBUG === "1",
     });
 
-    await subscriber.start();
-    console.log(`Subscribed to '${SUB_EXPRESSION}'`);
-    console.log(`Confidence threshold: ${CONFIDENCE_THRESHOLD}`);
-    console.log("Waiting for sensor data... Press Ctrl+C to stop\n");
-
-    // --- Graceful shutdown ---
     const shutdown = async () => {
         console.log("\nShutting down...");
-        try { await subscriber.stop(); } catch { }
-        try { await publisher.stop(); } catch { }
+        await pipeline.stop();
         process.exit(0);
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
+
+    await pipeline.start();
 }
 
-main().catch((err) => {
-    console.error("Fatal:", err.message);
-    process.exit(1);
-});
+if (require.main === module) {
+    main().catch((err) => {
+        console.error("Fatal:", err.message);
+        process.exit(1);
+    });
+}
+
+module.exports = { ZenohInferencePipeline, extractAcceleration, topResult, buildInferencePayload };
