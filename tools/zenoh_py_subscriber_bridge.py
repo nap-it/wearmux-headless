@@ -36,6 +36,10 @@ def main():
         sys.exit(1)
 
     conf = zenoh.Config.from_file(config_file)
+    router_override = os.environ.get("ZENOH_ROUTER")
+    if router_override:
+        conf.insert_json5("connect/endpoints", f'["{router_override}"]')
+        print(f"[SubscriberBridge] router override: {router_override}", flush=True)
     session = zenoh.open(conf)
 
     # Connect to UDS

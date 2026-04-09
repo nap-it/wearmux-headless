@@ -10,6 +10,10 @@ if not os.path.exists(CONFIG_FILE):
     sys.exit(1)
 
 conf = zenoh.Config.from_file(CONFIG_FILE)
+_router_override = os.environ.get("ZENOH_ROUTER")
+if _router_override:
+    conf.insert_json5("connect/endpoints", f'["{_router_override}"]')
+    print(f"[PythonSidecar] router override: {_router_override}", file=sys.stderr)
 session = zenoh.open(conf)
 print(f"[PythonSidecar] loaded zenoh peer config: {CONFIG_FILE}", file=sys.stderr)
 
