@@ -198,30 +198,13 @@ class DeviceManager extends EventEmitter {
     async _waitForScanningAvailable(scanner, timeoutMs = 20000) {
         if (scanner.isScanningAvailable) return true;
         debugLog("[DeviceManager] Waiting for BLE adapter to be ready...");
-        return new Promise((resolve) => {
-            let done = false;
-            const cleanup = () => {
-                if (done) return;
-                done = true;
-                clearInterval(iv);
-                clearTimeout(to);
-                try { scanner.removeEventListener?.("isScanningAvailable", onEvt); } catch { }
-            };
-            const onEvt = (ev) => {
-                const avail = ev?.message?.isScanningAvailable ?? ev?.isScanningAvailable ?? scanner.isScanningAvailable;
-                debugLog("[DeviceManager] BLE event, available:", avail);
-                if (avail) { cleanup(); resolve(true); }
-            };
-            try { scanner.addEventListener?.("isScanningAvailable", onEvt); } catch { }
-            const iv = setInterval(() => {
-                debugLog("[DeviceManager] Checking... isScanningAvailable:", scanner.isScanningAvailable);
-                if (scanner.isScanningAvailable) { cleanup(); resolve(true); }
-            }, 300);
-            const to = setTimeout(() => {
+        return Promise.race([
+            scanner.waitForEvent("scanningAvailable").then(() => true),
+            new Promise((resolve) => setTimeout(() => {
                 debugLog("[DeviceManager] Timeout waiting for BLE adapter");
-                cleanup(); resolve(false);
-            }, timeoutMs);
-        });
+                resolve(false);
+            }, timeoutMs)),
+        ]);
     }
 
     _setupEventListeners() {
@@ -253,12 +236,17 @@ class DeviceManager extends EventEmitter {
     }
 
     async _waitForConnection() {
-        const timeoutAt = Date.now() + 20000;
-        while (Date.now() < timeoutAt) {
-            if (this.device?.isConnected) return;
-            await new Promise((r) => setTimeout(r, 300));
-        }
-        throw new Error("Timeout waiting for device connection");
+        if (this.device?.isConnected) return;
+        await Promise.race([
+            (async () => {
+                while (!this.device?.isConnected) {
+                    await this.device.waitForEvent("isConnected");
+                }
+            })(),
+            new Promise((_, reject) =>
+                setTimeout(() => reject(new Error("Timeout waiting for device connection")), 20000)
+            ),
+        ]);
     }
 
     getDevice() {
