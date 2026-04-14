@@ -200,18 +200,6 @@ class GlassesController {
         await this.glasses.showMessage(message, { color: this.config.COLOR_CONFIRM });
         await new Promise(r => setTimeout(r, this.config.CONFIRMATION_DISPLAY_MS));
 
-        if (this.clearDisplayTimeout) {
-            clearTimeout(this.clearDisplayTimeout);
-        }
-
-        this.clearDisplayTimeout = setTimeout(async () => {
-            if (this.state === STATE.IDLE) {
-                await this.glasses.clearDisplay();
-                console.log("Display cleared after confirmation");
-            }
-            this.clearDisplayTimeout = null;
-        }, 5000);
-
         await this.glasses.clearDisplay();
         this.state = STATE.IDLE;
         console.log("Ready for next interaction\n");

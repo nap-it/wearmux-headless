@@ -160,6 +160,10 @@ class SensorManager extends EventEmitter {
         // Client-side emission throttle based on *_RATE envs (Hz or ms)
         const lastEmitMs = {};
 
+        // Track device listeners so stop() can remove them (prevents duplicate
+        // registration if startSensors is called again after stop).
+        this._deviceListeners = this._deviceListeners || new Map();
+
         // Motion sensor events
         const motionSensors = [
             "acceleration",
@@ -175,8 +179,7 @@ class SensorManager extends EventEmitter {
         const allSensors = [...motionSensors, "activity", "stepCounter", "pressure", "tapDetector"];
         allSensors.forEach((sensorType) => {
             if (this.enabledSensors.includes(sensorType)) {
-                this.device.addEventListener(sensorType, (event) => {
-                    // Client-side throttle if configured
+                const handler = (event) => {
                     const interval = this.outputThrottleMs[sensorType];
                     if (interval) {
                         const now = Date.now();
@@ -185,17 +188,29 @@ class SensorManager extends EventEmitter {
                         lastEmitMs[sensorType] = now;
                     }
                     this.emit(sensorType, this.side ? { ...event, side: this.side } : event);
-                });
+                };
+                this.device.addEventListener(sensorType, handler);
+                this._deviceListeners.set(sensorType, handler);
             }
         });
 
         if (process.env.DEBUG === '1') {
-            this.device.addEventListener("sensorData", (event) => {
+            const sensorDataHandler = (event) => {
                 const { sensorType, timestamp, isLast } = event.message || {};
                 console.log(`[SensorManager] sensorData: ${sensorType} t=${timestamp} last=${isLast}`);
                 this.emit("sensorData", event);
-            });
+            };
+            this.device.addEventListener("sensorData", sensorDataHandler);
+            this._deviceListeners.set("sensorData", sensorDataHandler);
         }
+    }
+
+    _removeDeviceListeners() {
+        if (!this._deviceListeners || typeof this.device?.removeEventListener !== "function") return;
+        for (const [sensorType, handler] of this._deviceListeners.entries()) {
+            try { this.device.removeEventListener(sensorType, handler); } catch { }
+        }
+        this._deviceListeners.clear();
     }
 
     async stop() {
@@ -208,6 +223,7 @@ class SensorManager extends EventEmitter {
         } finally {
             this.zenoh = null;
         }
+        this._removeDeviceListeners();
         this.isMonitoring = false;
     }
 

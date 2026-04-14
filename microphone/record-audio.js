@@ -157,6 +157,7 @@ async function main() {
   const fileSizeKB = (wavBuffer.length / 1024).toFixed(2);
   console.log(`[INFO] Saved. (${fileSizeKB} KB)\n`);
 
+  try { await device.disconnect(); } catch (e) { console.warn("[record-audio] disconnect failed:", e?.message || e); }
   process.exit(0);
 }
 
