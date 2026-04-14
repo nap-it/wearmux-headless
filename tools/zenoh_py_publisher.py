@@ -47,7 +47,15 @@ def handle_msg(obj):
     if obj.get("declare") and "json" not in obj:
         _pub_for(key)
         return
-    payload = json.dumps(obj.get("json", None), indent=4)
+    raw = obj.get("json", None)
+    # JS side pre-serializes to a JSON string; accept that directly.
+    # Keep legacy object path for backward compat.
+    if isinstance(raw, str):
+        payload = raw
+    elif isinstance(raw, (bytes, bytearray)):
+        payload = raw.decode("utf-8", "replace")
+    else:
+        payload = json.dumps(raw, indent=4, default=str)
     _pub_for(key).put(payload)
 
 try:

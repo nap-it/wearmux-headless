@@ -8,8 +8,9 @@ const {
 } = require("./lib/motion-sensors");
 const { TapDetectorHandler } = require("./lib/activity-sensors");
 const { DeviceManager } = require("../utils/device-manager");
+const { Config } = require("../utils/config");
 const readline = require("readline");
-const MLGestureDetector = require("./lib/ml-gesture-detector");
+const MLGestureDetector = require("./lib/ml/ml-gesture-detector");
 
 async function getDevice() {
     const device = await new DeviceManager().connectToDevice();
@@ -80,14 +81,12 @@ async function main() {
     let mlDetector = null;
 
     if (enableMLGestures || process.env.ML_GESTURES === '1') {
+        mlDetector = new MLGestureDetector(30);
+        console.log('\nInitializing ML gesture detector...');
         try {
-            mlDetector = new MLGestureDetector(30);
-            console.log('\nInitializing ML gesture detector...');
-            while (!mlDetector.initialized) {
-                await new Promise(r => setTimeout(r, 50));
-            }
+            await mlDetector.ready();
             console.log('✓ ML gesture detector ready');
-        } catch (error) {
+        } catch {
             console.log('⚠ ML model not found, gesture detection disabled');
             mlDetector = null;
         }
@@ -101,36 +100,12 @@ async function main() {
 
     const sensorManager = new SensorManager(device, { enabledSensors: enabledSensors });
 
-    // Apply per-sensor device rates from env (supports Hz number or '<ms>ms')
-    const roundTo5 = (hz) => Math.max(5, Math.round(hz / 5) * 5);
-    const parseRateHz = (raw) => {
-        if (!raw) return null;
-        if (/ms$/i.test(raw)) {
-            const v = Number(raw.replace(/ms$/i, ""));
-            if (!Number.isNaN(v) && v > 0) return Math.min(200, 1000 / v);
-            return null;
-        }
-        const hz = Number(raw);
-        return !Number.isNaN(hz) && hz > 0 ? hz : null;
-    };
-    const rateEnv = {
-        acceleration: process.env.ACCELERATION_RATE,
-        gyroscope: process.env.GYROSCOPE_RATE,
-        magnetometer: process.env.MAGNETOMETER_RATE,
-        orientation: process.env.ORIENTATION_RATE,
-        linearAcceleration: process.env.LINEAR_ACCELERATION_RATE,
-        gameRotation: process.env.GAME_ROTATION_RATE,
-        rotation: process.env.ROTATION_RATE,
-        tapDetector: process.env.TAP_DETECTOR_RATE,
-    };
-    for (const [sensor, raw] of Object.entries(rateEnv)) {
-        const hz = parseRateHz(raw);
-        if (!hz) continue;
-        const rate = roundTo5(hz);
-        if (!enabledSensors.includes(sensor)) {
-            try { sensorManager.enableSensor(sensor, rate); } catch { }
-        } else {
+    for (const [sensor, rate] of Object.entries(Config.getSensorRates())) {
+        if (rate === null) continue;
+        if (enabledSensors.includes(sensor)) {
             try { sensorManager.setSensorRate(sensor, rate); } catch { }
+        } else {
+            try { sensorManager.enableSensor(sensor, rate); } catch { }
         }
     }
 

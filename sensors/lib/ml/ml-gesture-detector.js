@@ -10,15 +10,23 @@ class MLGestureDetector extends EventEmitter {
         this.classifier = new EdgeImpulseClassifier();
         this.initialized = false;
         this.initError = null;
-        this._init().catch(err => {
-            this.initError = err;
-            console.warn("ML initialization failed:", err.message);
-        });
+        this._readyPromise = this._init();
     }
 
     async _init() {
-        await this.classifier.init();
-        this.initialized = true;
+        try {
+            await this.classifier.init();
+            this.initialized = true;
+        } catch (err) {
+            this.initError = err;
+            console.warn("ML initialization failed:", err.message);
+            throw err;
+        }
+    }
+
+    // Returns a promise that resolves when the classifier is ready, or rejects on init failure.
+    ready() {
+        return this._readyPromise;
     }
 
     // Call this with each new sensor reading

@@ -26,12 +26,10 @@ async function main() {
     let mlDetector = null;
 
     if (enableMLGestures) {
+        mlDetector = new MLGestureDetector(30); // 30 samples for 1.5s at 20Hz
+        console.log('Initializing ML gesture detector...');
         try {
-            mlDetector = new MLGestureDetector(30); // 30 samples for 1.5s at 20Hz
-            console.log('Initializing ML gesture detector...');
-            while (!mlDetector.initialized) {
-                await new Promise(r => setTimeout(r, 50));
-            }
+            await mlDetector.ready();
             console.log('✓ ML gesture detector ready\n');
         } catch {
             console.log('⚠ ML model not found, gesture detection disabled\n');

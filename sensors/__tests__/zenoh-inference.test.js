@@ -24,6 +24,7 @@ jest.mock("../lib/ml/ml-gesture-detector", () => {
         emitter.initialized = true;
         emitter.initError = null;
         emitter.addSample = jest.fn();
+        emitter.ready = jest.fn().mockResolvedValue();
         return emitter;
     });
 });

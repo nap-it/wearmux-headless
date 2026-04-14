@@ -103,11 +103,10 @@ class ZenohInferencePipeline {
 
     async start() {
         console.log("Loading ML gesture detector...");
-        while (!this.detector.initialized && !this.detector.initError) {
-            await new Promise((r) => setTimeout(r, 50));
-        }
-        if (this.detector.initError) {
-            throw new Error(`Failed to load ML model: ${this.detector.initError.message}`);
+        try {
+            await this.detector.ready();
+        } catch (e) {
+            throw new Error(`Failed to load ML model: ${e.message}`);
         }
         console.log("ML model ready");
 

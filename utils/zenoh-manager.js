@@ -167,7 +167,10 @@ class ZenohManager extends EventEmitter {
 
     async publish(key, payload) {
         if (!this._udsSocket) throw new Error("UDS socket is not connected");
-        const buf = Buffer.from(msgpack.encode({ key, json: payload }));
+        // Pre-serialize JSON on the JS side: msgpack would turn any Buffer field
+        // into Python bytes, which json.dumps can't handle in the sidecar.
+        const jsonStr = this._serialize(payload);
+        const buf = Buffer.from(msgpack.encode({ key, json: jsonStr }));
         const ok = this._udsSocket.write(buf);
         if (!ok) await new Promise((resolve) => this._udsSocket.once("drain", resolve));
         return;
