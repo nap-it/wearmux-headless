@@ -47,18 +47,21 @@ async function main() {
 
     // Wait for IP address
     const ipReady = new Promise((resolve, reject) => {
-        const timeout = setTimeout(
-            () => reject(new Error("Timed out waiting for WiFi IP address (30s)")),
-            30_000
-        );
         const onIp = (event) => {
             const ip = event.message?.ipAddress;
             if (ip) {
-                clearTimeout(timeout);
-                device.removeEventListener("ipAddress", onIp);
+                cleanup();
                 resolve(ip);
             }
         };
+        const cleanup = () => {
+            clearTimeout(timeout);
+            device.removeEventListener("ipAddress", onIp);
+        };
+        const timeout = setTimeout(() => {
+            cleanup();
+            reject(new Error("Timed out waiting for WiFi IP address (30s)"));
+        }, 30_000);
         device.addEventListener("ipAddress", onIp);
     });
 

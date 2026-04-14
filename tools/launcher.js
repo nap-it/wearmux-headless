@@ -38,7 +38,10 @@ function acquireLauncherLock() {
 
     try {
       fs.unlinkSync(LOCK_PATH);
-    } catch {}
+    } catch (unlinkErr) {
+      console.error(`[launcher] failed to remove stale lock ${LOCK_PATH}: ${unlinkErr?.message || unlinkErr}`);
+      return false;
+    }
 
     return acquireLauncherLock();
   }

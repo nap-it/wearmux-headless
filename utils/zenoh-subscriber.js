@@ -84,6 +84,9 @@ class ZenohSubscriber extends EventEmitter {
                 });
             });
 
+            // Clean up stale socket file from a prior crash
+            try { require("fs").rmSync(this._udsPath, { force: true }); } catch { }
+
             server.listen(this._udsPath, () => {
                 this._udsServer = server;
                 resolve();
@@ -123,17 +126,31 @@ class ZenohSubscriber extends EventEmitter {
             this._childReady = false;
         });
 
-        // Wait for readiness
-        await new Promise((resolve) => {
+        // Wait for readiness; reject if the process dies before signalling ready
+        await new Promise((resolve, reject) => {
             const onData = (chunk) => {
-                const txt = chunk.toString();
-                if (txt.includes("[SubscriberBridge] READY")) {
-                    child.stdout.off("data", onData);
+                if (chunk.toString().includes("[SubscriberBridge] READY")) {
+                    cleanup();
                     this._childReady = true;
                     resolve();
                 }
             };
+            const onExit = (code) => {
+                cleanup();
+                reject(new Error(`Python subscriber exited before READY (code=${code})`));
+            };
+            const onError = (err) => {
+                cleanup();
+                reject(err);
+            };
+            const cleanup = () => {
+                child.stdout.off("data", onData);
+                child.off("exit", onExit);
+                child.off("error", onError);
+            };
             child.stdout.on("data", onData);
+            child.once("exit", onExit);
+            child.once("error", onError);
         });
     }
 

@@ -81,6 +81,7 @@ async function main() {
 
     process.on("SIGINT", async () => {
         await sensorManager.stop();
+        try { await device.disconnect(); } catch (e) { console.warn("[pressure-map] disconnect failed:", e?.message || e); }
         process.exit(0);
     });
 }
