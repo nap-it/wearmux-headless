@@ -72,7 +72,7 @@ class TrainingDataCollector {
             sensorConfiguration[sensor] = CONFIG.sampleRate;
         });
         
-        await this.device.setSensorConfiguration(sensorConfiguration);
+        await this.device.setSensorConfiguration(sensorConfiguration, true);
         
         // Setup event listeners
         this._setupListeners();

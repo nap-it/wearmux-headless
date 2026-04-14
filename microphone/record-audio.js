@@ -75,7 +75,7 @@ async function main() {
     sampleRate: args.sampleRate,
     bitDepth: args.bitDepth
   });
-  await device.setSensorConfiguration({ microphone: 5 });
+  await device.setSensorConfiguration({ microphone: 5 }, true);
   console.log('[STATUS] Microphone configured.\n');
 
   // Recording buffer

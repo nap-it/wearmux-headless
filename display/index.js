@@ -115,12 +115,12 @@ async function main() {
                     pixelDepth: dcfg.pixelDepth,
                 },
             });
-        } catch {}
-        try { await zenoh.stop(); } catch {}
+        } catch (e) { console.warn("[Display] publish failed:", e?.message || e); }
+        try { await zenoh.stop(); } catch (e) { console.warn("[Display] zenoh.stop failed:", e?.message || e); }
     }
-    
+
     const shutdown = async () => {
-        try { await device.disconnect(); } catch {}
+        try { await device.disconnect(); } catch (e) { console.warn("[Display] disconnect failed:", e?.message || e); }
         process.exit(0);
     };
     process.on("SIGINT", shutdown);

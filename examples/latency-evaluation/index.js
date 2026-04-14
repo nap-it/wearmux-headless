@@ -57,17 +57,6 @@ async function toImageBuffer(cameraImage) {
     return null;
 }
 
-async function waitForConnected(device) {
-    if (device.connectionStatus === "connected" || device.isConnected) return;
-    await new Promise((resolve) => {
-        const handler = () => {
-            device.removeEventListener("connected", handler);
-            resolve();
-        };
-        device.addEventListener("connected", handler);
-    });
-}
-
 async function prepareCamera(device, config, cameraRate) {
     const availableSettings = new Set(
         Array.isArray(device.availableCameraConfigurationTypes) && device.availableCameraConfigurationTypes.length > 0
@@ -219,7 +208,7 @@ async function main() {
         console.log("Connecting to device...");
         deviceManager = new DeviceManager();
         device = await deviceManager.connectToDevice();
-        await waitForConnected(device);
+        if (!device.isConnected) await device.waitForEvent("connected");
         console.log(`Connected to device: ${device.name || device.id}`);
 
         if (!device.hasCamera) {

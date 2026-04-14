@@ -30,12 +30,8 @@ async function main() {
         // You can trigger actions here based on result
     });
 
-    // Wait for initialization
-    while (!detector.initialized) {
-        process.stdout.write('.');
-        await new Promise(r => setTimeout(r, 50));
-    }
-    console.log('\nMLGestureDetector initialized.');
+    await detector.ready();
+    console.log('MLGestureDetector initialized.');
 
     // Connect to device
     console.log('Connecting to device...');

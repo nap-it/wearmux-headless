@@ -119,7 +119,7 @@ async function main() {
       if (device) {
         await device.stopMicrophone();
         console.log('Microphone stopped.');
-        try { await device.disconnect(); } catch {}
+        try { await device.disconnect(); } catch (e) { console.warn("[Microphone] disconnect failed:", e?.message || e); }
       }
       console.log(`\nTotal duration: ${totalDuration.toFixed(1)}s`);
       console.log(`Total samples: ${sampleCount}`);
@@ -190,7 +190,7 @@ async function main() {
   });
 
   // Set sensor rate (5Hz for microphone data packets)
-  await device.setSensorConfiguration({ microphone: 5 });
+  await device.setSensorConfiguration({ microphone: 5 }, true);
 
   console.log('Microphone configured.\n');
 
