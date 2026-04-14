@@ -173,23 +173,30 @@ class DeviceManager extends EventEmitter {
             debugLog("[DeviceManager] discovered:", discoveredDevice?.name || discoveredDevice?.bluetoothId);
             const id = discoveredDevice.bluetoothId || discoveredDevice.id;
             // Register before connectToDevice to avoid a race on fast connections
-            const deviceConnectedPromise = new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
+            let onConnected;
+            let timeout;
+            try {
+                const deviceConnectedPromise = new Promise((resolve, reject) => {
+                    timeout = setTimeout(
+                        () => reject(new Error("Timeout waiting for device to connect")),
+                        20000
+                    );
+                    onConnected = (event) => {
+                        const device = event.message?.device;
+                        if (device?.bluetoothId === id || device?.id === id) {
+                            resolve(device);
+                        }
+                    };
+                    BS.DeviceManager.AddEventListener("deviceConnected", onConnected);
+                });
+                await scanner.connectToDevice(id);
+                this.device = await deviceConnectedPromise;
+            } finally {
+                if (timeout) clearTimeout(timeout);
+                if (onConnected) {
                     try { BS.DeviceManager.RemoveEventListener("deviceConnected", onConnected); } catch { }
-                    reject(new Error("Timeout waiting for device to connect"));
-                }, 20000);
-                const onConnected = (event) => {
-                    const device = event.message?.device;
-                    if (device?.bluetoothId === id || device?.id === id) {
-                        clearTimeout(timeout);
-                        try { BS.DeviceManager.RemoveEventListener("deviceConnected", onConnected); } catch { }
-                        resolve(device);
-                    }
-                };
-                BS.DeviceManager.AddEventListener("deviceConnected", onConnected);
-            });
-            await scanner.connectToDevice(id);
-            this.device = await deviceConnectedPromise;
+                }
+            }
         } finally {
             try { scanner.stopScan(); } catch { }
         }

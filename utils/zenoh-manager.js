@@ -172,8 +172,22 @@ class ZenohManager extends EventEmitter {
         const jsonStr = this._serialize(payload);
         const buf = Buffer.from(msgpack.encode({ key, json: jsonStr }));
         const ok = this._udsSocket.write(buf);
-        if (!ok) await new Promise((resolve) => this._udsSocket.once("drain", resolve));
-        return;
+        if (!ok) {
+            const sock = this._udsSocket;
+            await new Promise((resolve, reject) => {
+                const onDrain = () => { cleanup(); resolve(); };
+                const onError = (e) => { cleanup(); reject(e); };
+                const onClose = () => { cleanup(); reject(new Error("UDS socket closed before drain")); };
+                const cleanup = () => {
+                    sock.off("drain", onDrain);
+                    sock.off("error", onError);
+                    sock.off("close", onClose);
+                };
+                sock.once("drain", onDrain);
+                sock.once("error", onError);
+                sock.once("close", onClose);
+            });
+        }
     }
 
     // Attach all enabled sensors from SensorManager and publish

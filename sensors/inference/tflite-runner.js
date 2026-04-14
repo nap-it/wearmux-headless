@@ -66,16 +66,22 @@ async function main() {
 
     // --- Wait for device to signal ready ---
     const tfliteReady = new Promise((resolve, reject) => {
-        const timeout = setTimeout(
-            () => reject(new Error("Timed out waiting for tfliteIsReady (30s)")),
-            30_000
-        );
-        device.addEventListener("tfliteIsReady", (event) => {
+        let timeout;
+        const handler = (event) => {
             if (event.message?.tfliteIsReady) {
-                clearTimeout(timeout);
+                cleanup();
                 resolve();
             }
-        });
+        };
+        const cleanup = () => {
+            clearTimeout(timeout);
+            device.removeEventListener("tfliteIsReady", handler);
+        };
+        timeout = setTimeout(() => {
+            cleanup();
+            reject(new Error("Timed out waiting for tfliteIsReady (30s)"));
+        }, 30_000);
+        device.addEventListener("tfliteIsReady", handler);
     });
 
     // --- Send configuration + model to device ---

@@ -11,6 +11,9 @@ class MLGestureDetector extends EventEmitter {
         this.initialized = false;
         this.initError = null;
         this._readyPromise = this._init();
+        // Mark as handled so an un-awaited ready() won't crash the process;
+        // consumers still see the rejection when they call ready().
+        this._readyPromise.catch(() => { });
     }
 
     async _init() {
