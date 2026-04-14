@@ -151,10 +151,9 @@ class DisplayManager {
         // Use MTU-based calculation if available, but ensure we don't go smaller than tileMaxPixels
         let maxPixelsPerBitmap;
         if (this.device.mtu && this.device.mtu > 0) {
-            // SDK formula: maxPixelDataLength = mtu - (drawSpriteBitmapCommandHeaderLength + 5)
-            // drawSpriteBitmapCommandHeaderLength = 1 + 2 + 2 + 2 + 2 + 1 + 2 = 12 bytes
-            const drawSpriteBitmapCommandHeaderLength = 12;
-            const maxPixelDataLength = this.device.mtu - (drawSpriteBitmapCommandHeaderLength + 5);
+            // SDK: maxCommandDataLength = mtu - 7, drawBitmapHeaderLength = 13
+            // So max pixel data = mtu - 7 - 13 = mtu - 20
+            const maxPixelDataLength = this.device.mtu - 20;
             const mtuBasedMaxPixels = Math.floor(maxPixelDataLength / pixelsPerByte);
             maxPixelsPerBitmap = Math.max(mtuBasedMaxPixels, this.tileMaxPixels);
             if (process.env.DEBUG === '1') {

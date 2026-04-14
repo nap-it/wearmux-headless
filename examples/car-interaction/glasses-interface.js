@@ -59,9 +59,7 @@ class GlassesInterface {
     // Sensors & ML
     console.log("Initializing ML gesture detector...");
     this.mlDetector = new MLGestureDetector(this.config.ML_WINDOW_SIZE);
-    while (!this.mlDetector.initialized) {
-      await new Promise(r => setTimeout(r, this.config.ML_INIT_POLL_INTERVAL_MS));
-    }
+    await this.mlDetector.ready();
     console.log("ML gesture detector ready");
 
     console.log("Initializing sensors...");

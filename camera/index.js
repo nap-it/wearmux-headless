@@ -200,17 +200,9 @@ async function main() {
         }
         console.log("[OK] Device has camera");
 
-        await new Promise((resolve) => {
-            if (device.connectionStatus === 'connected') {
-                resolve();
-            } else {
-                const handler = () => {
-                    device.removeEventListener('connected', handler);
-                    resolve();
-                };
-                device.addEventListener('connected', handler);
-            }
-        });
+        if (device.connectionStatus !== 'connected') {
+            await device.waitForEvent("connected");
+        }
 
         console.log("Configuring camera...");
 
@@ -221,9 +213,7 @@ async function main() {
         }
 
         const availableCameraConfigTypes = new Set(
-            Array.isArray(device.availableCameraConfigurationTypes) && device.availableCameraConfigurationTypes.length > 0
-                ? device.availableCameraConfigurationTypes
-                : Object.keys(device.cameraConfiguration || {})
+            device.availableCameraConfigurationTypes || []
         );
 
         const requestedCameraConfig = {
@@ -330,8 +320,10 @@ async function main() {
                         latencyMs: bestImage.latency || null,
                         saved: Boolean(outDir),
                     };
-                    await zenoh.publish(`${zenoh.keyPrefix}/image`, meta);
-                    await publishRawImage(bestImage.buffer, meta);
+                    await Promise.all([
+                        zenoh.publish(`${zenoh.keyPrefix}/image`, meta),
+                        publishRawImage(bestImage.buffer, meta),
+                    ]);
                 } catch (e) {
                     debugWarn("[Camera][Zenoh] publish failed:", e?.message || e);
                 }
@@ -468,8 +460,10 @@ async function main() {
                                 latencyMs: cameraImage.latency || null,
                                 saved: Boolean(outDir),
                             };
-                            await zenoh.publish(`${zenoh.keyPrefix}/image`, meta);
-                            await publishRawImage(buffer, meta);
+                            await Promise.all([
+                                zenoh.publish(`${zenoh.keyPrefix}/image`, meta),
+                                publishRawImage(buffer, meta),
+                            ]);
                         } catch (e) {
                             debugWarn("[Camera][Zenoh] publish failed:", e?.message || e);
                         }
@@ -562,10 +556,10 @@ async function main() {
                 console.log("\nShutting down camera...");
                 device.autoPicture = false;
                 if (zenoh) {
-                    try { await zenoh.stop(); } catch {}
+                    try { await zenoh.stop(); } catch (e) { console.warn("[Camera] zenoh.stop failed:", e?.message || e); }
                 }
-                try { await device.disconnect(); } catch {}
-                if (viewerServer) try { viewerServer.stop(); } catch {}
+                try { await device.disconnect(); } catch (e) { console.warn("[Camera] disconnect failed:", e?.message || e); }
+                if (viewerServer) try { viewerServer.stop(); } catch (e) { console.warn("[Camera] viewerServer.stop failed:", e?.message || e); }
                 process.exit(0);
             };
             process.on("SIGINT", shutdown);

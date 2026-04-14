@@ -1,5 +1,3 @@
-const { DeviceManager } = require('../../utils/device-manager');
-
 /**
  * Calculate RMS (Root Mean Square) audio level
  * @param {Float32Array} samples - Audio samples normalized to [-1, 1]
@@ -92,29 +90,9 @@ function formatLevelBar(level, width = 20) {
   return '█'.repeat(filled) + '░'.repeat(empty);
 }
 
-/**
- * Analyze audio samples and return statistics
- * @param {Float32Array} samples - Audio samples
- * @returns {Object} Audio statistics
- */
-function analyzeAudioSamples(samples) {
-  const rms = calculateRMS(samples);
-  const peak = calculatePeak(samples);
-  const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
-
-  return {
-    rms,
-    peak,
-    db,
-    samples: samples.length,
-    duration: 0, // Will be calculated based on sample rate
-  };
-}
-
 module.exports = {
   calculateRMS,
   calculatePeak,
   float32ArrayToWav,
   formatLevelBar,
-  analyzeAudioSamples,
 };
