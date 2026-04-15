@@ -142,6 +142,10 @@ class CarSimulator {
     _handleGestureResponse(payload) {
         if (!this.isWaitingForResponse || !payload || !payload.gesture) return;
 
+        // Synchronously lock out duplicate responses arriving in the same tick
+        // before any await point is reached.
+        this.isWaitingForResponse = false;
+
         const gesture = payload.gesture;
         console.log(`Received gesture response: ${gesture}`);
 
@@ -150,8 +154,6 @@ class CarSimulator {
             this.responseTimeout = null;
         }
 
-        // Store the confirmation promise so _simulateApproach can await it
-        // before starting the next approach cycle.
         this._pendingConfirmation = this._sendConfirmation(gesture);
 
         if (this._responseResolve) {

@@ -106,7 +106,9 @@ class GlassesController {
         this.glasses.startWaitingForGesture();
 
         this.gestureTimeout = setTimeout(() => {
-            this._handleGestureTimeout();
+            this._handleGestureTimeout().catch((err) => {
+                console.error("[GlassesController] gesture timeout handler failed:", err?.message || err);
+            });
         }, this.config.DEFAULT_GESTURE_TIMEOUT_MS);
 
         console.log("Waiting for gesture (nod=yes, shake=no)...");
