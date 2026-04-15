@@ -130,6 +130,12 @@ class CarSimulator {
         if (!responseReceived) {
             console.log("No response (timeout)");
             await this._sendConfirmation(GESTURE_TYPES.TIMEOUT);
+        } else if (this._pendingConfirmation) {
+            // Ensure the confirmation flow finishes before starting the next approach
+            try { await this._pendingConfirmation; } catch (e) {
+                console.error("[CarSimulator] confirmation failed:", e.message);
+            }
+            this._pendingConfirmation = null;
         }
     }
 
@@ -144,7 +150,9 @@ class CarSimulator {
             this.responseTimeout = null;
         }
 
-        this._sendConfirmation(gesture);
+        // Store the confirmation promise so _simulateApproach can await it
+        // before starting the next approach cycle.
+        this._pendingConfirmation = this._sendConfirmation(gesture);
 
         if (this._responseResolve) {
             this._responseResolve(true);

@@ -91,23 +91,18 @@ class NetworkClient {
   }
 
   async cleanup() {
-    try {
-      if (this.subscriber) {
-        await this.subscriber.stop();
-      }
-      if (this.publisher) {
-        await this.publisher.stop();
-      }
-
-      // Cleanup potential orphaned socket files
-      if (fs.existsSync(this.options.pubUdsPath)) {
-        fs.unlinkSync(this.options.pubUdsPath);
-      }
-      if (fs.existsSync(this.options.subUdsPath)) {
-        fs.unlinkSync(this.options.subUdsPath);
-      }
-    } catch (e) {
-      console.error("[NetworkClient] Cleanup error:", e.message);
+    // Run each step independently so a failure in one doesn't orphan the rest
+    if (this.subscriber) {
+      try { await this.subscriber.stop(); }
+      catch (e) { console.error("[NetworkClient] subscriber.stop failed:", e.message); }
+    }
+    if (this.publisher) {
+      try { await this.publisher.stop(); }
+      catch (e) { console.error("[NetworkClient] publisher.stop failed:", e.message); }
+    }
+    for (const p of [this.options.pubUdsPath, this.options.subUdsPath]) {
+      try { fs.rmSync(p, { force: true }); }
+      catch (e) { console.error(`[NetworkClient] rm ${p} failed:`, e.message); }
     }
   }
 }

@@ -70,6 +70,7 @@ class DeviceManager extends EventEmitter {
         // .arrayBuffer(). Wrap ws to patch this.
         if (globalThis.WebSocket === undefined) {
             const WsClass = require("ws");
+            const wrappedMap = new WeakMap();
             class BlobCompatWebSocket extends WsClass {
                 addEventListener(type, listener, options) {
                     if (type !== "message") return super.addEventListener(type, listener, options);
@@ -96,7 +97,18 @@ class DeviceManager extends EventEmitter {
                             listener(event);
                         }
                     };
+                    wrappedMap.set(listener, wrapped);
                     return super.addEventListener(type, wrapped, options);
+                }
+                removeEventListener(type, listener, options) {
+                    if (type !== "message") return super.removeEventListener(type, listener, options);
+                    const wrapped = wrappedMap.get(listener);
+                    if (wrapped) {
+                        wrappedMap.delete(listener);
+                        return super.removeEventListener(type, wrapped, options);
+                    }
+                    // Fallback: listener wasn't registered through this wrapper
+                    return super.removeEventListener(type, listener, options);
                 }
             }
             globalThis.WebSocket = BlobCompatWebSocket;

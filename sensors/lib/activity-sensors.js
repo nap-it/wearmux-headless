@@ -109,7 +109,8 @@ class TapDetectorHandler extends EventEmitter {
                 this.emit("gesture", { type: "triple", timestamp: this.lastUpdate });
                 clearGroup();
             } else {
-                // Let the timer finalize double; start a new group with this tap
+                if (this._groupTimer) clearTimeout(this._groupTimer);
+                this.emit("gesture", { type: "double", timestamp: this.lastUpdate });
                 this._groupCount = 1;
                 this._groupFirstMs = now;
                 scheduleGroupTimeout(this.doubleWindowMs);

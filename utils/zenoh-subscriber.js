@@ -2,6 +2,7 @@
 const EventEmitter = require("events");
 const { spawn } = require("child_process");
 const net = require("net");
+const { Readable } = require("stream");
 const msgpack = require("@msgpack/msgpack");
 const path = require("path");
 
@@ -38,50 +39,35 @@ class ZenohSubscriber extends EventEmitter {
             const server = net.createServer((socket) => {
                 this._udsSocket = socket;
 
-                let buffer = Buffer.alloc(0);
+                // Feed bytes into decodeMultiStream via a Readable — it handles
+                // partial/coalesced msgpack frames across chunk boundaries.
+                const framing = new Readable({ read() { } });
 
-                socket.on("data", (chunk) => {
-                    buffer = Buffer.concat([buffer, chunk]);
-
-                    // Try to decode messages
-                    while (buffer.length > 0) {
-                        try {
-                            const decoded = msgpack.decodeMulti(buffer);
-                            for (const msg of decoded) {
-                                buffer = Buffer.alloc(0); // Reset buffer after successful decode
-
-                                if (msg && msg.key && msg.payload) {
-                                    // Parse JSON payload
-                                    let payload = msg.payload;
-                                    if (typeof payload === "string") {
-                                        try {
-                                            payload = JSON.parse(payload);
-                                        } catch {
-                                            // Keep as string if not JSON
-                                        }
-                                    }
-
-                                    // Emit message event
-                                    this.emit("message", {
-                                        key: msg.key,
-                                        payload: payload,
-                                    });
-                                }
-                            }
-                        } catch (e) {
-                            // Not enough data yet, wait for more
-                            break;
-                        }
-                    }
-                });
-
+                socket.on("data", (chunk) => { framing.push(chunk); });
+                socket.on("end", () => { framing.push(null); });
                 socket.on("error", (err) => {
+                    framing.destroy(err);
                     this.emit("error", new Error(`UDS socket error: ${err.message}`));
                 });
-
                 socket.on("close", () => {
+                    framing.push(null);
                     this._udsSocket = null;
                 });
+
+                (async () => {
+                    try {
+                        for await (const msg of msgpack.decodeMultiStream(framing)) {
+                            if (!msg || !msg.key || !msg.payload) continue;
+                            let payload = msg.payload;
+                            if (typeof payload === "string") {
+                                try { payload = JSON.parse(payload); } catch { /* leave as string */ }
+                            }
+                            this.emit("message", { key: msg.key, payload });
+                        }
+                    } catch (e) {
+                        this.emit("error", new Error(`msgpack decode error: ${e?.message || e}`));
+                    }
+                })();
             });
 
             // Clean up stale socket file from a prior crash
