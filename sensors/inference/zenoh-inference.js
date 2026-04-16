@@ -10,8 +10,7 @@
 //   ML_CONFIDENCE          Minimum confidence to publish a result (default: 0.7)
 //   DEBUG                  Set to 1 for verbose logging
 
-const { ZenohSubscriber } = require("../../utils/zenoh-subscriber");
-const { ZenohManager } = require("../../utils/zenoh-manager");
+const { createPublisher, createSubscriber, selectedTransport } = require("../../utils/transport");
 const MLGestureDetector = require("../lib/ml/ml-gesture-detector");
 
 // Extract acceleration from a Zenoh sensor message payload.
@@ -53,9 +52,21 @@ class ZenohInferencePipeline {
         this.sampleCount = 0;
         this._lastResultLines = 0;
 
+        this.transport = options.transport || selectedTransport();
+        if (this.transport === "none") {
+            // Default to zenoh if no env var is set, so the legacy command still works
+            this.transport = "zenoh";
+        }
+
         this.detector = options.detector || new MLGestureDetector(this.windowSize);
-        this.publisher = options.publisher || new ZenohManager({ keyPrefix: this.pubPrefix });
-        this.subscriber = options.subscriber || new ZenohSubscriber({ keyExpression: this.subExpression });
+        this.publisher = options.publisher || createPublisher({
+            transport: this.transport,
+            keyPrefix: this.pubPrefix,
+        });
+        this.subscriber = options.subscriber || createSubscriber({
+            transport: this.transport,
+            keyExpression: this.subExpression,
+        });
     }
 
     // Handle one Zenoh message. Extracts acc and feeds detector.
@@ -108,7 +119,7 @@ class ZenohInferencePipeline {
         } catch (e) {
             throw new Error(`Failed to load ML model: ${e.message}`);
         }
-        console.log("ML model ready");
+        console.log(`ML model ready (transport: ${this.transport})`);
 
         this.publisher.on("error", (e) => console.warn("[publisher]", e?.message || e));
         await this.publisher.start();

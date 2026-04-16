@@ -65,7 +65,7 @@ class GlassesInterface {
     console.log("Initializing sensors...");
     this.sensorManager = new SensorManager(this.device, {
       enabledSensors: ["acceleration", "orientation"],
-      zenohEnabled: false,
+      publisherEnabled: false,
     });
     this.sensorManager.setSensorRate("acceleration", this.config.DEFAULT_SENSOR_RATE);
     this.sensorManager.setSensorRate("orientation", this.config.DEFAULT_SENSOR_RATE);

@@ -1,9 +1,11 @@
 {
     "dependencies": {
         "@msgpack/msgpack": "^3.0.0",
+        "aedes": "^0.51.3",
         "auto-bind": "^5.0.1",
         "brilliantsole": "^0.0.73",
         "dgram": "^1.0.1",
+        "mqtt": "^5.15.1",
         "opentype.js": "^1.3.4",
         "rgbquant": "^1.1.2",
         "sharp": "^0.34.4",
@@ -26,6 +28,7 @@
         "sensors:inference": "node tools/run-with-config.js sensors/training/run-inference.js",
         "sensors:collect-training": "node tools/run-with-config.js sensors/training/collect-training-data.js",
         "wifi:setup": "node tools/run-with-config.js tools/wifi-setup.js",
+        "mqtt:broker": "node tools/mqtt-broker.js",
         "display": "node tools/run-with-config.js display/index.js",
         "camera": "node tools/run-with-config.js camera/index.js",
         "examples:car-help": "echo 'Car demo (examples/car-interaction):\n  npm run examples:car-demo   # Glasses (demo mode)\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",

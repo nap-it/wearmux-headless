@@ -1,6 +1,6 @@
 // Sensor management for BrilliantSole device sensors
 const EventEmitter = require("events");
-const { ZenohManager } = require("../../utils/zenoh-manager");
+const { createPublisher, selectedTransport } = require("../../utils/transport");
 
 class SensorManager extends EventEmitter {
     /**
@@ -19,20 +19,22 @@ class SensorManager extends EventEmitter {
         this.isMonitoring = false;
         this.sensorConfiguration = {};
         
-        // Zenoh integration controls (env or options)
-        this.zenohEnabled =
-            options.zenohEnabled !== undefined
-                ? Boolean(options.zenohEnabled)
-                : process.env.ZENOH_ENABLE === "1";
-        this.zenohOptions = {
-            keyPrefix: options.zenohKeyPrefix || process.env.ZENOH_KEY_PREFIX || "bsole/sensors",
+        // Transport integration: zenoh or mqtt, auto-selected by env.
+        this.transport = options.transport || selectedTransport();
+        this.publisherEnabled =
+            options.publisherEnabled !== undefined
+                ? Boolean(options.publisherEnabled)
+                : this.transport !== "none";
+        this.publisherOptions = {
+            keyPrefix: options.publisherKeyPrefix || process.env.ZENOH_KEY_PREFIX
+                || process.env.MQTT_KEY_PREFIX || "bsole/sensors",
             prettyJson: true,
         };
-        this.zenohAttachAll =
-            options.zenohAttachAll !== undefined
-                ? Boolean(options.zenohAttachAll)
-                : process.env.ZENOH_ATTACH_ALL !== "0";
-        this.zenoh = null;
+        this.publisherAttachAll =
+            options.publisherAttachAll !== undefined
+                ? Boolean(options.publisherAttachAll)
+                : process.env.PUBLISHER_ATTACH_ALL !== "0" && process.env.ZENOH_ATTACH_ALL !== "0";
+        this.publisher = null;
 
         // Available sensor types with their default device rates (SDK expects multiples of 5).
         // Rate 0 means disabled by default; non-zero means enabled at that rate when included
@@ -62,21 +64,22 @@ class SensorManager extends EventEmitter {
     }
 
     async startSensors() {
-        // If Zenoh is enabled, make sure the sidecar is up and handlers are attached first
-        if (this.zenohEnabled && this.zenohAttachAll) {
+        // If a transport is selected, start the publisher and attach sensors
+        if (this.publisherEnabled && this.publisherAttachAll && this.transport !== "none") {
             try {
-                this.zenoh = new ZenohManager({
-                    keyPrefix: this.zenohOptions.keyPrefix,
-                    prettyJson: this.zenohOptions.prettyJson,
+                this.publisher = createPublisher({
+                    transport: this.transport,
+                    keyPrefix: this.publisherOptions.keyPrefix,
+                    prettyJson: this.publisherOptions.prettyJson,
                 });
-                this.zenoh.on("error", (e) =>
-                    console.warn("[SensorManager][Zenoh]", e?.message || e)
+                this.publisher.on("error", (e) =>
+                    console.warn(`[SensorManager][${this.transport}]`, e?.message || e)
                 );
-                await this.zenoh.start();
-                await this.zenoh.attachToSensorManager(this, { quiet: true });
+                await this.publisher.start();
+                await this.publisher.attachToSensorManager(this, { quiet: true });
             } catch (e) {
                 console.warn(
-                    "[SensorManager] Failed to start Zenoh publisher:",
+                    `[SensorManager] Failed to start ${this.transport} publisher:`,
                     e?.message || e
                 );
             }
@@ -215,13 +218,13 @@ class SensorManager extends EventEmitter {
 
     async stop() {
         try {
-            if (this.zenoh) {
-                await this.zenoh.stop();
+            if (this.publisher) {
+                await this.publisher.stop();
             }
         } catch (e) {
-            console.warn("[SensorManager] Error stopping Zenoh:", e?.message || e);
+            console.warn(`[SensorManager] Error stopping ${this.transport} publisher:`, e?.message || e);
         } finally {
-            this.zenoh = null;
+            this.publisher = null;
         }
         this._removeDeviceListeners();
         this.isMonitoring = false;
