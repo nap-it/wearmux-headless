@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { Config } = require("../utils/config");
 const { DeviceManager } = require("../utils/device-manager");
-const { ZenohManager } = require("../utils/zenoh-manager");
+const { createPublisher, selectedTransport } = require("../utils/transport");
 const { isValidJpeg, hasValidJpegStructure, formatToMime } = require("./lib/image-validator");
 const { ViewerServer } = require("./lib/viewer-server");
 
@@ -66,9 +66,9 @@ async function main() {
     const viewMjpeg = config.camera.viewMjpeg;
     let latestImage = null;
     let viewerServer = null;
-    const zenohEnabled = process.env.ZENOH_ENABLE === "1" && process.env.ZENOH_CAMERA_ENABLE !== "0";
-    const zenoh = zenohEnabled
-        ? new ZenohManager({
+    const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_CAMERA_ENABLE !== "0";
+    const zenoh = publisherEnabled
+        ? createPublisher({
             keyPrefix: process.env.ZENOH_CAMERA_KEY_PREFIX || "bsole/camera",
             udsPath: process.env.ZENOH_CAMERA_UDS_PATH || `/tmp/bsole-zenoh-camera-${process.pid}.sock`,
         })

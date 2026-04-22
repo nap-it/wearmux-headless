@@ -1,3 +1,7 @@
+// NetworkClient uses the transport factory, which checks env vars to pick a transport.
+// Set one so the factory returns the mocked ZenohManager/ZenohSubscriber below.
+process.env.ZENOH_ENABLE = '1';
+
 const { CarSimulator } = require('../car-simulator');
 const { GlassesController } = require('../glasses-controller');
 

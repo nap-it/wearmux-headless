@@ -16,7 +16,7 @@
 const { DeviceManager } = require('../utils/device-manager');
 const { calculateRMS, calculatePeak, formatLevelBar } = require('./lib/audio-utils');
 const { RtspPublisher } = require("./lib/rtsp-publisher");
-const { ZenohManager } = require("../utils/zenoh-manager");
+const { createPublisher, selectedTransport } = require("../utils/transport");
 
 // Configuration
 const SAMPLE_RATE = Number(process.env.SAMPLE_RATE || "16000");
@@ -44,9 +44,9 @@ function normalizeRtspPublishUrl(url) {
 async function main() {
   console.log('BrilliantSole Frame - Microphone Streaming\n');
 
-  const zenohEnabled = process.env.ZENOH_ENABLE === "1" && process.env.ZENOH_MIC_ENABLE !== "0";
-  const zenoh = zenohEnabled
-    ? new ZenohManager({
+  const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_MIC_ENABLE !== "0";
+  const zenoh = publisherEnabled
+    ? createPublisher({
         keyPrefix: process.env.ZENOH_MIC_KEY_PREFIX || "bsole/microphone",
         udsPath: process.env.ZENOH_MIC_UDS_PATH || `/tmp/bsole-zenoh-mic-${process.pid}.sock`,
       })

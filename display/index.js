@@ -2,7 +2,7 @@
 const { DisplayManager } = require("./lib/display-manager");
 const { Config } = require("../utils/config");
 const { DeviceManager } = require("../utils/device-manager");
-const { ZenohManager } = require("../utils/zenoh-manager");
+const { createPublisher, selectedTransport } = require("../utils/transport");
 
 async function getDevice() {
     const device = await new DeviceManager().connectToDevice();
@@ -38,9 +38,9 @@ async function main() {
     console.log("Connecting to device...");
     const device = await getDevice();
 
-    const zenohEnabled = process.env.ZENOH_ENABLE === "1" && process.env.ZENOH_DISPLAY_ENABLE !== "0";
-    const zenoh = zenohEnabled
-        ? new ZenohManager({
+    const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_DISPLAY_ENABLE !== "0";
+    const zenoh = publisherEnabled
+        ? createPublisher({
             keyPrefix: process.env.ZENOH_DISPLAY_KEY_PREFIX || "bsole/display",
             udsPath: process.env.ZENOH_DISPLAY_UDS_PATH || `/tmp/bsole-zenoh-display-${process.pid}.sock`,
         })

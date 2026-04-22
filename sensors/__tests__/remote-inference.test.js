@@ -1,4 +1,4 @@
-const { ZenohInferencePipeline, extractAcceleration, topResult, buildInferencePayload } = require("../inference/zenoh-inference");
+const { RemoteInferencePipeline, extractAcceleration, topResult, buildInferencePayload } = require("../inference/remote-inference");
 
 jest.mock("../../utils/zenoh-subscriber", () => ({
     ZenohSubscriber: jest.fn().mockImplementation(() => ({
@@ -108,11 +108,11 @@ describe("buildInferencePayload", () => {
     });
 });
 
-// ── ZenohInferencePipeline.handleMessage ──────────────────────────────────
+// ── RemoteInferencePipeline.handleMessage ──────────────────────────────────
 
-describe("ZenohInferencePipeline.handleMessage", () => {
+describe("RemoteInferencePipeline.handleMessage", () => {
     function makePipeline(opts = {}) {
-        return new ZenohInferencePipeline({ confidenceThreshold: 0.7, ...opts });
+        return new RemoteInferencePipeline({ confidenceThreshold: 0.7, ...opts });
     }
 
     test("feeds valid acceleration to detector", () => {
@@ -151,11 +151,11 @@ describe("ZenohInferencePipeline.handleMessage", () => {
     });
 });
 
-// ── ZenohInferencePipeline.handleInferenceResult ──────────────────────────
+// ── RemoteInferencePipeline.handleInferenceResult ──────────────────────────
 
-describe("ZenohInferencePipeline.handleInferenceResult", () => {
+describe("RemoteInferencePipeline.handleInferenceResult", () => {
     function makePipeline(opts = {}) {
-        return new ZenohInferencePipeline({ confidenceThreshold: 0.7, debug: true, ...opts });
+        return new RemoteInferencePipeline({ confidenceThreshold: 0.7, debug: true, ...opts });
     }
 
     test("publishes when top result meets threshold", async () => {

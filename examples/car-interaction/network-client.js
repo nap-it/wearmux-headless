@@ -1,9 +1,8 @@
-const { ZenohManager } = require("../../utils/zenoh-manager");
-const { ZenohSubscriber } = require("../../utils/zenoh-subscriber");
+const { createPublisher, createSubscriber } = require("../../utils/transport");
 const fs = require('fs');
 
 /**
- * Wraps Zenoh Publisher and Subscriber logic into a single Network Client
+ * Wraps pub/sub logic for the selected transport (zenoh or mqtt) into a single client.
  */
 class NetworkClient {
   /**
@@ -29,19 +28,18 @@ class NetworkClient {
   }
 
   async start() {
-    // Initialize Zenoh publisher
-    this.publisher = new ZenohManager({
+    this.publisher = createPublisher({
       keyPrefix: this.options.pubPrefix,
       udsPath: this.options.pubUdsPath,
     });
-
+    if (!this.publisher) throw new Error("No transport enabled (set MQTT_ENABLE=1 or ZENOH_ENABLE=1)");
     await this.publisher.start();
 
-    // Initialize Zenoh subscriber
-    this.subscriber = new ZenohSubscriber({
+    this.subscriber = createSubscriber({
       keyExpression: this.options.subExpression,
       udsPath: this.options.subUdsPath,
     });
+    if (!this.subscriber) throw new Error("No transport enabled (set MQTT_ENABLE=1 or ZENOH_ENABLE=1)");
 
     this.subscriber.on("message", (msg) => {
       if (this.onMessageCallback) {

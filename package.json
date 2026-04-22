@@ -24,7 +24,7 @@
         "sensors:pressure-map": "node tools/run-with-config.js sensors/pressure-map.js",
         "sensors:ml-gesture": "node tools/run-with-config.js sensors/inference/real-time-ml-gesture.js",
         "sensors:tflite": "node tools/run-with-config.js sensors/inference/tflite-runner.js",
-        "sensors:zenoh-inference": "node tools/run-with-config.js sensors/inference/zenoh-inference.js",
+        "sensors:remote-inference": "node tools/run-with-config.js sensors/inference/remote-inference.js",
         "sensors:inference": "node tools/run-with-config.js sensors/training/run-inference.js",
         "sensors:collect-training": "node tools/run-with-config.js sensors/training/collect-training-data.js",
         "wifi:setup": "node tools/run-with-config.js tools/wifi-setup.js",

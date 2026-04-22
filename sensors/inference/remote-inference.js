@@ -1,14 +1,16 @@
-// Distributed inference: subscribe to sensor data from Zenoh, run ML, publish results back
+// Distributed inference: subscribe to sensor data, run ML, publish results back.
+// Transport is auto-selected by env (MQTT_ENABLE=1 or ZENOH_ENABLE=1).
 //
-// RPi side: run sensors/index.js with ZENOH_ENABLE=1  → publishes bsole/sensors/acceleration
-// PC side:  run this script                           → subscribes, classifies, publishes bsole/inference/gesture
+// RPi side: run sensors/index.js with a transport enabled → publishes bsole/sensors/acceleration
+// PC side:  run this script                               → subscribes, classifies, publishes bsole/inference/gesture
 //
 // Env vars:
-//   ZENOH_SUB_EXPRESSION   Key expression to subscribe to (default: bsole/sensors/acceleration)
-//   ZENOH_PUB_PREFIX       Prefix for inference result topics (default: bsole/inference)
-//   ML_WINDOW_SIZE         Sliding window sample count (default: 30 = 1.5s at 20 Hz)
-//   ML_CONFIDENCE          Minimum confidence to publish a result (default: 0.7)
-//   DEBUG                  Set to 1 for verbose logging
+//   MQTT_ENABLE / ZENOH_ENABLE   Select transport (MQTT wins if both set)
+//   ZENOH_SUB_EXPRESSION         Key expression to subscribe to (default: bsole/sensors/acceleration)
+//   ZENOH_PUB_PREFIX             Prefix for inference result topics (default: bsole/inference)
+//   ML_WINDOW_SIZE               Sliding window sample count (default: 30 = 1.5s at 20 Hz)
+//   ML_CONFIDENCE                Minimum confidence to publish a result (default: 0.7)
+//   DEBUG                        Set to 1 for verbose logging
 
 const { createPublisher, createSubscriber, selectedTransport } = require("../../utils/transport");
 const MLGestureDetector = require("../lib/ml/ml-gesture-detector");
@@ -40,7 +42,7 @@ function buildInferencePayload(top, results) {
     };
 }
 
-class ZenohInferencePipeline {
+class RemoteInferencePipeline {
     constructor(options = {}) {
         this.pubPrefix = options.pubPrefix || "bsole/inference";
         this.subExpression = options.subExpression || "bsole/sensors/acceleration";
@@ -142,7 +144,7 @@ class ZenohInferencePipeline {
 }
 
 async function main() {
-    const pipeline = new ZenohInferencePipeline({
+    const pipeline = new RemoteInferencePipeline({
         pubPrefix: process.env.ZENOH_PUB_PREFIX || "bsole/inference",
         subExpression: process.env.ZENOH_SUB_EXPRESSION || "bsole/sensors/acceleration",
         windowSize: Number(process.env.ML_WINDOW_SIZE) || 30,
@@ -168,4 +170,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { ZenohInferencePipeline, extractAcceleration, topResult, buildInferencePayload };
+module.exports = { RemoteInferencePipeline, extractAcceleration, topResult, buildInferencePayload };
