@@ -107,6 +107,16 @@ class SensorManager extends EventEmitter {
             );
         }
 
+        // Filter against sensors the device actually supports (populated after connect)
+        const deviceSensors = this.device.availableSensorTypes;
+        if (Array.isArray(deviceSensors) && deviceSensors.length > 0) {
+            const skipped = this.enabledSensors.filter((s) => !deviceSensors.includes(s));
+            if (skipped.length > 0) {
+                console.log(`[SensorManager] Skipping sensors not available on this device: ${skipped.join(", ")}`);
+            }
+            this.enabledSensors = this.enabledSensors.filter((s) => deviceSensors.includes(s));
+        }
+
         this.enabledSensors.forEach((sensorType) => {
             if (this.availableSensors.hasOwnProperty(sensorType)) {
                 this.sensorConfiguration[sensorType] =

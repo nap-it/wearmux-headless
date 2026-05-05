@@ -7,7 +7,7 @@ Run sensor collection and ML inference on separate machines over Zenoh.
 ```
 RPi (collects)                    PC (classifies)
 ──────────────                    ───────────────
-npm run sensors                   npm run sensors:zenoh-inference
+npm run sensors                   npm run sensors:remote-inference
   ZENOH_ENABLE=1          →           subscribes to bsole/sensors/acceleration
   ZENOH_ROUTER=<pc-ip>:7447           runs MLGestureDetector
   ENABLED_SENSORS=acceleration        publishes to bsole/inference/gesture
@@ -48,7 +48,7 @@ ENABLED_SENSORS=acceleration npm run sensors
 ### 4. PC — run inference
 
 ```bash
-npm run sensors:zenoh-inference
+npm run sensors:remote-inference
 ```
 
 Results above the confidence threshold are published to `bsole/inference/gesture`.
@@ -71,6 +71,6 @@ Results above the confidence threshold are published to `bsole/inference/gesture
 | Script | Description |
 |---|---|
 | `npm run sensors` | Collect sensors (RPi), publishes if `ZENOH_ENABLE=1` |
-| `npm run sensors:zenoh-inference` | Distributed inference (PC) |
+| `npm run sensors:remote-inference` | Distributed inference (PC) |
 | `npm run sensors:ml-gesture` | Local inference — device connected directly |
 | `npm run sensors:tflite` | On-device TFLite inference (Frame only) |
