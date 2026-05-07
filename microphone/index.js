@@ -109,6 +109,7 @@ async function main() {
   async function shutdown({ exitCode = 0, error = null } = {}) {
     if (isShuttingDown) return;
     isShuttingDown = true;
+    setTimeout(() => process.exit(exitCode), 3000).unref();
 
     if (error) {
       console.error(`\n[RTSP] ${error.message}`);

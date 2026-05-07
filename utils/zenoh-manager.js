@@ -92,6 +92,7 @@ class ZenohManager extends EventEmitter {
         }
         await new Promise((resolve, reject) => {
             const sock = net.createConnection({ path: this._udsPath }, () => resolve());
+            sock.setMaxListeners(256); // high-frequency publishes add transient drain/error/close listeners
             sock.on("error", (e) => {
                 this.emit("error", new Error(`[ZenohManager] UDS socket error: ${e?.message || e}`));
                 reject(e);
