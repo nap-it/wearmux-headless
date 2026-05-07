@@ -11,15 +11,25 @@ Usage:
     python3 whisper/runner.py
 
 Environment variables:
-    WHISPER_MODEL         Model size: tiny, base, small, medium, large-v3 (default: tiny)
-    WHISPER_DEVICE        Inference device: cpu, cuda, auto (default: cpu)
-    WHISPER_COMPUTE_TYPE  Quantization: int8, float16, float32 (default: int8)
-    WHISPER_LANGUAGE      Language code e.g. en, pt — empty = auto-detect (default: empty)
-    WHISPER_WINDOW_S      Seconds of audio to accumulate before each inference run (default: 5)
-    WHISPER_PUB_KEY       Zenoh key to publish transcripts to (default: bsole/whisper/transcript)
-    ZENOH_SUB_MIC         Key expression to subscribe to (default: bsole/microphone/raw/**)
-    ZENOH_ROUTER          Zenoh router endpoint override (e.g. tcp/192.168.1.10:7447)
-    DEBUG                 Set to 1 for verbose frame-level logging
+    WHISPER_MODEL               Model size: tiny, base, small, medium, large-v3 (default: tiny)
+    WHISPER_DEVICE              Inference device: cpu, cuda, auto (default: cpu)
+    WHISPER_COMPUTE_TYPE        Quantization: int8, float16, float32 (default: int8)
+    WHISPER_LANGUAGE            Language code e.g. en, pt — empty = auto-detect (default: empty)
+    WHISPER_AUTODETECT_EVERY    Re-detect language every N windows; 0 = detect once then lock (default: 0)
+    WHISPER_AUTODETECT_WINDOWS  Number of windows to sample before locking language via majority vote (default: 3)
+    WHISPER_WINDOW_S            Seconds of audio per inference window (default: 5)
+    WHISPER_OVERLAP             Fraction of window kept as overlap between windows, 0–0.9 (default: 0)
+    WHISPER_WORD_TIMESTAMPS     Set to 1 for per-word timing in transcript payload (default: 0)
+    WHISPER_NO_SPEECH_THRESHOLD Drop windows where all segments exceed this prob (default: 0.6)
+    WHISPER_PUB_KEY             Zenoh key to publish transcripts to (default: bsole/whisper/transcript)
+    ZENOH_SUB_MIC               Key expression to subscribe to (default: bsole/microphone/raw/**)
+    ZENOH_ROUTER                Zenoh router endpoint override (e.g. tcp/192.168.1.10:7447)
+    MQTT_ENABLE                 Set to 1 to use MQTT instead of Zenoh (default: 0)
+    MQTT_BROKER                 MQTT broker host (default: localhost)
+    MQTT_PORT                   MQTT broker port (default: 1883)
+    MQTT_PUB_TOPIC              Topic to publish transcripts to (default: same as WHISPER_PUB_KEY)
+    MQTT_SUB_MIC                Topic filter to subscribe for audio (default: bsole/microphone/raw/#)
+    DEBUG                       Set to 1 for verbose frame-level logging
 """
 
 import os
@@ -28,10 +38,33 @@ import json
 import time
 import base64
 import signal
-import struct
 import queue
 import threading
 from pathlib import Path
+
+# Apply config/whisper.ini before reading env vars so the script works when
+# invoked directly (python3 runner.py) or in Docker without the Node launcher.
+# Existing env vars always take precedence (shell / docker-compose explicit values).
+def _load_ini(path: Path) -> None:
+    try:
+        in_env = False
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("["):
+                in_env = line.lower() == "[env]"
+                continue
+            if not in_env or not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip()
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except OSError:
+        pass
+
+_load_ini(Path(__file__).resolve().parent.parent / "config" / "whisper.ini")
 
 try:
     import numpy as np
@@ -46,33 +79,38 @@ except ImportError:
     sys.exit(1)
 
 try:
-    import zenoh
+    import soxr as _soxr
+    _HAS_SOXR = True
 except ImportError:
-    print(
-        "[whisper-runner] zenoh is not installed.\n"
-        "  pip install eclipse-zenoh==1.6.1",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+    _HAS_SOXR = False
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
 MODEL_SIZE        = os.environ.get("WHISPER_MODEL", "tiny")
 DEVICE            = os.environ.get("WHISPER_DEVICE", "cpu")
 COMPUTE_TYPE      = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
-LANGUAGE          = os.environ.get("WHISPER_LANGUAGE", "") or None  # None = auto-detect
+LANGUAGE           = os.environ.get("WHISPER_LANGUAGE", "") or None  # None = auto-detect
+AUTODETECT_EVERY   = int(os.environ.get("WHISPER_AUTODETECT_EVERY", "0"))
+AUTODETECT_WINDOWS = int(os.environ.get("WHISPER_AUTODETECT_WINDOWS", "3"))
 WINDOW_S          = float(os.environ.get("WHISPER_WINDOW_S", "5"))
+OVERLAP           = float(os.environ.get("WHISPER_OVERLAP", "0"))
+WORD_TIMESTAMPS   = os.environ.get("WHISPER_WORD_TIMESTAMPS", "0") == "1"
+NO_SPEECH_THRESH  = float(os.environ.get("WHISPER_NO_SPEECH_THRESHOLD", "0.6"))
 PUB_KEY           = os.environ.get("WHISPER_PUB_KEY", "bsole/whisper/transcript")
 SUB_EXPR          = os.environ.get("ZENOH_SUB_MIC", "bsole/microphone/raw/**")
 ROUTER            = os.environ.get("ZENOH_ROUTER", "")
+MQTT_ENABLE       = os.environ.get("MQTT_ENABLE", "0") == "1"
+MQTT_BROKER       = os.environ.get("MQTT_BROKER", "localhost")
+MQTT_PORT         = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_PUB_TOPIC    = os.environ.get("MQTT_PUB_TOPIC", PUB_KEY)
+MQTT_SUB_TOPIC    = os.environ.get("MQTT_SUB_MIC", "bsole/microphone/raw/#")
 DEBUG             = os.environ.get("DEBUG", "0") == "1"
-NO_SPEECH_THRESH  = float(os.environ.get("WHISPER_NO_SPEECH_THRESHOLD", "0.6"))
 
-# Zenoh peer config: one level up from this file, inside config/
+# Zenoh peer config — only needed when MQTT_ENABLE=0
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
 
-_FRAME_TIMEOUT_S = 2.0   # discard incomplete frames after this duration
-_QUEUE_MAXSIZE   = 4     # inference windows to buffer before dropping (backpressure)
+_FRAME_TIMEOUT_S = 2.0
+_QUEUE_MAXSIZE   = 4
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -90,13 +128,10 @@ def decode_frame(chunks_by_idx: dict) -> np.ndarray:
 
 
 def resample_to_16k(audio: np.ndarray, src_rate: int) -> np.ndarray:
-    """Linear-interpolation resampling to 16 kHz.
-
-    Sufficient for speech recognition; replace with soxr or librosa for
-    higher fidelity (see README — possible improvements).
-    """
     if src_rate == 16000:
         return audio
+    if _HAS_SOXR:
+        return _soxr.resample(audio, src_rate, 16000, quality="HQ").astype(np.float32)
     target_len = int(len(audio) * 16000 / src_rate)
     return np.interp(
         np.linspace(0, len(audio) - 1, target_len),
@@ -108,7 +143,7 @@ def resample_to_16k(audio: np.ndarray, src_rate: int) -> np.ndarray:
 # ── Frame assembler ────────────────────────────────────────────────────────────
 
 class FrameAssembler:
-    """Reassembles multi-chunk audio frames from Zenoh meta + chunk messages.
+    """Reassembles multi-chunk audio frames from meta + chunk messages.
 
     microphone/index.js splits each Float32 frame into N base64 chunks and
     publishes them as:
@@ -120,7 +155,6 @@ class FrameAssembler:
     """
 
     def __init__(self, on_frame):
-        # on_frame(samples: np.ndarray, meta: dict)
         self._on_frame = on_frame
         self._pending: dict = {}
         self._lock = threading.Lock()
@@ -184,18 +218,17 @@ class FrameAssembler:
 class AudioAccumulator:
     """Buffers assembled frames until a full WHISPER_WINDOW_S window is ready.
 
-    When the buffer fills, the window is handed to on_window and the buffer
-    is reset (non-overlapping windows). Overlapping / VAD-gated windowing
-    are documented as possible improvements in the README.
+    When OVERLAP > 0, keeps that fraction of each window as the start of the
+    next, reducing word-boundary cut-offs at 1/(1-overlap)× more inference cost.
     """
 
-    def __init__(self, window_s: float, on_window):
-        # on_window(samples: np.ndarray, sample_rate: int)
-        self._window_s   = window_s
-        self._on_window  = on_window
-        self._samples    = np.empty(0, dtype=np.float32)
+    def __init__(self, window_s: float, overlap: float, on_window):
+        self._window_s    = window_s
+        self._overlap     = max(0.0, min(overlap, 0.9))
+        self._on_window   = on_window
+        self._samples     = np.empty(0, dtype=np.float32)
         self._sample_rate = 16000
-        self._lock       = threading.Lock()
+        self._lock        = threading.Lock()
 
     def add(self, samples: np.ndarray, meta: dict) -> None:
         sr = int(meta.get("sampleRate") or 16000)
@@ -203,9 +236,10 @@ class AudioAccumulator:
             self._sample_rate = sr
             self._samples = np.concatenate([self._samples, samples])
             needed = int(self._window_s * sr)
+            keep   = int(needed * self._overlap)
             while len(self._samples) >= needed:
                 window = self._samples[:needed].copy()
-                self._samples = self._samples[needed:]
+                self._samples = self._samples[needed - keep:]
                 self._on_window(window, sr)
 
 
@@ -214,18 +248,21 @@ class AudioAccumulator:
 class InferenceWorker(threading.Thread):
     """Daemon thread that dequeues audio windows and runs Whisper inference.
 
-    Inference is intentionally isolated from the Zenoh callback thread so
+    Inference is intentionally isolated from the subscriber callback thread so
     that blocking GPU/CPU work never stalls the message receiver.
     """
 
-    def __init__(self, model: WhisperModel, publisher, language):
+    def __init__(self, model: WhisperModel, publish_fn, language):
         super().__init__(daemon=True, name="whisper-inference")
         self._model        = model
-        self._publisher    = publisher
-        self._language     = language
+        self._publish_fn   = publish_fn
+        self._language     = language       # configured value; None = always auto-detect
+        self._locked_lang  = language       # majority-voted language once enough samples collected
+        self._lang_votes: list = []         # language detections before lock
+        self._window_count = 0
         self._queue: queue.Queue = queue.Queue(maxsize=_QUEUE_MAXSIZE)
         self._running      = True
-        self._last_text    = ""  # for initial_prompt continuity
+        self._last_text    = ""
 
     def enqueue(self, samples: np.ndarray, sample_rate: int) -> None:
         try:
@@ -236,7 +273,7 @@ class InferenceWorker(threading.Thread):
     def stop(self) -> None:
         self._running = False
         try:
-            self._queue.put_nowait(None)  # unblock get()
+            self._queue.put_nowait(None)
         except queue.Full:
             pass
 
@@ -251,13 +288,27 @@ class InferenceWorker(threading.Thread):
     def _infer(self, samples: np.ndarray, sample_rate: int) -> None:
         audio = resample_to_16k(samples, sample_rate)
 
+        # Determine language for this window
+        if self._language is None:
+            # Still collecting votes to establish majority language
+            if len(self._lang_votes) < AUTODETECT_WINDOWS:
+                lang_arg = None
+            elif AUTODETECT_EVERY > 0 and self._window_count % AUTODETECT_EVERY == 0:
+                self._lang_votes = []  # reset for periodic re-detection
+                lang_arg = None
+            else:
+                lang_arg = self._locked_lang
+        else:
+            lang_arg = self._language
+
         t0 = time.monotonic()
         try:
             segments_gen, info = self._model.transcribe(
                 audio,
-                language=self._language,
+                language=lang_arg,
                 beam_size=1,
                 vad_filter=True,
+                word_timestamps=WORD_TIMESTAMPS,
                 initial_prompt=self._last_text or None,
             )
             segments = list(segments_gen)
@@ -267,10 +318,25 @@ class InferenceWorker(threading.Thread):
 
         elapsed = time.monotonic() - t0
 
-        # Drop windows where all segments are likely silence/hallucination
+        # Accumulate language votes; lock to majority once enough samples collected
+        if lang_arg is None and info and info.language:
+            self._lang_votes.append(info.language)
+            if len(self._lang_votes) == AUTODETECT_WINDOWS:
+                from collections import Counter
+                majority = Counter(self._lang_votes).most_common(1)[0][0]
+                if self._locked_lang != majority:
+                    log(f"language locked: {majority} (votes: {self._lang_votes})")
+                self._locked_lang = majority
+            else:
+                log(f"language vote {len(self._lang_votes)}/{AUTODETECT_WINDOWS}: "
+                    f"{info.language} (prob={info.language_probability:.2f})")
+
+        self._window_count += 1
+
+        # Drop silent / hallucination windows
         if segments and all(s.no_speech_prob > NO_SPEECH_THRESH for s in segments):
             if DEBUG:
-                log(f"no-speech filtered (probs: {[round(s.no_speech_prob,2) for s in segments]})")
+                log(f"no-speech filtered (probs: {[round(s.no_speech_prob, 2) for s in segments]})")
             return
 
         text = " ".join(s.text.strip() for s in segments).strip()
@@ -285,6 +351,16 @@ class InferenceWorker(threading.Thread):
         if not text:
             return
 
+        seg_list = []
+        for s in segments:
+            entry = {"start": round(s.start, 3), "end": round(s.end, 3), "text": s.text.strip()}
+            if WORD_TIMESTAMPS and hasattr(s, "words") and s.words:
+                entry["words"] = [
+                    {"word": w.word, "start": round(w.start, 3), "end": round(w.end, 3), "prob": round(w.probability, 3)}
+                    for w in s.words
+                ]
+            seg_list.append(entry)
+
         payload = {
             "ts":                   int(time.time() * 1000),
             "text":                 text,
@@ -292,14 +368,11 @@ class InferenceWorker(threading.Thread):
             "language_probability": round(info.language_probability, 3) if info else None,
             "inference_s":          round(elapsed, 3),
             "window_s":             round(len(samples) / sample_rate, 3),
-            "segments": [
-                {"start": round(s.start, 3), "end": round(s.end, 3), "text": s.text.strip()}
-                for s in segments
-            ],
+            "segments":             seg_list,
         }
 
         try:
-            self._publisher.put(json.dumps(payload))
+            self._publish_fn(json.dumps(payload))
         except Exception as exc:
             log(f"publish error: {exc}", err=True)
 
@@ -307,60 +380,116 @@ class InferenceWorker(threading.Thread):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    if not CONFIG_FILE.exists():
-        log(f"zenoh peer config not found: {CONFIG_FILE}", err=True)
-        log("expected at config/peer.json5 (one level above this script)", err=True)
-        sys.exit(1)
-
     log(f"loading model '{MODEL_SIZE}'  device={DEVICE}  compute={COMPUTE_TYPE}")
     t0    = time.monotonic()
     model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
     log(f"model ready ({time.monotonic() - t0:.1f}s)")
 
-    conf = zenoh.Config.from_file(str(CONFIG_FILE))
-    if ROUTER:
-        conf.insert_json5("connect/endpoints", f'["{ROUTER}"]')
-        log(f"router override: {ROUTER}")
-
-    session   = zenoh.open(conf)
-    publisher = session.declare_publisher(PUB_KEY)
-
-    worker      = InferenceWorker(model, publisher, LANGUAGE)
-    accumulator = AudioAccumulator(window_s=WINDOW_S, on_window=worker.enqueue)
-    assembler   = FrameAssembler(on_frame=accumulator.add)
-
-    def on_message(sample) -> None:
-        key = str(sample.key_expr)
+    if MQTT_ENABLE:
         try:
-            payload = json.loads(bytes(sample.payload).decode("utf-8"))
-        except Exception:
-            return
-        if key.endswith("/meta"):
-            assembler.on_meta(payload)
-        elif key.endswith("/chunk"):
-            assembler.on_chunk(payload)
+            import paho.mqtt.client as mqtt
+        except ImportError:
+            log("paho-mqtt not installed — run: pip install paho-mqtt", err=True)
+            sys.exit(1)
 
-    sub = session.declare_subscriber(SUB_EXPR, on_message)
-    worker.start()
+        # publish_fn is set after client connects; use a holder so the lambda captures it
+        _pub: list = [None]
+        worker      = InferenceWorker(model, lambda s: _pub[0](s), LANGUAGE)
+        accumulator = AudioAccumulator(window_s=WINDOW_S, overlap=OVERLAP, on_window=worker.enqueue)
+        assembler   = FrameAssembler(on_frame=accumulator.add)
 
-    log(f"subscribed   '{SUB_EXPR}'")
-    log(f"publishing → '{PUB_KEY}'")
-    log(f"window={WINDOW_S}s  language={'auto' if LANGUAGE is None else LANGUAGE}")
-    log("waiting for audio... press Ctrl+C to stop\n")
-
-    def shutdown(*_) -> None:
-        log("\nshutting down...")
-        worker.stop()
         try:
-            sub.undeclare()
-        except Exception:
-            pass
+            client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        except AttributeError:
+            client = mqtt.Client()  # paho-mqtt < 2.0
+
+        def on_mqtt_message(client, userdata, msg):
+            try:
+                payload = json.loads(msg.payload.decode("utf-8"))
+            except Exception:
+                return
+            if msg.topic.endswith("/meta"):
+                assembler.on_meta(payload)
+            elif msg.topic.endswith("/chunk"):
+                assembler.on_chunk(payload)
+
+        client.on_message = on_mqtt_message
+        client.connect(MQTT_BROKER, MQTT_PORT)
+        client.subscribe(MQTT_SUB_TOPIC)
+        client.loop_start()
+        _pub[0] = lambda s: client.publish(MQTT_PUB_TOPIC, s)
+
+        worker.start()
+
+        log(f"MQTT broker:  {MQTT_BROKER}:{MQTT_PORT}")
+        log(f"subscribed    '{MQTT_SUB_TOPIC}'")
+        log(f"publishing  → '{MQTT_PUB_TOPIC}'")
+        log(f"window={WINDOW_S}s  overlap={OVERLAP}  language={'auto' if LANGUAGE is None else LANGUAGE}")
+        log("waiting for audio... press Ctrl+C to stop\n")
+
+        def shutdown(*_) -> None:
+            log("\nshutting down...")
+            worker.stop()
+            client.loop_stop()
+            client.disconnect()
+            sys.exit(0)
+
+    else:
         try:
-            publisher.undeclare()
-        except Exception:
-            pass
-        session.close()
-        sys.exit(0)
+            import zenoh
+        except ImportError:
+            log("zenoh not installed — pip install eclipse-zenoh==1.6.1", err=True)
+            sys.exit(1)
+
+        if not CONFIG_FILE.exists():
+            log(f"zenoh peer config not found: {CONFIG_FILE}", err=True)
+            log("expected at config/peer.json5 (one level above this script)", err=True)
+            sys.exit(1)
+
+        conf = zenoh.Config.from_file(str(CONFIG_FILE))
+        if ROUTER:
+            conf.insert_json5("connect/endpoints", f'["{ROUTER}"]')
+            log(f"router override: {ROUTER}")
+
+        session   = zenoh.open(conf)
+        publisher = session.declare_publisher(PUB_KEY)
+
+        worker      = InferenceWorker(model, publisher.put, LANGUAGE)
+        accumulator = AudioAccumulator(window_s=WINDOW_S, overlap=OVERLAP, on_window=worker.enqueue)
+        assembler   = FrameAssembler(on_frame=accumulator.add)
+
+        def on_zenoh_message(sample) -> None:
+            key = str(sample.key_expr)
+            try:
+                payload = json.loads(bytes(sample.payload).decode("utf-8"))
+            except Exception:
+                return
+            if key.endswith("/meta"):
+                assembler.on_meta(payload)
+            elif key.endswith("/chunk"):
+                assembler.on_chunk(payload)
+
+        sub = session.declare_subscriber(SUB_EXPR, on_zenoh_message)
+        worker.start()
+
+        log(f"subscribed   '{SUB_EXPR}'")
+        log(f"publishing → '{PUB_KEY}'")
+        log(f"window={WINDOW_S}s  overlap={OVERLAP}  language={'auto' if LANGUAGE is None else LANGUAGE}")
+        log("waiting for audio... press Ctrl+C to stop\n")
+
+        def shutdown(*_) -> None:
+            log("\nshutting down...")
+            worker.stop()
+            try:
+                sub.undeclare()
+            except Exception:
+                pass
+            try:
+                publisher.undeclare()
+            except Exception:
+                pass
+            session.close()
+            sys.exit(0)
 
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)

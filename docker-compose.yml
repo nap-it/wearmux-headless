@@ -63,6 +63,37 @@ services:
       retries: 3
       start_period: 10s
   
+  whisper:
+    build:
+      context: .
+      dockerfile: whisper/Dockerfile
+    container_name: whisper-runner
+    depends_on:
+      zenoh-router:
+        condition: service_healthy
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      # Pass through host overrides; config/whisper.ini provides defaults
+      - WHISPER_MODEL
+      - WHISPER_DEVICE
+      - WHISPER_COMPUTE_TYPE
+      - WHISPER_LANGUAGE
+      - WHISPER_AUTODETECT_WINDOWS
+      - WHISPER_AUTODETECT_EVERY
+      - WHISPER_WINDOW_S
+      - WHISPER_OVERLAP
+      - WHISPER_WORD_TIMESTAMPS
+      - WHISPER_NO_SPEECH_THRESHOLD
+      - MQTT_ENABLE
+      - MQTT_BROKER
+      - MQTT_PORT
+      - DEBUG
+      - ZENOH_ROUTER=tcp/zenoh-router:7447
+    networks:
+      - bsole-network
+    restart: unless-stopped
+
   mediamtx:
     image: bluenviron/mediamtx:latest
     container_name: mediamtx

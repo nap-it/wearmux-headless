@@ -22,63 +22,95 @@ microphone/index.js  ──(bsole/microphone/raw/**)──►  whisper/runner.py
 
 1. **Install Python dependencies** (from `bsole-connector/`):
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
+   npm run whisper:setup
    ```
 
-2. **Enable raw audio publishing** in `config/zenoh.ini` (or via env):
+2. **Enable raw audio publishing** in `config/zenoh.ini`:
    ```ini
    ZENOH_MIC_ENABLE=1
    ZENOH_MIC_RAW_ENABLE=1
+   ZENOH_MIC_RAW_THROTTLE_MS=0
    ```
-   Without this flag `microphone/index.js` only publishes level metrics, not samples.
+   Without these the microphone only publishes level metrics, not samples.
 
-3. **A Zenoh router must be reachable** — default `tcp/127.0.0.1:7447`.
+3. **A Zenoh router must be reachable** — default `tcp/127.0.0.1:7447`:
+   ```bash
+   docker compose up -d zenoh-router
+   ```
 
 ---
 
 ## Running
 
-Run both sides in separate terminals (or add both to `config/config.ini [scripts]`):
-
 ```bash
 # Terminal 1 — stream mic audio
-npm run microphone:rtsp   # (or sensors, etc.)
+npm run microphone:rtsp
 
 # Terminal 2 — transcribe
 npm run whisper:runner
+
+# Terminal 3 — read transcripts
+npm run whisper:listen
 ```
 
-Or configure `config/config.ini` to run them together:
-
+To start whisper automatically with `npm start`, uncomment in `config/config.ini`:
 ```ini
-[scripts]
-run=microphone:rtsp
-run=whisper:runner       # not yet wired into launcher — see improvements below
+run=whisper:runner
 ```
 
-### Direct invocation
-
+Or run the full stack in Docker:
 ```bash
-WHISPER_MODEL=base WHISPER_LANGUAGE=en python3 whisper/runner.py
+docker compose up --build whisper
 ```
 
 ---
 
 ## Configuration (`config/whisper.ini`)
 
+### Model
+
 | Variable | Default | Description |
 |---|---|---|
 | `WHISPER_MODEL` | `tiny` | Model size: `tiny` `base` `small` `medium` `large-v3` |
 | `WHISPER_DEVICE` | `cpu` | `cpu`, `cuda`, or `auto` |
 | `WHISPER_COMPUTE_TYPE` | `int8` | `int8`, `float16`, `float32` |
+
+### Language
+
+| Variable | Default | Description |
+|---|---|---|
 | `WHISPER_LANGUAGE` | _(empty)_ | BCP-47 code (`en`, `pt`…) or empty for auto-detect |
+| `WHISPER_AUTODETECT_WINDOWS` | `3` | Windows to sample before locking via majority vote |
+| `WHISPER_AUTODETECT_EVERY` | `0` | Re-detect every N windows after locking; `0` = lock forever |
+
+When `WHISPER_LANGUAGE` is empty, the runner samples the first 3 windows (15 s at default window size), takes the majority-voted language, and locks to it. This makes detection robust against the occasional misidentification that `tiny` produces on short clips. Each vote is logged — watch for `language vote N/3` then `language locked: pt`.
+
+### Audio window
+
+| Variable | Default | Description |
+|---|---|---|
 | `WHISPER_WINDOW_S` | `5` | Seconds to accumulate before each inference call |
-| `WHISPER_PUB_KEY` | `bsole/whisper/transcript` | Zenoh key for transcript output |
+| `WHISPER_OVERLAP` | `0` | Fraction of window kept as overlap (0–0.9). `0.5` = 50% overlap, 2× inference cost |
+
+### Quality
+
+| Variable | Default | Description |
+|---|---|---|
+| `WHISPER_NO_SPEECH_THRESHOLD` | `0.6` | Drop windows where all segments exceed this no-speech probability |
+| `WHISPER_WORD_TIMESTAMPS` | `0` | Set to `1` for per-word timing in payload (~10–20% slower) |
+
+### Transport
+
+| Variable | Default | Description |
+|---|---|---|
+| `MQTT_ENABLE` | `0` | Set to `1` to subscribe via MQTT instead of Zenoh |
+| `MQTT_BROKER` | `localhost` | MQTT broker host |
+| `MQTT_PORT` | `1883` | MQTT broker port |
+| `MQTT_PUB_TOPIC` | _(same as `WHISPER_PUB_KEY`)_ | Topic to publish transcripts to |
+| `MQTT_SUB_MIC` | `bsole/microphone/raw/#` | Topic filter for audio subscription |
 | `ZENOH_SUB_MIC` | `bsole/microphone/raw/**` | Zenoh key expression to subscribe to |
 | `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Router endpoint |
-| `DEBUG` | `0` | Set to `1` for frame-level logging |
+| `WHISPER_PUB_KEY` | `bsole/whisper/transcript` | Zenoh key for transcript output |
 
 ### CPU performance guide
 
@@ -96,6 +128,7 @@ only with GPU (`WHISPER_DEVICE=cuda WHISPER_COMPUTE_TYPE=float16`).
 
 ## Transcript payload (`bsole/whisper/transcript`)
 
+Default (no word timestamps):
 ```json
 {
   "ts": 1748198400000,
@@ -110,199 +143,63 @@ only with GPU (`WHISPER_DEVICE=cuda WHISPER_COMPUTE_TYPE=float16`).
 }
 ```
 
+With `WHISPER_WORD_TIMESTAMPS=1`, each segment includes a `words` array:
+```json
+{
+  "segments": [
+    {
+      "start": 0.0, "end": 1.8, "text": "hello world",
+      "words": [
+        { "word": "hello", "start": 0.0, "end": 0.6, "prob": 0.98 },
+        { "word": "world", "start": 0.7, "end": 1.8, "prob": 0.97 }
+      ]
+    }
+  ]
+}
+```
+
 ---
 
 ## Architecture
 
 ```
-Zenoh callback thread
+Subscriber thread (Zenoh or MQTT)
   on_message()
     └── FrameAssembler.on_meta() / on_chunk()
           │  reassemble multi-chunk base64 frames by frameId
           └── AudioAccumulator.add()
-                │  concatenate Float32 samples
-                └── (when window full) InferenceWorker.enqueue()
+                │  concatenate Float32 samples; emit when window full
+                │  if OVERLAP > 0: keep overlap fraction for next window
+                └── InferenceWorker.enqueue()
 
 InferenceWorker (daemon thread)
   dequeue window
-    └── resample to 16 kHz (if needed)
+    └── resample_to_16k()  (soxr if installed, else np.interp)
     └── WhisperModel.transcribe()
-    └── publisher.put(json)
+          language caching: detect once, then lock
+          no-speech filter: drop silent windows
+          initial_prompt: pass previous transcript for continuity
+    └── publish_fn(json)   (Zenoh publisher.put or MQTT client.publish)
 ```
 
-The Zenoh callback and inference run on separate threads so a slow CPU
-inference pass never stalls frame reception.
+The subscriber and inference run on separate threads so a slow CPU inference
+pass never stalls frame reception.
 
 ---
 
 ## Possible improvements
 
-The items below are intentionally **not** in this V1 — they add complexity
-that is only justified once the baseline pipeline is validated.
+### Voice Activity Detection (VAD) gated windowing
 
-### 1. Voice Activity Detection (VAD) gated windowing
-
-**What:** Instead of cutting at a fixed `WHISPER_WINDOW_S` boundary, only
-trigger inference when a speech segment ends (detected by
-[Silero-VAD](https://github.com/snakers4/silero-vad)).
+**What:** Instead of fixed `WHISPER_WINDOW_S` boundaries, trigger inference
+when a speech segment ends using [Silero-VAD](https://github.com/snakers4/silero-vad).
 
 **Why:** Fixed windows cut words at the boundary and waste inference cycles
-on silence. VAD eliminates both problems: utterances arrive complete, and
-inference only runs when there is actually speech.
+on silence. VAD eliminates both: utterances arrive complete, inference only
+runs on speech.
 
-**How:** Load the Silero-VAD ONNX model (~1 MB) in `AudioAccumulator`.
-Run it on each incoming frame (~3 ms per frame). Trigger `on_window` on
-speech-end events instead of on fixed length. Add `WHISPER_VAD_ENABLE=1`
-env flag to keep it optional.
+**How:** Load the Silero-VAD ONNX model (~1 MB) in `AudioAccumulator`. Run it
+on each incoming frame (~3 ms). Trigger `on_window` on speech-end events instead
+of on fixed length. Add `WHISPER_VAD_ENABLE=1` flag.
 
-**Cost:** one extra ONNX Runtime dependency; ~3 ms extra latency per frame.
-
----
-
-### 2. Overlapping windows (interim fix before VAD)
-
-**What:** Slide the window by 50% overlap (e.g., infer every 2.5 s on a 5 s
-buffer) instead of non-overlapping.
-
-**Why:** Reduces word-boundary cut-offs without requiring VAD. Simple change
-to `AudioAccumulator`.
-
-**Cost:** 2× the inference calls. Produces duplicate words at the overlap
-that need deduplication. Only worthwhile as a temporary improvement before
-VAD is added.
-
----
-
-### 3. Initial prompt for continuity
-
-**What:** Pass the previous transcript as Whisper's `initial_prompt` parameter.
-
-**Why:** Whisper uses the prompt as context for the next window. This
-significantly reduces hallucinations and improves continuity across window
-boundaries (especially for technical vocabulary).
-
-**How:** Store the last `text` output in `InferenceWorker`. Pass it as
-`initial_prompt=prev_text` to `model.transcribe()`.
-
-**Cost:** Near-zero; one variable and one extra argument.
-
----
-
-### 4. Higher-quality resampling
-
-**What:** Replace the current `np.interp` linear resampler with
-[`soxr`](https://python-soxr.readthedocs.io/) or
-`librosa.resample(res_type="kaiser_fast")`.
-
-**Why:** Linear interpolation introduces aliasing at high frequencies. For
-the `tiny` model this is rarely perceptible, but `small`/`medium` models
-benefit from cleaner input.
-
-**Cost:** one extra dependency (`soxr` is ~300 KB, no heavy transitive deps).
-Only relevant when `sampleRate != 16000`.
-
----
-
-### 5. MQTT transport
-
-**What:** Add a subscriber path that reads from MQTT (`bsole/microphone/raw/#`)
-in addition to Zenoh, selected by the `MQTT_ENABLE=1` env var — mirroring
-the `utils/transport.js` pattern.
-
-**Why:** Allows the whisper runner to work in MQTT-only deployments without
-a Zenoh router.
-
-**How:** Use `paho-mqtt` as the subscriber. The frame reassembly and inference
-worker are transport-agnostic; only the subscriber initialization changes.
-
-**Cost:** `paho-mqtt` dependency; ~50 lines of subscriber code.
-
----
-
-### 6. Word-level timestamps
-
-**What:** Enable `word_timestamps=True` in `model.transcribe()` and include
-per-word timing in the published payload.
-
-**Why:** Enables downstream consumers to synchronize text with display events
-(e.g., showing subtitles on the Frame glasses synchronized to speech).
-
-**Cost:** ~10–20% slower inference. Add `WHISPER_WORD_TIMESTAMPS=1` env flag.
-
----
-
-### 7. Language detection caching
-
-**What:** Run language detection only on the first window (or every N windows),
-then lock `WHISPER_LANGUAGE` to the detected code for subsequent calls.
-
-**Why:** Language detection adds ~0.3 s per window. For single-speaker
-sessions the language does not change.
-
-**How:** Detect on first window, store result, set `self._language` for all
-subsequent calls. Add `WHISPER_AUTODETECT_EVERY=10` env flag to re-detect
-periodically.
-
-**Cost:** Near-zero; a counter variable.
-
----
-
-### 8. Docker service
-
-**What:** Add a `whisper` service to `docker-compose.yml` that runs
-`whisper/runner.py` alongside the `bsole` and `zenoh-router` services.
-
-**Why:** Currently the runner must be started manually in a separate terminal.
-A Docker service enables fully automated startup with health checks and
-restart policies.
-
-**How:**
-```yaml
-whisper:
-  build:
-    context: .
-    dockerfile: whisper/Dockerfile
-  depends_on:
-    zenoh-router:
-      condition: service_healthy
-  environment:
-    - WHISPER_MODEL=tiny
-    - ZENOH_ROUTER=tcp/zenoh-router:7447
-  networks:
-    - bsole-network
-  restart: unless-stopped
-```
-Requires a separate `whisper/Dockerfile` (Python base image + `faster-whisper`).
-
----
-
-### 9. No-speech filtering
-
-**What:** Discard windows where `faster-whisper`'s `no_speech_prob` exceeds
-a threshold before publishing.
-
-**Why:** When VAD is not enabled, Whisper still runs on silent windows and
-emits hallucinated text (e.g., `"Thank you."`, `"Bye."` — a known Whisper
-artifact). Filtering on `no_speech_prob > 0.6` suppresses most hallucinations.
-
-**How:** Check `segments[i].no_speech_prob` (available on each segment
-object) and skip `put()` if all segments are above the threshold. Add
-`WHISPER_NO_SPEECH_THRESHOLD=0.6` env flag.
-
-**Cost:** Near-zero. This should probably be added even in V1 once validated.
-
----
-
-### 10. Launcher integration (multi-script startup)
-
-**What:** Wire `whisper:runner` into `tools/launcher.js` so it starts
-alongside `microphone:rtsp` from a single `npm start`.
-
-**Why:** Currently the launcher only supports `npm run` scripts that invoke
-Node.js. The whisper launcher spawns Python, which the current `run-with-config.js`
-cannot do.
-
-**How:** Either modify `tools/launcher.js` to accept arbitrary shell commands
-in `config.ini [scripts]`, or add a `whisper:runner` entry that is recognized
-as a Node-started script (since `whisper/launcher.js` is the entry point,
-this already works — just needs a `run=whisper:runner` line in `config.ini`).
+**Cost:** `onnxruntime` dependency; ~3 ms extra latency per frame.
