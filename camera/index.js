@@ -501,7 +501,7 @@ async function main() {
         device.addEventListener('cameraImage', imageHandler);
         
         device.addEventListener('cameraStatus', (event) => {
-            console.log("[STATUS] Camera:", event.message.cameraStatus);
+            if (debug) console.log("[STATUS] Camera:", event.message.cameraStatus);
         });
 
         console.log(`Camera ready. Auto=${auto}. ${outDir ? `Output -> ${outDir}` : 'No file output (set CAMERA_OUTPUT_DIR to save images)'}`);
@@ -554,6 +554,7 @@ async function main() {
 
             const shutdown = async () => {
                 console.log("\nShutting down camera...");
+                setTimeout(() => process.exit(0), 3000).unref();
                 device.autoPicture = false;
                 if (zenoh) {
                     try { await zenoh.stop(); } catch (e) { console.warn("[Camera] zenoh.stop failed:", e?.message || e); }

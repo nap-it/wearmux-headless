@@ -57,15 +57,16 @@ except ImportError:
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-MODEL_SIZE    = os.environ.get("WHISPER_MODEL", "tiny")
-DEVICE        = os.environ.get("WHISPER_DEVICE", "cpu")
-COMPUTE_TYPE  = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
-LANGUAGE      = os.environ.get("WHISPER_LANGUAGE", "") or None  # None = auto-detect
-WINDOW_S      = float(os.environ.get("WHISPER_WINDOW_S", "5"))
-PUB_KEY       = os.environ.get("WHISPER_PUB_KEY", "bsole/whisper/transcript")
-SUB_EXPR      = os.environ.get("ZENOH_SUB_MIC", "bsole/microphone/raw/**")
-ROUTER        = os.environ.get("ZENOH_ROUTER", "")
-DEBUG         = os.environ.get("DEBUG", "0") == "1"
+MODEL_SIZE        = os.environ.get("WHISPER_MODEL", "tiny")
+DEVICE            = os.environ.get("WHISPER_DEVICE", "cpu")
+COMPUTE_TYPE      = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
+LANGUAGE          = os.environ.get("WHISPER_LANGUAGE", "") or None  # None = auto-detect
+WINDOW_S          = float(os.environ.get("WHISPER_WINDOW_S", "5"))
+PUB_KEY           = os.environ.get("WHISPER_PUB_KEY", "bsole/whisper/transcript")
+SUB_EXPR          = os.environ.get("ZENOH_SUB_MIC", "bsole/microphone/raw/**")
+ROUTER            = os.environ.get("ZENOH_ROUTER", "")
+DEBUG             = os.environ.get("DEBUG", "0") == "1"
+NO_SPEECH_THRESH  = float(os.environ.get("WHISPER_NO_SPEECH_THRESHOLD", "0.6"))
 
 # Zenoh peer config: one level up from this file, inside config/
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
@@ -219,11 +220,12 @@ class InferenceWorker(threading.Thread):
 
     def __init__(self, model: WhisperModel, publisher, language):
         super().__init__(daemon=True, name="whisper-inference")
-        self._model     = model
-        self._publisher = publisher
-        self._language  = language
+        self._model        = model
+        self._publisher    = publisher
+        self._language     = language
         self._queue: queue.Queue = queue.Queue(maxsize=_QUEUE_MAXSIZE)
-        self._running   = True
+        self._running      = True
+        self._last_text    = ""  # for initial_prompt continuity
 
     def enqueue(self, samples: np.ndarray, sample_rate: int) -> None:
         try:
@@ -254,8 +256,9 @@ class InferenceWorker(threading.Thread):
             segments_gen, info = self._model.transcribe(
                 audio,
                 language=self._language,
-                beam_size=1,        # fast; raise to 5 for accuracy (see README)
+                beam_size=1,
                 vad_filter=True,
+                initial_prompt=self._last_text or None,
             )
             segments = list(segments_gen)
         except Exception as exc:
@@ -263,11 +266,24 @@ class InferenceWorker(threading.Thread):
             return
 
         elapsed = time.monotonic() - t0
-        text    = " ".join(s.text.strip() for s in segments).strip()
+
+        # Drop windows where all segments are likely silence/hallucination
+        if segments and all(s.no_speech_prob > NO_SPEECH_THRESH for s in segments):
+            if DEBUG:
+                log(f"no-speech filtered (probs: {[round(s.no_speech_prob,2) for s in segments]})")
+            return
+
+        text = " ".join(s.text.strip() for s in segments).strip()
+
+        if text:
+            self._last_text = text
 
         if text or DEBUG:
             lang = info.language if info else "?"
             log(f"[{lang}] {text!r}  ({elapsed:.2f}s)")
+
+        if not text:
+            return
 
         payload = {
             "ts":                   int(time.time() * 1000),
