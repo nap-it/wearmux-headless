@@ -94,6 +94,33 @@ services:
       - bsole-network
     restart: unless-stopped
 
+  yolo:
+    build:
+      context: .
+      dockerfile: yolo/Dockerfile
+    container_name: yolo-runner
+    depends_on:
+      zenoh-router:
+        condition: service_healthy
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      # Pass through host overrides; config/yolo.ini provides defaults
+      - YOLO_MODEL
+      - YOLO_DEVICE
+      - YOLO_CONFIDENCE
+      - YOLO_IOU
+      - YOLO_INPUT_SIZE
+      - YOLO_CLASSES
+      - MQTT_ENABLE
+      - MQTT_BROKER
+      - MQTT_PORT
+      - DEBUG
+      - ZENOH_ROUTER=tcp/zenoh-router:7447
+    networks:
+      - bsole-network
+    restart: unless-stopped
+
   mediamtx:
     image: bluenviron/mediamtx:latest
     container_name: mediamtx

@@ -1,6 +1,6 @@
 # BSole Connector
 
-Node.js + Python tooling to connect to BrilliantSole devices, stream microphone audio, monitor sensors, and optionally publish data to Zenoh.
+Node.js + Python tooling to connect to BrilliantSole devices, stream sensor data, run AI inference (speech-to-text, object detection), and publish everything to Zenoh.
 
 ## Project Structure
 
@@ -12,7 +12,9 @@ bsole-connector/
 │   ├── config.ini                  # App configuration (for Docker)
 │   ├── peer.json5                  # Zenoh peer configuration
 │   ├── peer.docker.json5           # Zenoh peer configuration (for Docker)
-│   └── router.json5                # Zenoh router configuration
+│   ├── router.json5                # Zenoh router configuration
+│   ├── whisper.ini                 # Whisper STT configuration
+│   └── yolo.ini                    # YOLO object detection configuration
 ├── display/
 │   ├── index.js                    # Show images on device display
 │   └── lib/display-manager.js      # Display rendering & tiling
@@ -35,6 +37,16 @@ bsole-connector/
 │   └── lib/
 │       ├── image-validator.js      # Image validation utilities
 │       └── viewer-server.js        # HTTP/MJPEG browser viewer
+├── whisper/
+│   ├── runner.py                   # Speech-to-text inference (faster-whisper)
+│   ├── launcher.js                 # Node entry point for whisper runner
+│   ├── Dockerfile                  # Standalone whisper Docker image
+│   └── README.md                   # Whisper configuration & payload docs
+├── yolo/
+│   ├── runner.py                   # Object detection inference (YOLOv8)
+│   ├── launcher.js                 # Node entry point for yolo runner
+│   ├── Dockerfile                  # Standalone yolo Docker image
+│   └── README.md                   # YOLO configuration & payload docs
 ├── examples/
 │   ├── car-interaction/            # Car interaction example + tests
 │   └── latency-evaluation/         # Display-to-camera latency evaluation example
@@ -98,6 +110,19 @@ npm run camera
 
 # Display-to-camera latency example
 npm run examples:latency
+
+# --- AI Inference ---
+
+# Install Python dependencies (shared venv for whisper + yolo)
+npm run whisper:setup   # or npm run yolo:setup — same venv
+
+# Speech-to-text (requires ZENOH_MIC_RAW_ENABLE=1)
+npm run whisper:runner
+npm run whisper:listen  # read transcripts in another terminal
+
+# Object detection (requires ZENOH_CAMERA_RAW_ENABLE=1)
+npm run yolo:runner
+npm run yolo:listen     # read detections in another terminal
 ```
 
 
@@ -128,6 +153,27 @@ npm run examples:latency
 - Automatic image preprocessing and dithering
 - Performance timing diagnostics
 - Supports PNG and JPEG formats
+
+### 🧠 AI Inference
+
+#### Speech-to-Text (Whisper)
+
+- **Real-time transcription** via [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+- Subscribes to `bsole/microphone/raw/**` — works with the existing mic pipeline
+- Publishes transcripts to `bsole/whisper/transcript` (Zenoh or MQTT)
+- **Automatic language detection** with majority-vote locking across windows
+- **No-speech filtering** suppresses silent-window hallucinations
+- Configurable window size, overlap, model size, and compute type
+- See [whisper/README.md](whisper/README.md) for full configuration
+
+#### Object Detection (YOLO)
+
+- **Real-time detection** via [Ultralytics YOLOv8](https://docs.ultralytics.com/)
+- Subscribes to `bsole/camera/raw/**` — works with the existing camera pipeline
+- Publishes detections to `bsole/yolo/detections` (Zenoh or MQTT)
+- Configurable model size (n/s/m/l/x), confidence threshold, IOU, and class filter
+- Detection payload includes bounding boxes, class names, and confidence scores
+- See [yolo/README.md](yolo/README.md) for full configuration
 
 
 ## Zenoh Integration
@@ -169,6 +215,45 @@ When `ZENOH_ENABLE=1` and `ZENOH_CAMERA_ENABLE` is not `0`:
 - **`bsole/camera/image`** - Image metadata (timestamp, filename, dimensions, etc.)
 - **`bsole/camera/raw/meta`** - Raw image metadata (when `ZENOH_CAMERA_RAW_ENABLE=1`)
 - **`bsole/camera/raw/chunk`** - Raw image data chunks in base64 (when `ZENOH_CAMERA_RAW_ENABLE=1`)
+
+#### Whisper (`bsole/whisper/`)
+
+Published by `whisper/runner.py` when running (`npm run whisper:runner`):
+
+- **`bsole/whisper/transcript`** - Transcription result per audio window
+
+```json
+{
+  "ts": 1748198400000,
+  "text": "hello world",
+  "language": "en",
+  "language_probability": 0.998,
+  "inference_s": 1.42,
+  "window_s": 5.0,
+  "segments": [{ "start": 0.0, "end": 1.8, "text": "hello world" }]
+}
+```
+
+#### YOLO (`bsole/yolo/`)
+
+Published by `yolo/runner.py` when running (`npm run yolo:runner`):
+
+- **`bsole/yolo/detections`** - Object detection results per camera frame
+
+```json
+{
+  "ts": 1748198400000,
+  "frameId": "abc123",
+  "inference_ms": 45.2,
+  "image_w": 320,
+  "image_h": 240,
+  "model": "yolov8n",
+  "device": "BrilliantFrame",
+  "detections": [
+    { "class": "person", "class_id": 0, "confidence": 0.9213, "x1": 10.0, "y1": 20.0, "x2": 150.0, "y2": 300.0 }
+  ]
+}
+```
 
 ### Configuration
 
@@ -342,7 +427,47 @@ Below is a comprehensive list of environment variables, grouped by function.
 |------------------|---------------------------|---------|---------|
 | `DISPLAY_TIMING` | Log display timing         | `0`     | `1`     |
 
-For more advanced options, see the comments in each script or the main README.md.
+### Whisper (Speech-to-Text)
+
+Defaults are set in `config/whisper.ini`. See [whisper/README.md](whisper/README.md) for full details.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `WHISPER_MODEL` | `tiny` | Model size: `tiny` `base` `small` `medium` `large-v3` |
+| `WHISPER_DEVICE` | `cpu` | `cpu`, `cuda`, or `auto` |
+| `WHISPER_COMPUTE_TYPE` | `int8` | `int8`, `float16`, `float32` |
+| `WHISPER_LANGUAGE` | _(empty)_ | BCP-47 language code or empty for auto-detect |
+| `WHISPER_AUTODETECT_WINDOWS` | `3` | Windows to sample before locking language |
+| `WHISPER_AUTODETECT_EVERY` | `0` | Re-detect every N windows; `0` = lock forever |
+| `WHISPER_WINDOW_S` | `5` | Seconds of audio per inference window |
+| `WHISPER_OVERLAP` | `0` | Overlap fraction between windows (0–0.9) |
+| `WHISPER_NO_SPEECH_THRESHOLD` | `0.6` | Drop windows where all segments exceed this no-speech probability |
+| `WHISPER_WORD_TIMESTAMPS` | `0` | Set to `1` for per-word timing in payload |
+| `WHISPER_PUB_KEY` | `bsole/whisper/transcript` | Zenoh key for transcript output |
+| `ZENOH_SUB_MIC` | `bsole/microphone/raw/**` | Zenoh key expression to subscribe to |
+| `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Zenoh router endpoint |
+| `MQTT_ENABLE` | `0` | Set to `1` to use MQTT instead of Zenoh |
+| `MQTT_BROKER` | `localhost` | MQTT broker host |
+| `MQTT_PORT` | `1883` | MQTT broker port |
+
+### YOLO (Object Detection)
+
+Defaults are set in `config/yolo.ini`. See [yolo/README.md](yolo/README.md) for full details.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `YOLO_MODEL` | `yolov8n.pt` | Model file: `yolov8n`, `yolov8s`, `yolov8m`, `yolov8l`, `yolov8x` |
+| `YOLO_DEVICE` | `cpu` | `cpu`, `cuda`, or `mps` |
+| `YOLO_CONFIDENCE` | `0.5` | Minimum detection confidence (0–1) |
+| `YOLO_IOU` | `0.45` | NMS IOU threshold (0–1) |
+| `YOLO_INPUT_SIZE` | `320` | Inference image size in pixels (multiple of 32) |
+| `YOLO_CLASSES` | _(empty)_ | Comma-separated COCO class IDs; empty = all 80 |
+| `YOLO_PUB_KEY` | `bsole/yolo/detections` | Zenoh key for detection output |
+| `ZENOH_SUB_CAMERA` | `bsole/camera/raw/**` | Zenoh key expression to subscribe to |
+| `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Zenoh router endpoint |
+| `MQTT_ENABLE` | `0` | Set to `1` to use MQTT instead of Zenoh |
+| `MQTT_BROKER` | `localhost` | MQTT broker host |
+| `MQTT_PORT` | `1883` | MQTT broker port |
 
 ---
 
