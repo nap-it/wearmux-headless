@@ -186,16 +186,20 @@ class InferenceWorker(threading.Thread):
 
     def __init__(self, model: YOLO, publish_fn):
         super().__init__(daemon=True, name="yolo-inference")
-        self._model      = model
-        self._publish_fn = publish_fn
+        self._model        = model
+        self._publish_fn   = publish_fn
         self._queue: queue.Queue = queue.Queue(maxsize=_QUEUE_MAXSIZE)
-        self._running    = True
+        self._running      = True
+        self._dropped      = 0
 
     def enqueue(self, jpeg_bytes: bytes, meta: dict) -> None:
         try:
             self._queue.put_nowait((jpeg_bytes, meta))
+            if self._dropped:
+                log(f"dropped {self._dropped} frame(s) — inference slower than camera input", err=True)
+                self._dropped = 0
         except queue.Full:
-            log("inference queue full — dropping frame (inference is slower than camera input)", err=True)
+            self._dropped += 1
 
     def stop(self) -> None:
         self._running = False
@@ -263,7 +267,7 @@ class InferenceWorker(threading.Thread):
             "image_w":      img.width,
             "image_h":      img.height,
             "model":        Path(MODEL_PATH).stem,
-            "device":       meta.get("device"),
+            "device":       DEVICE,
             "detections":   detections,
         }
 
@@ -322,6 +326,7 @@ def main() -> None:
 
         def shutdown(*_) -> None:
             log("\nshutting down...")
+            threading.Timer(3.0, lambda: os._exit(0)).start()
             worker.stop()
             client.loop_stop()
             client.disconnect()
@@ -371,6 +376,7 @@ def main() -> None:
 
         def shutdown(*_) -> None:
             log("\nshutting down...")
+            threading.Timer(3.0, lambda: os._exit(0)).start()
             worker.stop()
             try:
                 sub.undeclare()
