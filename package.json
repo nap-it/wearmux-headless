@@ -35,6 +35,7 @@
         "yolo:setup": "python3 -m venv venv && venv/bin/pip install -r requirements.txt",
         "yolo:runner": "node yolo/launcher.js",
         "yolo:listen": "venv/bin/python3 yolo/listen.py",
+        "yolo:test": "venv/bin/python3 yolo/test_publish.py",
         "display": "node tools/run-with-config.js display/index.js",
         "camera": "node tools/run-with-config.js camera/index.js",
         "examples:car-help": "echo 'Car demo (examples/car-interaction):\n  npm run examples:car-demo   # Glasses (demo mode)\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",

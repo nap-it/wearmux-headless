@@ -15,7 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 ARG YOLO_MODEL=yolov8n.pt
 RUN python3 -c "from ultralytics import YOLO; YOLO('${YOLO_MODEL}')"
 
-COPY config/ ./config/
 COPY yolo/ ./yolo/
 
 CMD ["python3", "yolo/runner.py"]

@@ -435,6 +435,13 @@ async function main() {
                     
                     isProcessingImage = false;
                 } else {
+                    const minBytes = parseInt(process.env.CAMERA_MIN_IMAGE_BYTES || "0", 10);
+                    if (minBytes > 0 && buffer.length < minBytes) {
+                        debugLog(`[SKIP] Image too small (${buffer.length} < ${minBytes} bytes)`);
+                        isProcessingImage = false;
+                        return;
+                    }
+
                     const ts = new Date().toISOString().replace(/[:.]/g, "-");
                     const fname = `bsole-${ts}-${(counter++).toString().padStart(4, "0")}.${imgFmt}`;
                     

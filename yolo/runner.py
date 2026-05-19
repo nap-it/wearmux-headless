@@ -60,7 +60,7 @@ def _load_ini(path: Path) -> None:
 _load_ini(Path(__file__).resolve().parent.parent / "config" / "yolo.ini")
 
 try:
-    from PIL import Image
+    from PIL import Image, ImageOps
     from ultralytics import YOLO
 except ImportError:
     print("[yolo-runner] missing dependencies — run: npm run yolo:setup", file=sys.stderr)
@@ -218,7 +218,8 @@ class InferenceWorker(threading.Thread):
 
     def _infer(self, jpeg_bytes: bytes, meta: dict) -> None:
         try:
-            img = Image.open(BytesIO(jpeg_bytes)).convert("RGB")
+            img = Image.open(BytesIO(jpeg_bytes))
+            img = ImageOps.exif_transpose(img).convert("RGB")
         except Exception as exc:
             log(f"image decode error: {exc}", err=True)
             return
@@ -324,13 +325,20 @@ def main() -> None:
         log(f"publishing  → '{MQTT_PUB_TOPIC}'")
         log("waiting for camera frames... press Ctrl+C to stop\n")
 
+        _stopping = False
+
         def shutdown(*_) -> None:
-            log("\nshutting down...")
+            nonlocal _stopping
+            if _stopping:
+                return
+            _stopping = True
+            sys.stderr.write("[yolo-runner] shutting down...\n")
+            sys.stderr.flush()
             threading.Timer(3.0, lambda: os._exit(0)).start()
             worker.stop()
             client.loop_stop()
             client.disconnect()
-            sys.exit(0)
+            os._exit(0)
 
     else:
         try:
@@ -374,8 +382,15 @@ def main() -> None:
         log(f"model={MODEL_PATH}  conf={CONFIDENCE}  iou={IOU}  imgsz={INPUT_SIZE}")
         log("waiting for camera frames... press Ctrl+C to stop\n")
 
+        _stopping = False
+
         def shutdown(*_) -> None:
-            log("\nshutting down...")
+            nonlocal _stopping
+            if _stopping:
+                return
+            _stopping = True
+            sys.stderr.write("[yolo-runner] shutting down...\n")
+            sys.stderr.flush()
             threading.Timer(3.0, lambda: os._exit(0)).start()
             worker.stop()
             try:
@@ -387,16 +402,13 @@ def main() -> None:
             except Exception:
                 pass
             session.close()
-            sys.exit(0)
+            os._exit(0)
 
     signal.signal(signal.SIGINT,  shutdown)
     signal.signal(signal.SIGTERM, shutdown)
 
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        shutdown()
+    while True:
+        time.sleep(1)
 
 
 if __name__ == "__main__":
