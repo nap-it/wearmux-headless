@@ -192,6 +192,10 @@ async function main() {
         };
 
         const triggerPicture = async () => {
+            if (device.connectionStatus !== "connected") {
+                console.warn("[Camera] Skipping takePicture — device not connected");
+                return;
+            }
             await invokeCameraCommand("Take picture command", () => device.takePicture(cameraRate));
         };
 
@@ -274,6 +278,7 @@ async function main() {
         console.log("Waiting for camera to stabilize...");
         await sleep(2000);
 
+        let isAutoActive = false;
         let counter = 0;
         let savedCount = 0;
         let isProcessingImage = false;
@@ -482,7 +487,7 @@ async function main() {
                     
                     // SDK's autoPicture mechanism doesn't trigger in Node.js environment
                     // Manually trigger next picture.
-                    if (auto && device.autoPicture) {
+                    if (isAutoActive) {
                         const triggerNext = async () => {
                             try {
                                 if (autoCaptureDelay > 0) {
@@ -509,6 +514,25 @@ async function main() {
         
         device.addEventListener('cameraStatus', (event) => {
             if (debug) console.log("[STATUS] Camera:", event.message.cameraStatus);
+        });
+
+        let _cameraWasConnected = true;
+        device.addEventListener('isConnected', async (event) => {
+            const connected = Boolean(event.message?.isConnected);
+            if (connected && _cameraWasConnected === false) {
+                console.log("[Camera] Reconnected — resuming auto-capture...");
+                isAutoActive = false;
+                try {
+                    await sleep(2000);
+                    if (auto) {
+                        isAutoActive = true;
+                        await triggerPicture();
+                    }
+                } catch (e) {
+                    console.error("[Camera] Resume after reconnect failed:", e);
+                }
+            }
+            _cameraWasConnected = connected;
         });
 
         console.log(`Camera ready. Auto=${auto}. ${outDir ? `Output -> ${outDir}` : 'No file output (set CAMERA_OUTPUT_DIR to save images)'}`);
@@ -542,7 +566,7 @@ async function main() {
             }, 500);
         } else {
             console.log("Starting auto-capture mode (Ctrl+C to stop)...");
-            device.autoPicture = true;
+            isAutoActive = true;
             
             // Show auto-capture configuration
             const config_info = [];
@@ -562,7 +586,7 @@ async function main() {
             const shutdown = async () => {
                 console.log("\nShutting down camera...");
                 setTimeout(() => process.exit(0), 3000).unref();
-                device.autoPicture = false;
+                isAutoActive = false;
                 if (zenoh) {
                     try { await zenoh.stop(); } catch (e) { console.warn("[Camera] zenoh.stop failed:", e?.message || e); }
                 }
