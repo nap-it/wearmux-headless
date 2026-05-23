@@ -98,6 +98,8 @@ services:
     build:
       context: .
       dockerfile: yolo/Dockerfile
+      args:
+        YOLO_MODEL: ${YOLO_MODEL:-yolov8n.pt}
     container_name: yolo-runner
     depends_on:
       zenoh-router:
@@ -105,9 +107,10 @@ services:
     volumes:
       - ./config:/app/config:ro
     environment:
-      # Pass through host overrides; config/yolo.ini provides defaults
-      - YOLO_MODEL
-      - YOLO_DEVICE
+      # Docker defaults: cpu + small model (safe without GPU passthrough).
+      # Override on the host: YOLO_DEVICE=cuda YOLO_MODEL=yolov8m.pt docker compose up yolo
+      - YOLO_MODEL=${YOLO_MODEL:-yolov8n.pt}
+      - YOLO_DEVICE=${YOLO_DEVICE:-cpu}
       - YOLO_CONFIDENCE
       - YOLO_IOU
       - YOLO_INPUT_SIZE
@@ -117,6 +120,12 @@ services:
       - MQTT_PORT
       - DEBUG
       - ZENOH_ROUTER=tcp/zenoh-router:7447
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/yolo.ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
     networks:
       - bsole-network
     restart: unless-stopped

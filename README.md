@@ -21,17 +21,26 @@ bsole-connector/
 ├── microphone/
 │   ├── index.js                    # Microphone → RTSP publisher
 │   ├── record-audio.js             # Record audio to WAV file
-│   └── lib/microphone-manager.js   # Microphone data handling
+│   └── lib/
+│       ├── audio-utils.js          # Audio format utilities
+│       └── rtsp-publisher.js       # FFmpeg RTSP publisher
 ├── sensors/
 │   ├── index.js                    # Sensor monitor
-│   ├── real-time-ml-gesture.js     # ML gesture recognition
-│   ├── run-inference.js            # Edge Impulse inference runner
+│   ├── inference/
+│   │   ├── real-time-ml-gesture.js # ML gesture recognition
+│   │   ├── remote-inference.js     # Remote inference client
+│   │   └── tflite-runner.js        # On-device TFLite inference
+│   ├── training/
+│   │   ├── collect-training-data.js# Edge Impulse data collection
+│   │   ├── run-impulse.js          # Run Edge Impulse pipeline
+│   │   └── run-inference.js        # Edge Impulse inference runner
 │   └── lib/
 │       ├── sensor-manager.js       # Device + sensor orchestration
 │       ├── motion-sensors.js       # Motion handlers/utilities
 │       ├── activity-sensors.js     # Tap detector & activity classification
-│       ├── ml-gesture-detector.js  # ML gesture detection
-│       └── ei-classifier.js        # Edge Impulse classifier wrapper
+│       └── ml/
+│           ├── ml-gesture-detector.js # ML gesture detection
+│           └── ei-classifier.js    # Edge Impulse classifier wrapper
 ├── camera/
 │   ├── index.js                    # Camera capture CLI
 │   └── lib/
@@ -52,13 +61,21 @@ bsole-connector/
 │   └── latency-evaluation/         # Display-to-camera latency evaluation example
 ├── tools/
 │   ├── launcher.js                 # Config parser and script launcher
+│   ├── run-with-config.js          # Env-injecting script runner
+│   ├── mqtt-broker.js              # Embedded MQTT broker helper
+│   ├── wifi-setup.js               # BLE WiFi provisioning tool
 │   ├── zenoh_py_publisher.py       # Python sidecar: UDS→Zenoh publisher
-│   └── zenoh_py_subscriber.py      # Python subscriber helper
+│   ├── zenoh_py_subscriber.py      # Python subscriber helper
+│   └── zenoh_py_subscriber_bridge.py # Zenoh↔MQTT bridge
 ├── utils/
 │   ├── config.js                   # Env-driven config loader
-│   ├── device-manager.js           # BLE connection
-│   ├── stream-manager.js           # FFmpeg RTSP publisher
-│   └── zenoh-manager.js            # Node→Python sidecar bridge (UDS)
+│   ├── ini-config.js               # INI file parser
+│   ├── device-manager.js           # BLE/WiFi connection manager
+│   ├── mqtt-manager.js             # MQTT publisher
+│   ├── mqtt-subscriber.js          # MQTT subscriber
+│   ├── transport.js                # Transport abstraction (Zenoh/MQTT)
+│   ├── zenoh-manager.js            # Node→Python sidecar bridge (UDS)
+│   └── zenoh-subscriber.js         # Zenoh subscriber helper
 ├── docker-compose.yml              # Docker for Linux
 ├── package.json
 └── README.md
@@ -384,8 +401,8 @@ Below is a comprehensive list of environment variables, grouped by function.
 ### Zenoh
 
 | Variable | Description | Default |
-|----------|-------------|---------||
-| `ZENOH_ENABLE` | Enable Zenoh publishing | `0` |
+|----------|-------------|---------|
+| `ZENOH_ENABLE` | Enable Zenoh publishing | `1` |
 | `ZENOH_KEY_PREFIX` | Sensor topic prefix | `bsole/sensors` |
 | `ZENOH_ATTACH_ALL` | Publish all enabled sensors | `1` |
 | `ZENOH_MIC_ENABLE` | Enable microphone publishing | `1` (if ZENOH_ENABLE=1) |
@@ -394,7 +411,7 @@ Below is a comprehensive list of environment variables, grouped by function.
 | `ZENOH_MIC_RAW_THROTTLE_MS` | Throttle raw audio (ms) | `200` |
 | `ZENOH_CAMERA_ENABLE` | Enable camera publishing | `1` (if ZENOH_ENABLE=1) |
 | `ZENOH_CAMERA_KEY_PREFIX` | Camera topic prefix | `bsole/camera` |
-| `ZENOH_CAMERA_RAW_ENABLE` | Publish raw image data | `0` |
+| `ZENOH_CAMERA_RAW_ENABLE` | Publish raw image data | `1` |
 | `ZENOH_RAW_CHUNK_SIZE` | Chunk size for raw data | `30000` |
 | `ZENOH_UDS_PATH` | Unix socket path for sidecar | `/tmp/bsole-zenoh.sock` |
 

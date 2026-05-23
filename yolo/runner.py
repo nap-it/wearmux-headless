@@ -86,6 +86,7 @@ MQTT_SUB_TOPIC = os.environ.get("MQTT_SUB_CAMERA", "bsole/camera/raw/#")
 DEBUG        = os.environ.get("DEBUG", "0") == "1"
 
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
+READY_FILE  = os.environ.get("YOLO_READY_FILE", "/tmp/yolo.ready")
 
 _FRAME_TIMEOUT_S = 2.0
 _QUEUE_MAXSIZE   = 2
@@ -95,6 +96,14 @@ _QUEUE_MAXSIZE   = 2
 
 def log(msg: str, *, err: bool = False) -> None:
     print(f"[yolo-runner] {msg}", flush=True, file=sys.stderr if err else sys.stdout)
+
+
+def _signal_ready() -> None:
+    print("[yolo-runner] READY", flush=True)
+    try:
+        Path(READY_FILE).touch()
+    except OSError:
+        pass
 
 
 def decode_frame(chunks_by_idx: dict) -> bytes:
@@ -286,6 +295,10 @@ def main() -> None:
     model = YOLO(MODEL_PATH)
     log(f"model ready ({time.monotonic() - t0:.1f}s)  classes={len(model.names)}")
 
+    log("warming up model...")
+    model(Image.new("RGB", (INPUT_SIZE, INPUT_SIZE)), device=DEVICE, verbose=False)
+    log("warm-up done")
+
     if MQTT_ENABLE:
         try:
             import paho.mqtt.client as mqtt
@@ -324,6 +337,7 @@ def main() -> None:
         log(f"subscribed    '{MQTT_SUB_TOPIC}'")
         log(f"publishing  → '{MQTT_PUB_TOPIC}'")
         log("waiting for camera frames... press Ctrl+C to stop\n")
+        _signal_ready()
 
         _stopping = False
 
@@ -381,6 +395,7 @@ def main() -> None:
         log(f"publishing → '{PUB_KEY}'")
         log(f"model={MODEL_PATH}  conf={CONFIDENCE}  iou={IOU}  imgsz={INPUT_SIZE}")
         log("waiting for camera frames... press Ctrl+C to stop\n")
+        _signal_ready()
 
         _stopping = False
 

@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Stage 1: Build dependencies
 FROM code.nap.av.it.pt:5050/external-tools/misc-docker-images/node:20-bookworm-slim AS builder
 
@@ -17,14 +18,16 @@ ENV PYTHON=/usr/bin/python3 \
     npm_config_legacy_peer_deps=true \
     npm_config_sharp_binary_host="https://npmmirror.com/mirrors/sharp"
 
-RUN npm ci --only=production || npm install --only=production --no-audit --no-fund --legacy-peer-deps
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --only=production || npm install --only=production --no-audit --no-fund --legacy-peer-deps
 
 # Install Python dependencies
 COPY requirements.txt ./
-RUN python3 -m venv /opt/venv \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m venv /opt/venv \
     && . /opt/venv/bin/activate \
     && pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install -r requirements.txt
 
 # Stage 2: Runtime image
 FROM code.nap.av.it.pt:5050/external-tools/misc-docker-images/node:20-bookworm-slim AS runtime
