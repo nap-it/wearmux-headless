@@ -31,7 +31,7 @@ services:
         condition: service_healthy
     volumes:
       - ./config:/config:ro
-      - ./config/peer.docker.json5:/app/zenoh/peer.json5:ro
+      - ./config/peer.json5:/app/zenoh/peer.json5:ro
       # Data persistence (optional)
       - ./training-data:/app/training-data
       - ./logs:/app/logs
@@ -126,6 +126,8 @@ services:
       timeout: 5s
       retries: 6
       start_period: 60s
+    ports:
+      - "8080:8080"
     networks:
       - bsole-network
     restart: unless-stopped

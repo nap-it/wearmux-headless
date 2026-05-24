@@ -54,7 +54,6 @@ COPY . .
 # Set environment variables
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH" \
-    ZENOH_ENABLE=0 \
     NODE_ENV=production \
     DEBUG=0
 
