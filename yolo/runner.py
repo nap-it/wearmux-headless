@@ -60,7 +60,7 @@ def _load_ini(path: Path) -> None:
 _load_ini(Path(__file__).resolve().parent.parent / "config" / "yolo.ini")
 
 try:
-    from PIL import Image, ImageOps
+    from PIL import Image, ImageDraw, ImageOps
     from ultralytics import YOLO
 except ImportError:
     print("[yolo-runner] missing dependencies — run: npm run yolo:setup", file=sys.stderr)
@@ -75,7 +75,9 @@ IOU          = float(os.environ.get("YOLO_IOU", "0.45"))
 INPUT_SIZE   = int(os.environ.get("YOLO_INPUT_SIZE", "320"))
 _classes_raw = os.environ.get("YOLO_CLASSES", "").strip()
 CLASSES      = [int(c) for c in _classes_raw.split(",") if c.strip()] if _classes_raw else None
-PUB_KEY      = os.environ.get("YOLO_PUB_KEY", "bsole/yolo/detections")
+PUB_KEY           = os.environ.get("YOLO_PUB_KEY", "bsole/yolo/detections")
+ANNOTATED_PUB_KEY = os.environ.get("YOLO_ANNOTATED_PUB_KEY", "bsole/yolo/annotated")
+PUBLISH_ANNOTATED = os.environ.get("YOLO_PUBLISH_ANNOTATED", "0") == "1"
 SUB_EXPR     = os.environ.get("ZENOH_SUB_CAMERA", "bsole/camera/raw/**")
 ROUTER       = os.environ.get("ZENOH_ROUTER", "")
 MQTT_ENABLE  = os.environ.get("MQTT_ENABLE", "0") == "1"
@@ -193,13 +195,14 @@ class InferenceWorker(threading.Thread):
     blocking CPU/GPU work never stalls the message receiver.
     """
 
-    def __init__(self, model: YOLO, publish_fn):
+    def __init__(self, model: YOLO, publish_fn, publish_annotated_fn=None):
         super().__init__(daemon=True, name="yolo-inference")
-        self._model        = model
-        self._publish_fn   = publish_fn
-        self._queue: queue.Queue = queue.Queue(maxsize=_QUEUE_MAXSIZE)
-        self._running      = True
-        self._dropped      = 0
+        self._model                = model
+        self._publish_fn           = publish_fn
+        self._publish_annotated_fn = publish_annotated_fn
+        self._queue: queue.Queue   = queue.Queue(maxsize=_QUEUE_MAXSIZE)
+        self._running              = True
+        self._dropped              = 0
 
     def enqueue(self, jpeg_bytes: bytes, meta: dict) -> None:
         try:
@@ -286,6 +289,23 @@ class InferenceWorker(threading.Thread):
         except Exception as exc:
             log(f"publish error: {exc}", err=True)
 
+        if PUBLISH_ANNOTATED and self._publish_annotated_fn and detections:
+            try:
+                draw = ImageDraw.Draw(img)
+                for d in detections:
+                    draw.rectangle([d["x1"], d["y1"], d["x2"], d["y2"]], outline="red", width=2)
+                    draw.text((d["x1"], max(0, d["y1"] - 10)), f"{d['class']} {d['confidence']:.2f}", fill="red")
+                buf = BytesIO()
+                img.save(buf, format="JPEG", quality=75)
+                annotated = json.dumps({
+                    "ts":      payload["ts"],
+                    "frameId": payload["frameId"],
+                    "data":    base64.b64encode(buf.getvalue()).decode(),
+                })
+                self._publish_annotated_fn(annotated)
+            except Exception as exc:
+                log(f"annotated publish error: {exc}", err=True)
+
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
@@ -307,7 +327,9 @@ def main() -> None:
             sys.exit(1)
 
         _pub: list = [None]
-        worker    = InferenceWorker(model, lambda s: _pub[0](s))
+        _pub_ann: list = [None]
+        worker    = InferenceWorker(model, lambda s: _pub[0](s),
+                                    publish_annotated_fn=lambda s: _pub_ann[0](s) if _pub_ann[0] else None)
         assembler = FrameAssembler(on_frame=worker.enqueue)
 
         try:
@@ -329,7 +351,8 @@ def main() -> None:
         client.connect(MQTT_BROKER, MQTT_PORT)
         client.subscribe(MQTT_SUB_TOPIC)
         client.loop_start()
-        _pub[0] = lambda s: client.publish(MQTT_PUB_TOPIC, s)
+        _pub[0]     = lambda s: client.publish(MQTT_PUB_TOPIC, s)
+        _pub_ann[0] = lambda s: client.publish(ANNOTATED_PUB_KEY, s) if PUBLISH_ANNOTATED else None
 
         worker.start()
 
@@ -371,10 +394,12 @@ def main() -> None:
             conf.insert_json5("connect/endpoints", f'["{ROUTER}"]')
             log(f"router override: {ROUTER}")
 
-        session   = zenoh.open(conf)
-        publisher = session.declare_publisher(PUB_KEY)
+        session              = zenoh.open(conf)
+        publisher            = session.declare_publisher(PUB_KEY)
+        annotated_publisher  = session.declare_publisher(ANNOTATED_PUB_KEY) if PUBLISH_ANNOTATED else None
 
-        worker    = InferenceWorker(model, publisher.put)
+        worker    = InferenceWorker(model, publisher.put,
+                                    publish_annotated_fn=annotated_publisher.put if annotated_publisher else None)
         assembler = FrameAssembler(on_frame=worker.enqueue)
 
         def on_zenoh_message(sample) -> None:
@@ -414,6 +439,11 @@ def main() -> None:
                 pass
             try:
                 publisher.undeclare()
+            except Exception:
+                pass
+            try:
+                if annotated_publisher:
+                    annotated_publisher.undeclare()
             except Exception:
                 pass
             session.close()
