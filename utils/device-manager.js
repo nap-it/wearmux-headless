@@ -177,8 +177,9 @@ class DeviceManager extends EventEmitter {
                     const normalize = (id) => id?.toLowerCase().replaceAll(":", "");
                     const idMatched = filterId && normalize(dd.bluetoothId) === normalize(filterId);
                     if (filterId && !idMatched) continue;
+                    debugLog("[DeviceManager] found device:", dd.name, dd.bluetoothId);
                     // Skip name filter when ID matched, noble on Linux omits names during scan
-                    if (filterName && !idMatched && dd.name !== filterName) continue;
+                    if (filterName && !idMatched && dd.name?.toLowerCase() !== filterName.toLowerCase()) continue;
                     return dd;
                 }
             })();
@@ -217,13 +218,17 @@ class DeviceManager extends EventEmitter {
     async _waitForScanningAvailable(scanner, timeoutMs = 20000) {
         if (scanner.isScanningAvailable) return true;
         debugLog("[DeviceManager] Waiting for BLE adapter to be ready...");
-        return Promise.race([
-            scanner.waitForEvent("scanningAvailable").then(() => true),
-            new Promise((resolve) => setTimeout(() => {
+        return new Promise((resolve) => {
+            const timeout = setTimeout(() => {
                 debugLog("[DeviceManager] Timeout waiting for BLE adapter");
                 resolve(false);
-            }, timeoutMs)),
-        ]);
+            }, timeoutMs);
+
+            scanner.waitForEvent("scanningAvailable").then(() => {
+                clearTimeout(timeout);
+                resolve(true);
+            });
+        });
     }
 
     _setupEventListeners() {

@@ -125,7 +125,12 @@ async function main() {
     };
     process.on("SIGINT", shutdown);
     process.on("SIGTERM", shutdown);
-    console.log("Done. Press Ctrl+C to exit.");
+    
+    if (process.env.DISPLAY_KEEP_ALIVE === "1") {
+        console.log("Done. Press Ctrl+C to exit.");
+    } else {
+        await shutdown();
+    }
 }
 
 if (require.main === module) {

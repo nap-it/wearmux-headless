@@ -109,9 +109,10 @@ async function main() {
 
   function spawnScript(name) {
     const script = process.env[`NPM_SCRIPT_${name.toUpperCase()}`] || name;
+    const parts = script.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
     const cmd = 'npm';
-    const args = ['run', script];
-    console.log(`[launcher] starting: ${cmd} ${args.join(' ')}`);
+    const args = ['run', ...parts.map(p => p.replace(/^"|"$/g, ''))];
+    console.log(`[launcher] starting: ${cmd} ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`);
     const child = spawn(cmd, args, { stdio: 'inherit', env: process.env });
     children.push(child);
     child.on('exit', (code, signal) => {

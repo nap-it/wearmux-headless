@@ -378,13 +378,17 @@ class DisplayManager {
                 this._devicePaletteCache[colorIndex] = hex;
                 this._devicePaletteNext = (this._devicePaletteNext + 1) % 16;
                 // Update the hardware's global palette at this index
+                if (process.env.DEBUG === '1') console.log(`[Debug] Calling setDisplayColor(${colorIndex}, ${hex})...`);
                 await this.device.setDisplayColor(colorIndex, hex);
+                if (process.env.DEBUG === '1') console.log(`[Debug] setDisplayColor done`);
             }
             bitmapColorPairs.push({ bitmapColorIndex: i, colorIndex });
         }
 
         if (bitmapColorPairs.length) {
+            if (process.env.DEBUG === '1') console.log(`[Debug] Calling selectDisplayBitmapColors...`);
             await this.device.selectDisplayBitmapColors(bitmapColorPairs);
+            if (process.env.DEBUG === '1') console.log(`[Debug] selectDisplayBitmapColors done`);
         }
         const colorSetupTime = enableTiming ? performance.now() - colorSetupStartTime : 0;
 
@@ -393,13 +397,19 @@ class DisplayManager {
         for (let i = 0; i < mergedTiles.length; i++) {
             const tile = mergedTiles[i];
             const isLast = i === mergedTiles.length - 1;
+            if (process.env.DEBUG === '1') console.log(`[Debug] Calling drawDisplayBitmap(${i}/${mergedTiles.length})...`);
             await this.device.drawDisplayBitmap(tile.x, tile.y, tile.bitmap, isLast);
+            if (process.env.DEBUG === '1') console.log(`[Debug] drawDisplayBitmap done`);
         }
+        if (process.env.DEBUG === '1') console.log(`[Debug] Calling showDisplay...`);
         await this.device.showDisplay(true);
+        if (process.env.DEBUG === '1') console.log(`[Debug] showDisplay done`);
         const drawTime = enableTiming ? performance.now() - drawStartTime : 0;
 
         if (Math.abs(scale - 1) > 1e-3) {
+            if (process.env.DEBUG === '1') console.log(`[Debug] Calling resetDisplayBitmapScale...`);
             await this.device.resetDisplayBitmapScale(true);
+            if (process.env.DEBUG === '1') console.log(`[Debug] resetDisplayBitmapScale done`);
         }
 
         if (enableTiming) {
