@@ -242,9 +242,9 @@ async function main() {
         duration: totalDuration,
         samples: samples?.length || 0,
       };
-      zenoh.publish(`${zenoh.keyPrefix}/level`, meta).catch(() => {});
+      zenoh.publish(`${zenoh.keyPrefix}/level`, meta).catch((e) => { if (process.env.DEBUG === "1") console.error('[Mic/Zenoh] level publish error:', e?.message || e); });
       if (zenohRawEnabled && samples && samples.buffer) {
-        publishRawAudio(samples, meta).catch(() => {});
+        publishRawAudio(samples, meta).catch((e) => { if (process.env.DEBUG === "1") console.error('[Mic/Zenoh] raw publish error:', e?.message || e); });
       }
     }
 
@@ -283,6 +283,17 @@ async function main() {
     shutdown({ exitCode: 0 }).catch(() => process.exit(0));
   });
 }
+
+// The BrilliantSole library can throw RangeError on malformed microphone packets.
+// Catch it here so a bad packet doesn't kill the process.
+process.on('uncaughtException', (err) => {
+  if (err instanceof RangeError && err.message.includes('bounds of the DataView')) {
+    if (process.env.DEBUG === '1') console.warn('[Microphone] bad packet skipped:', err.message);
+    return;
+  }
+  console.error('\nUncaught exception:', err.message);
+  process.exit(1);
+});
 
 main().catch((error) => {
   console.error('\nError:', error.message);
