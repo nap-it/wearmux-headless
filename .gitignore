@@ -369,3 +369,8 @@ sensors/model/*.js
 sensors/model/*.wasm
 sensors/model/*.eim
 !sensors/model/.gitkeep
+
+# Camera output
+images/*.jpg
+images/*.png
+images/*.jpeg

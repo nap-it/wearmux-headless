@@ -29,6 +29,8 @@ services:
     depends_on:
       zenoh-router:
         condition: service_healthy
+    environment:
+      - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/127.0.0.1:7447}
     volumes:
       - ./config:/config:ro
       - ./config/peer.json5:/app/zenoh/peer.json5:ro
@@ -89,7 +91,7 @@ services:
       - MQTT_BROKER
       - MQTT_PORT
       - DEBUG
-      - ZENOH_ROUTER=tcp/zenoh-router:7447
+      - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/zenoh-router:7447}
     networks:
       - bsole-network
     restart: unless-stopped
@@ -119,7 +121,7 @@ services:
       - MQTT_BROKER
       - MQTT_PORT
       - DEBUG
-      - ZENOH_ROUTER=tcp/zenoh-router:7447
+      - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/zenoh-router:7447}
     healthcheck:
       test: ["CMD-SHELL", "test -f /tmp/yolo.ready"]
       interval: 10s
@@ -149,7 +151,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/16
+        - subnet: 172.25.0.0/16
 
 volumes:
   training-data:
