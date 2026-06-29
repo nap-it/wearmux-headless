@@ -368,6 +368,7 @@ microphone/recordings/
 sensors/model/*.js
 sensors/model/*.wasm
 sensors/model/*.eim
+sensors/model/*.zip
 !sensors/model/.gitkeep
 
 # Camera output
