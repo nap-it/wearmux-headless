@@ -102,6 +102,7 @@ describe('Car-Glasses Interaction', () => {
       showMessage: jest.fn().mockResolvedValue(undefined),
       clearDisplay: jest.fn().mockResolvedValue(undefined),
       waitForDemoGesture: jest.fn().mockReturnValue(new Promise(() => { })),
+      cleanup: jest.fn().mockResolvedValue(undefined),
       device: { bluetoothId: 'test-id', name: 'Test Device' }
     };
     glasses.network = {

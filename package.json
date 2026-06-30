@@ -40,7 +40,7 @@
         "display": "node tools/run-with-config.js display/index.js",
         "camera": "node tools/run-with-config.js camera/index.js",
         "examples:car-help": "echo 'Car demo (examples/car-interaction):\n  npm run examples:car-demo   # Glasses (demo mode)\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
-        "examples:car-demo": "cd examples/car-interaction && DEMO_MODE=1 node glasses-controller.js\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
+        "examples:car-demo": "cd examples/car-interaction && node glasses-controller.js\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
         "examples:car": "cd examples/car-interaction && node car-simulator.js",
         "examples:latency": "node tools/run-with-config.js examples/latency-evaluation/index.js",
         "examples:test": "jest examples",
