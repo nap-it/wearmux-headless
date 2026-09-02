@@ -2,6 +2,18 @@
 
 WearMux Headless is the unattended Node.js host of the **WearMux** wearable toolchain. It connects heterogeneous Brilliant Wear / BrilliantSole-compatible devices over BLE or Wi-Fi, exposes modality-oriented camera, microphone, sensor, and display functions, and can forward data to local or distributed consumers through MQTT or Zenoh.
 
+### Citation
+
+If you find this code useful in your research, please consider citing:
+
+```bibtex
+@INPROCEEDINGS{Tavares2026,
+    author={Guilherme Tavares and Rafael Soares and André Clérigo and Gonçalo Silva and Gabriel Silva and Tomás Cruz and João Abrunhosa and Pedro Laredo and Pedro Rito and Susana Sargento},
+    booktitle={2026 IEEE 29th International Symposium on Personal, Indoor and Mobile Radio Communications (WPMC)},
+    title={WearMux: Real-Time Multimodal Sensing and Feedback across Heterogeneous Wearables}
+}
+```
+
 ## Repository layout
 
 ```text
