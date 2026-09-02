@@ -1,0 +1,157 @@
+services:
+  # Zenoh Router - Message broker
+  zenoh-router:
+    image: eclipse/zenoh:1.6.1
+    container_name: zenoh-router
+    command: -c /zenoh/router.json5
+    ports:
+      - "7447:7447" # TCP port for zenoh
+      # - "8000:8000"  # REST API (optional, disabled to avoid conflicts)
+    volumes:
+      - ./config/router.json5:/zenoh/router.json5:ro
+    environment:
+      - RUST_LOG=${ZENOH_LOG_LEVEL:-info}
+    networks:
+      - wearmux-network
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "pgrep zenohd || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # WearMux headless host - main application
+  wearmux:
+    build:
+      context: .
+    container_name: wearmux-headless
+    depends_on:
+      zenoh-router:
+        condition: service_healthy
+    environment:
+      - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/127.0.0.1:7447}
+    volumes:
+      - ./config:/config:ro
+      # Data persistence (optional)
+      - ./training-data:/app/training-data
+      - ./logs:/app/logs
+      # Display assets (if using display module)
+      - ./display/assets:/app/display/assets:ro
+      # Camera output (if using camera module)
+      - ./images:/app/images
+
+    # BLE access requires special permissions
+    privileged: ${PRIVILEGED:-true}
+    network_mode: host # Required for BLE discovery
+
+    # Alternative to privileged mode (more secure, but may not work for all systems)
+    # cap_add:
+    #   - NET_ADMIN
+    #   - NET_RAW
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - seccomp:unconfined
+    # devices:
+    #   - "/dev/bus/usb:/dev/bus/usb"
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: [ "CMD", "node", "-e", "console.log('healthy')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+  
+  whisper:
+    build:
+      context: .
+      dockerfile: whisper/Dockerfile
+    container_name: whisper-runner
+    depends_on:
+      zenoh-router:
+        condition: service_healthy
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      # Pass through host overrides; config/whisper.ini provides defaults
+      - WHISPER_MODEL
+      - WHISPER_DEVICE
+      - WHISPER_COMPUTE_TYPE
+      - WHISPER_LANGUAGE
+      - WHISPER_AUTODETECT_WINDOWS
+      - WHISPER_AUTODETECT_EVERY
+      - WHISPER_WINDOW_S
+      - WHISPER_OVERLAP
+      - WHISPER_WORD_TIMESTAMPS
+      - WHISPER_NO_SPEECH_THRESHOLD
+      - MQTT_ENABLE
+      - MQTT_BROKER
+      - MQTT_PORT
+      - DEBUG
+      - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/zenoh-router:7447}
+    networks:
+      - wearmux-network
+    restart: unless-stopped
+
+  yolo:
+    build:
+      context: .
+      dockerfile: yolo/Dockerfile
+      args:
+        YOLO_MODEL: ${YOLO_MODEL:-yolov8n.pt}
+    container_name: yolo-runner
+    depends_on:
+      zenoh-router:
+        condition: service_healthy
+    volumes:
+      - ./config:/app/config:ro
+    environment:
+      # Docker defaults: cpu + small model (safe without GPU passthrough).
+      # Override on the host: YOLO_DEVICE=cuda YOLO_MODEL=yolov8m.pt docker compose up yolo
+      - YOLO_MODEL=${YOLO_MODEL:-yolov8n.pt}
+      - YOLO_DEVICE=${YOLO_DEVICE:-cpu}
+      - YOLO_CONFIDENCE
+      - YOLO_IOU
+      - YOLO_INPUT_SIZE
+      - YOLO_CLASSES
+      - MQTT_ENABLE
+      - MQTT_BROKER
+      - MQTT_PORT
+      - DEBUG
+      - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/zenoh-router:7447}
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/yolo.ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+    ports:
+      - "8080:8080"
+    networks:
+      - wearmux-network
+    restart: unless-stopped
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    restart: unless-stopped
+    network_mode: host # Required for RTSP access from host
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -f http://localhost:8554 || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  wearmux-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+
+volumes:
+  training-data:
+  logs:

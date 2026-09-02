@@ -1,0 +1,40 @@
+.git/
+.github/
+.vscode/
+.idea/
+.DS_Store
+
+node_modules/
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+.env
+.env.*
+!.env.example
+
+logs/
+training-data/
+microphone/recordings/
+images/*
+!images/.gitkeep
+coverage/
+.nyc_output/
+
+# Downloaded/generated model artifacts that are not part of the tracked snapshot
+*.pt
+*.onnx
+sensors/model/*.js
+sensors/model/*.wasm
+sensors/model/*.eim
+sensors/model/*.zip
+
+# CI/test-only content
+**/__tests__/
+*.test.js
+
+# Local/editor/build noise
+*.log
+*.tgz
+npm-debug.log*

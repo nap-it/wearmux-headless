@@ -1,0 +1,7 @@
+// Zenoh peer configuration for Docker environment
+{
+  mode: "client",
+  connect: {
+    endpoints: ["tcp/zenoh-router:7447"],
+  }
+}
