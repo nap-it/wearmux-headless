@@ -60,22 +60,8 @@ function validateImageBuffer(buffer, options = {}) {
     return { isValid: true };
 }
 
-/**
- * Convert image format string to MIME type
- * @param {string} format - Image format (jpg, jpeg, png, bmp)
- * @returns {string} MIME type string
- */
-function formatToMime(format) {
-    const fmt = String(format || "").toLowerCase();
-    if (fmt === "jpg" || fmt === "jpeg") return "image/jpeg";
-    if (fmt === "png") return "image/png";
-    if (fmt === "bmp") return "image/bmp";
-    return "application/octet-stream";
-}
-
 module.exports = {
     isValidJpeg,
     hasValidJpegStructure,
-    validateImageBuffer,
-    formatToMime
+    validateImageBuffer
 };

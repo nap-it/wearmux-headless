@@ -2,6 +2,8 @@
 
 Node.js tooling to connect to Brilliant Wear devices and exchange modality data and device actions over MQTT or Zenoh. Optional consumer examples show how to run speech-to-text and object detection on another process or machine.
 
+The default `sessions` runtime discovers nearby compatible devices and keeps one connection per device. Each session starts the sensors, camera, and microphone that its SDK capabilities support, and accepts display or haptic actions when available. Multiple devices can publish to the same MQTT or Zenoh topics; modality payloads carry a device ID.
+
 ## Project Structure
 
 The project has been organized with clear separation of concerns:
@@ -19,10 +21,11 @@ wearmux-headless/
 ├── actions/
 │   └── index.js                    # Standalone device action receiver
 ├── microphone/
-│   ├── index.js                    # Microphone → RTSP publisher
+│   ├── index.js                    # Standalone microphone command
 │   ├── record-audio.js             # Record audio to WAV file
 │   └── lib/
 │       ├── audio-utils.js          # Audio format utilities
+│       ├── microphone-session.js   # Microphone on a shared device session
 │       └── rtsp-publisher.js       # FFmpeg RTSP publisher
 ├── sensors/
 │   ├── index.js                    # Sensor monitor
@@ -42,8 +45,9 @@ wearmux-headless/
 │           ├── ml-gesture-detector.js # ML gesture detection
 │           └── ei-classifier.js    # Edge Impulse classifier wrapper
 ├── camera/
-│   ├── index.js                    # Camera capture CLI
+│   ├── index.js                    # Standalone camera command
 │   └── lib/
+│       ├── camera-session.js       # Camera on a shared device session
 │       ├── image-validator.js      # Image validation utilities
 │       └── viewer-server.js        # HTTP/MJPEG browser viewer
 ├── examples/
@@ -55,6 +59,7 @@ wearmux-headless/
 │       └── README.md               # Message contract and deployment guide
 ├── tools/
 │   ├── launcher.js                 # Config parser and script launcher
+│   ├── sessions.js                 # Multi-device session runtime
 │   ├── run-with-config.js          # Env-injecting script runner
 │   ├── mqtt-broker.js              # Embedded MQTT broker helper
 │   ├── send-action.js              # Send an action and wait for its result
@@ -66,6 +71,9 @@ wearmux-headless/
 │   ├── config.js                   # Env-driven config loader
 │   ├── ini-config.js               # INI file parser
 │   ├── device-manager.js           # BLE/WiFi connection manager
+│   ├── device-fleet.js             # Discovery and concurrent sessions
+│   ├── device-session.js           # Per-device capability ownership
+│   ├── raw-media.js                # Shared camera/audio chunk publishing
 │   ├── mqtt-manager.js             # MQTT publisher
 │   ├── mqtt-subscriber.js          # MQTT subscriber
 │   ├── transport.js                # Transport abstraction (Zenoh/MQTT)
@@ -105,6 +113,9 @@ wearmux-headless/
 # Install dependencies
 npm install
 
+# Discover all nearby compatible devices and start their capabilities
+npm run sessions
+
 # Microphone → RTSP
 npm run microphone:rtsp
 
@@ -129,6 +140,8 @@ npm run camera
 # Display-to-camera latency example
 npm run examples:latency
 ```
+
+`npm start` and Docker Compose use the same session runtime through `config/config.ini`. Leave `DEVICE_ID` and `DEVICE_NAME` unset to connect multiple devices. The standalone `sensors`, `camera`, `microphone:rtsp`, and `actions` commands remain useful for focused single-device work; do not run them beside `sessions` against the same BLE device. Standalone camera and microphone commands use the same capture and streaming code as device sessions.
 
 For off-device inference, see the [consumer guide](examples/consumers/README.md). Whisper and YOLO are optional examples with separate Python dependencies; the default Docker build does not install or start them.
 
@@ -191,9 +204,11 @@ The default topic root for both transports is `bwear/`. Set `TOPIC_PREFIX` only 
 
 For existing configurations, replace `MQTT_ENABLE` or `ZENOH_ENABLE` with `MESSAGE_TRANSPORT`, and replace transport-specific topic prefixes with `TOPIC_PREFIX`. Raw media publishing uses `MIC_RAW_ENABLE` and `CAMERA_RAW_ENABLE`. Set these in `config/` or your shell; the old flags are no longer read.
 
-The normal sensor command (`npm run sensors`) publishes sensor data and listens for actions on the same device connection. If sensors are not running, `npm run actions` starts a standalone action receiver. Run one action receiver per device connection.
+The default `npm run sessions` command publishes data from every connected device and listens for actions on one shared subscription. The `npm run sensors` command publishes sensor data and listens for actions on its single device connection. `npm run actions` is a standalone single-device action receiver.
 
 Applications publish a JSON object to `bwear/actions`. The action receiver publishes a result to `bwear/actions/result` with the same `id`, an `ok` flag, device identity, and timestamp. `ok` means the device SDK accepted the action call; it does not confirm that the wearer perceived the output. Failed actions also include an `error`. An optional `deviceId` targets one connected device. Supported actions are:
+
+In the session runtime, an action without `deviceId` goes to the sole connected device with that capability. If several devices support it, the result asks for `deviceId` instead of sending the action to every device. A device-specific command uses the ID reported on `bwear/devices/status` or in modality messages.
 
 | Action | Fields | Effect |
 | --- | --- | --- |
@@ -205,11 +220,14 @@ Applications publish a JSON object to `bwear/actions`. The action receiver publi
 Use the included sender to publish an action and print its result:
 
 ```bash
-# Default Zenoh configuration; run `npm run sensors` in another terminal first.
+# Default Zenoh configuration; run `npm run sessions` in another terminal first.
 npm run actions:send -- '{"action":"display.text","text":"Hello"}'
 
+# Target a specific wristband when more than one device can vibrate.
+npm run actions:send -- '{"action":"haptic.vibrate","deviceId":"<wristband-id>"}'
+
 # MQTT, with `npm run mqtt:broker` running in another terminal.
-MESSAGE_TRANSPORT=mqtt npm run sensors
+MESSAGE_TRANSPORT=mqtt npm run sessions
 MESSAGE_TRANSPORT=mqtt npm run actions:send -- '{"action":"haptic.vibrate"}'
 ```
 
@@ -243,17 +261,22 @@ Each message includes:
 ```
 
 #### Microphone (`bwear/microphone/`)
-When messaging is enabled and the microphone command is running:
+When messaging is enabled and a connected device has a microphone:
 - **`bwear/microphone/status`** - Microphone connection status
 - **`bwear/microphone/level`** - Real-time audio level (RMS, peak, timestamp)
 - **`bwear/microphone/raw/meta`** - Raw audio metadata (when `MIC_RAW_ENABLE=1`)
 - **`bwear/microphone/raw/chunk`** - Raw audio data chunks in base64 (when `MIC_RAW_ENABLE=1`)
 
 #### Camera (`bwear/camera/`)
-When messaging is enabled and the camera command is running:
+When messaging is enabled and a connected device has a camera:
 - **`bwear/camera/image`** - Image metadata (timestamp, filename, dimensions, etc.)
 - **`bwear/camera/raw/meta`** - Raw image metadata (when `CAMERA_RAW_ENABLE=1`)
 - **`bwear/camera/raw/chunk`** - Raw image data chunks in base64 (when `CAMERA_RAW_ENABLE=1`)
+
+#### Device sessions (`bwear/devices/`)
+- **`bwear/devices/status`** - Connection status and discovered capabilities for each device
+
+With multiple cameras, the browser viewers use consecutive ports starting at `CAMERA_VIEW_PORT` (8099 by default), in connection order. A second microphone RTSP stream uses the configured path with `-1` appended, and so on. Media frame IDs include the source device ID so consumer adapters can distinguish simultaneous streams.
 
 #### Whisper (`bwear/whisper/`)
 
@@ -352,17 +375,17 @@ The Compose file also supports local builds. The Dockerfile uses the CodeNap `no
 
 The launcher reads the INI files in `config/`. Shared settings and the startup scripts are in `config/config.ini`:
 - **`[env]` section**: Environment variables (device ID, sensors, Zenoh settings, etc.)
-- **`[scripts]` section**: Scripts to run on startup (e.g., `sensors`, `camera`, `microphone:rtsp`)
+- **`[scripts]` section**: Scripts to run on startup (`sessions` by default)
 
 Example `config/config.ini`:
 ```ini
 [env]
 MESSAGE_TRANSPORT=zenoh
-ENABLED_SENSORS=acceleration,magnetometer,orientation
-DEVICE_ID=CE:59:C3:0F:4D:C9
+# Optional: restrict which sensor types run on each capable device.
+# ENABLED_SENSORS=acceleration,magnetometer,orientation
 
 [scripts]
-run=sensors
+run=sessions
 ```
 
 ### Permissions & Troubleshooting
@@ -404,40 +427,44 @@ Set `WEARMUX_CONFIG_PATH` to load a different configuration directory or INI fil
 
 | Variable           | Description                                 | Default                | Example/Values           |
 |--------------------|---------------------------------------------|------------------------|--------------------------|
-| `RTSP_URL`         | RTSP destination for microphone             | `rtsp://127.0.0.1:8554/mic` | `rtsp://...`      |
+| `RTSP_URL`         | RTSP publish URL; unset disables RTSP       | unset                  | `rtsp://host:8554/mic` |
 | `SAMPLE_RATE`      | Microphone sample rate (Hz)                 | `16000`                | `8000`, `16000`          |
 | `CHANNELS`         | Audio channels                              | `1`                    | `1`, `2`                 |
-| `SAMPLE_FORMAT`    | PCM format for FFmpeg                       | `s16le`                | `s16le`, `s8`            |
+| `SAMPLE_FORMAT`    | PCM format for FFmpeg                       | `s16le`                | `s16le`, `f32le`         |
 | `AUDIO_BITRATE`    | OPUS bitrate for RTSP                       | `64k`                  | `64k`, `128k`            |
 | `FFMPEG_PATH`      | FFmpeg binary path                          | `ffmpeg`               | `/usr/bin/ffmpeg`        |
 | `FFMPEG_LOGLEVEL`  | FFmpeg verbosity                            | `error`                | `info`, `warning`        |
-| `TEST_MODE`        | If `1`, saves audio to `test_output.wav`    | `0`                    | `1`                      |
 | `BIT_DEPTH`        | Audio bit depth                             | `16`                   | `8`, `16`                |
+| `RTSP_ENABLE`      | Set to `0` to disable a configured RTSP publisher | `1` when `RTSP_URL` is set | `0`, `1` |
 
 ### Device Discovery / Connection
 
 | Variable           | Description                                 | Default   | Example/Values                |
 |--------------------|---------------------------------------------|-----------|------------------------------|
-| `USE_CUSTOM_NOBLE` | Use custom Noble for Linux kernel 6.x       | `false`   | `true`, `1`                  |
-| `DEVICE_ID`        | Filter by Bluetooth MAC address             | -         | `CE:59:C3:0F:4D:C9`          |
-| `DEVICE_NAME`      | Filter by device name                       | -         | `Brilliant Frame 12`         |
-| `MIC_DEVICE_ID`    | Filter by Bluetooth ID for microphone       | -         | `CE:59:C3:0F:4D:C9`          |
-| `MIC_DEVICE_NAME`  | Filter by device name for microphone        | -         | `Brilliant Frame 12`         |
-| `MIC_CONNECT_ONLY` | If `1`, connect but don't start microphone  | `0`       | `1`                          |
+| `DEVICE_ID`        | In `sessions`, restrict to one Bluetooth device; unset discovers all compatible devices | unset | Bluetooth ID |
+| `DEVICE_NAME`      | Restrict discovery to one advertised device name | unset | `Brilliant Frame 12` |
+| `MIC_DEVICE_ID`    | Legacy alias for `DEVICE_ID`                | unset     | Bluetooth ID                 |
+| `MIC_DEVICE_NAME`  | Legacy alias for `DEVICE_NAME`              | unset     | `Brilliant Frame 12`         |
 
 ### Sensors
 
+Rates accept a value in Hz or a period such as `20ms`; the SDK uses 5 Hz steps. Unset `ENABLED_SENSORS` lets the session runtime use each device's supported sensors.
+
 | Variable                    | Description                                 | Default | Example/Values              |
 |-----------------------------|---------------------------------------------|---------|----------------------------|
-| `ENABLED_SENSORS`           | Comma-separated list of sensors             | -       | `acceleration,gyroscope`    |
+| `ENABLED_SENSORS`           | Restrict the session runtime to these sensor types | all supported | `acceleration,gyroscope` |
 | `ACCELERATION_RATE`         | Acceleration sensor rate (Hz)               | `50`    | `100`                      |
+| `GRAVITY_RATE`              | Gravity sensor rate (Hz)                    | `50`    | `100`                      |
 | `GYROSCOPE_RATE`            | Gyroscope sensor rate (Hz)                  | `50`    | `100`                      |
 | `MAGNETOMETER_RATE`         | Magnetometer sensor rate (Hz)               | `50`    | `100`                      |
 | `ORIENTATION_RATE`          | Orientation sensor rate (Hz)                | `50`    | `100`                      |
-| `TAP_DETECTOR_RATE`         | Tap detector rate (Hz)                      | `50`    | `100`                      |
+| `TAP_DETECTOR_RATE`         | Tap detector rate (Hz)                      | `5`     | `10`                       |
 | `LINEAR_ACCELERATION_RATE`  | Linear acceleration rate (Hz)               | `50`    | `100`                      |
 | `GAME_ROTATION_RATE`        | Game rotation rate (Hz)                     | `50`    | `100`                      |
 | `ROTATION_RATE`             | Rotation rate (Hz)                          | `50`    | `100`                      |
+| `ACTIVITY_RATE`             | Activity classification rate (Hz)           | `5`     | `10`                       |
+| `STEP_COUNTER_RATE`         | Step counter rate (Hz)                      | `5`     | `10`                       |
+| `PRESSURE_RATE`             | Pressure sensor rate (Hz)                   | `50`    | `100`                      |
 
 ### Messaging
 
@@ -447,8 +474,8 @@ Set `WEARMUX_CONFIG_PATH` to load a different configuration directory or INI fil
 | `TOPIC_PREFIX` | Root for all published and subscribed topics | `bwear` |
 | `MQTT_BROKER_URL` | MQTT broker URL, including optional credentials and TLS | `mqtt://127.0.0.1:1883` |
 | `ZENOH_ROUTER` | Zenoh router endpoint override | `config/peer.json5` |
-| `MIC_RAW_ENABLE` | Publish audio chunks for external consumers | `1` (audio.ini) |
-| `CAMERA_RAW_ENABLE` | Publish image chunks for external consumers | `1` (camera.ini) |
+| `MIC_RAW_ENABLE` | `1` publishes audio chunks; `0` leaves level/status messages only | `1` (audio.ini) |
+| `CAMERA_RAW_ENABLE` | `1` publishes image chunks; `0` leaves metadata only | `1` (camera.ini) |
 | `MIC_RAW_THROTTLE_MS` | Minimum interval between raw audio publishes | `200` |
 | `RAW_CHUNK_SIZE` | Base64 characters per raw chunk | `30000` |
 
@@ -456,29 +483,45 @@ Set `WEARMUX_CONFIG_PATH` to load a different configuration directory or INI fil
 
 | Variable                | Description                                 | Default   | Example/Values             |
 |-------------------------|---------------------------------------------|-----------|---------------------------|
-| `CAMERA_OUTPUT_DIR`     | Directory to save images                    | -         | `./images`                |
-| `CAMERA_AUTO_PICTURE`   | Enable continuous capture mode              | `0`       | `1`                       |
-| `CAMERA_AUTO_DELAY`     | Delay between captures in auto mode (ms)    | `0`       | `1000`, `2000`            |
-| `CAMERA_AUTO_FOCUS`     | Auto-focus before each capture              | `1`       | `0` (disable)             |
-| `CAMERA_IMAGE_FORMAT`   | File extension for images                   | `jpg`     | `jpg`, `png`              |
-| `CAMERA_QUALITY`        | Legacy quality setting                      | -         | `80`                      |
-| `CAMERA_RESOLUTION`     | Square frame size (e.g., 300x300)           | `640`     | `300`, `1280`             |
-| `CAMERA_QUALITY_FACTOR` | Quality factor (1..100)                     | `95`      | `80`, `100`               |
-| `CAMERA_SHUTTER`        | Shutter/exposure setting                    | -         | `auto`, `100`             |
-| `CAMERA_GAIN`           | Overall gain                                | -         | `1.5`                     |
-| `CAMERA_RED_GAIN`       | Red channel gain                            | -         | `1.2`                     |
-| `CAMERA_GREEN_GAIN`     | Green channel gain                          | -         | `1.1`                     |
-| `CAMERA_BLUE_GAIN`      | Blue channel gain                           | -         | `1.3`                     |
-| `CAMERA_VIEW_ENABLE`    | Enable browser viewer                       | `0`       | `1`                       |
-| `CAMERA_VIEW_HOST`      | Viewer host                                 | `127.0.0.1` | `0.0.0.0`               |
-| `CAMERA_VIEW_PORT`      | Viewer port                                 | `8099`    | `8080`                    |
-| `CAMERA_VIEW_MJPEG`     | Use MJPEG stream at /stream.mjpg            | `0`       | `1`                       |
-| `CAMERA_DEBUG`          | Enable verbose camera logging               | `0`       | `1`                       |
+| `CAMERA_OUTPUT_DIR`     | Directory to save JPEG images               | unset     | `./images`                |
+| `CAMERA_AUTO_PICTURE`   | `1` captures continuously; `0` captures once | `1` (camera.ini) | `0`, `1` |
+| `CAMERA_AUTO_DELAY`     | Delay between continuous captures (ms)      | `0`       | `1000`, `2000`            |
+| `CAMERA_AUTO_FOCUS`     | `1` focuses before capture; `0` skips focus  | `0` (camera.ini) | `0`, `1` |
+| `CAMERA_CAPTURE_TIMEOUT_MS` | Maximum wait for a captured image (ms)   | `5000` (camera.ini) | `8000` |
+| `CAMERA_FOCUS_IDLE_TIMEOUT_MS` | Maximum wait for focus to finish (ms) | `3000`   | `5000`                    |
+| `CAMERA_MIN_IMAGE_BYTES` | Reject smaller camera candidates           | `3000` (camera.ini) | `0`, `5000` |
+| `CAMERA_RESOLUTION`     | Device-supported numeric SDK resolution     | `480` (camera.ini) | numeric SDK value |
+| `CAMERA_WIDTH`, `CAMERA_HEIGHT` | Legacy resolution fallback when `CAMERA_RESOLUTION` is unset | unset | numeric values |
+| `CAMERA_QUALITY_FACTOR` | JPEG quality from 0 to 100                  | `60` (camera.ini) | `80`, `100` |
+| `CAMERA_QUALITY`        | Legacy alias for `CAMERA_QUALITY_FACTOR`     | unset     | `80`                      |
+| `CAMERA_RATE`           | Camera sensor rate; supported values depend on device | `5` | `10` |
+| `CAMERA_COMMAND_TIMEOUT_MS` | Wait before continuing from a camera command (ms) | `3000` (camera.ini) | `5000` |
+| `CAMERA_VIEW_ENABLE`    | `1` starts an HTTP browser viewer; `0` disables it | `1` (camera.ini) | `0`, `1` |
+| `CAMERA_VIEW_HOST`      | Viewer bind address                         | `0.0.0.0` | `127.0.0.1`               |
+| `CAMERA_VIEW_PORT`      | Viewer TCP port; more cameras use following ports | `8099` | `8080` |
+| `CAMERA_VIEW_MJPEG`     | `1` streams MJPEG; `0` uses browser polling  | `1` (camera.ini) | `0`, `1` |
+| `CAMERA_RAW_ENABLE`     | `1` publishes image chunks; requires MQTT or Zenoh | `1` (camera.ini) | `0`, `1` |
+| `CAMERA_EXPOSURE`       | Device-specific numeric exposure value      | `168` (camera.ini) | device-supported value |
+| `CAMERA_AUTO_EXPOSURE_ENABLED` | Numeric flag: `1` on, `0` off         | `0` (camera.ini) | `0`, `1` |
+| `CAMERA_AUTO_WHITE_BALANCE_ENABLED`, `CAMERA_AUTO_GAIN_ENABLED` | Device-specific numeric flags | unset | `0`, `1` |
+| `CAMERA_SHUTTER`, `CAMERA_GAIN`, `CAMERA_RED_GAIN`, `CAMERA_GREEN_GAIN`, `CAMERA_BLUE_GAIN` | Device-specific numeric controls | unset | device-supported values |
+| `CAMERA_BRIGHTNESS`, `CAMERA_SATURATION`, `CAMERA_CONTRAST`, `CAMERA_SHARPNESS` | Device-specific numeric controls | unset | device-supported values |
+| `CAMERA_LATENCY_MEASUREMENTS` | Number of images in the latency example | `500` (camera.ini) | positive integer |
+| `CAMERA_LATENCY_OUTPUT` | Optional latency results JSON path | unset | `./logs/latency.json` |
 
 ### Display
 
-| Variable         | Description                | Default | Example |
-|------------------|---------------------------|---------|---------|
-| `DISPLAY_TIMING` | Log display timing         | `0`     | `1`     |
+| Variable | Description | Default | Example/Values |
+|----------|-------------|---------|----------------|
+| `DISPLAY_TIMING` | Log display transfer timing | `0` | `1` |
+| `DISPLAY_KEEP_ALIVE` | Keep the display process alive after sending an image | `1` | `0`, `1` |
+| `DISPLAY_PIXEL_DEPTH` | Color depth in bits per pixel | automatic | `1`, `2`, `4` |
+| `DISPLAY_BRIGHTNESS` | Display brightness preset | device default | `veryLow`, `low`, `medium`, `high`, `veryHigh` |
+| `DISPLAY_FIT` | How to fit the image to the display | `contain` | `contain`, `cover`, `fill`, `inside`, `outside` |
+| `DISPLAY_ALIGN` | Image alignment | `center` | `top`, `bottom`, `left`, `right`, `center` |
+| `DISPLAY_X`, `DISPLAY_Y` | Top-left image position in pixels | `0`, `0` | integer values |
+| `DISPLAY_INPUT_HEIGHT`, `DISPLAY_OUTPUT_HEIGHT` | Image processing and device output heights | device default | positive pixel values |
+| `DISPLAY_WIDTH`, `DISPLAY_HEIGHT` | Legacy size fallback | unset | positive pixel values |
+| `DISPLAY_TILE_MAX_PIXELS` | Pixel limit per transmitted tile | `220` | positive integer |
 
 Whisper and YOLO settings are documented with their optional [consumer examples](examples/consumers/README.md). They are not loaded by the main service.

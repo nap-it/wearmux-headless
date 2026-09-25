@@ -3,6 +3,22 @@ const EventEmitter = require("events");
 const { createPublisher, selectedTransport } = require("../../utils/transport");
 const { topic } = require("../../utils/topics");
 
+// Baseline rates for sensors known by the SDK; each device enables only the types it supports.
+const DEFAULT_SENSOR_RATES = Object.freeze({
+    acceleration: 50,
+    magnetometer: 50,
+    orientation: 50,
+    gravity: 50,
+    linearAcceleration: 50,
+    gyroscope: 50,
+    gameRotation: 50,
+    rotation: 50,
+    activity: 5,
+    stepCounter: 5,
+    tapDetector: 5,
+    pressure: 50,
+});
+
 class SensorManager extends EventEmitter {
     /**
      * @param {Device} device - SDK device instance (already connected)
@@ -16,6 +32,8 @@ class SensorManager extends EventEmitter {
         this.device = device;
         this.side = options.side || null; // 'left' | 'right' | null
         this.enabledSensors = options.enabledSensors || [];
+        // When false, setSensorConfiguration preserves other active modes such as camera and microphone.
+        this.clearRest = options.clearRest !== undefined ? Boolean(options.clearRest) : true;
         this.isMonitoring = false;
         this.sensorConfiguration = {};
         
@@ -34,25 +52,7 @@ class SensorManager extends EventEmitter {
         // Available sensor types with their default device rates (SDK expects multiples of 5).
         // Rate 0 means disabled by default; non-zero means enabled at that rate when included
         // in ENABLED_SENSORS. Insoles support the full IMU set; Frame only has the first group.
-        this.availableSensors = {
-            // Full IMU (Insole + Frame)
-            acceleration: 50,
-            magnetometer: 50,
-            orientation: 50,
-            // Full IMU (Insole only — Frame lacks these)
-            gravity: 50,
-            linearAcceleration: 50,
-            gyroscope: 50,
-            gameRotation: 50,
-            rotation: 50,
-            // Activity / step sensors (Insole only)
-            activity: 5,
-            stepCounter: 5,
-            // Tap detection
-            tapDetector: 5,
-            // Pressure (Insole only)
-            pressure: 50,
-        };
+        this.availableSensors = { ...DEFAULT_SENSOR_RATES };
 
         // Build per-sensor output throttle (Hz or ms) from environment
         this.outputThrottleMs = this._buildOutputThrottleMap();
@@ -80,7 +80,7 @@ class SensorManager extends EventEmitter {
             }
         }
 
-        this._configureSensors();
+        await this._configureSensors();
 
         // Wait for configuration to take effect
         await new Promise((r) => setTimeout(r, 500));
@@ -91,7 +91,7 @@ class SensorManager extends EventEmitter {
         this.isMonitoring = true;
     }
 
-    _configureSensors() {
+    async _configureSensors() {
         // Build sensor configuration - ONLY for enabled sensors
         this.sensorConfiguration = {};
 
@@ -128,7 +128,7 @@ class SensorManager extends EventEmitter {
         console.log("[SensorManager] Enabled sensors:", this.enabledSensors);
 
         if (typeof this.device.setSensorConfiguration === "function") {
-            this.device.setSensorConfiguration(this.sensorConfiguration, true);
+            await this.device.setSensorConfiguration(this.sensorConfiguration, this.clearRest);
         } else {
             console.warn(
                 "[SensorManager] Device does not support setSensorConfiguration"
@@ -235,6 +235,11 @@ class SensorManager extends EventEmitter {
         this.isMonitoring = false;
     }
 
+    async reconfigure() {
+        // Reapply rates after the device SDK reports a connection has resumed.
+        if (this.isMonitoring) await this._configureSensors();
+    }
+
     // Sensor-specific methods
     enableSensor(sensorType, sampleRate = null) {
         if (!this.availableSensors.hasOwnProperty(sensorType)) {
@@ -250,7 +255,7 @@ class SensorManager extends EventEmitter {
         }
 
         if (this.isMonitoring) {
-            this._configureSensors();
+            this._configureSensors().catch((error) => this.emit("error", error));
         }
     }
 
@@ -261,7 +266,7 @@ class SensorManager extends EventEmitter {
         }
 
         if (this.isMonitoring) {
-            this._configureSensors();
+            this._configureSensors().catch((error) => this.emit("error", error));
         }
     }
 
@@ -273,7 +278,7 @@ class SensorManager extends EventEmitter {
         this.availableSensors[sensorType] = sampleRate;
 
         if (this.isMonitoring) {
-            this._configureSensors();
+            this._configureSensors().catch((error) => this.emit("error", error));
         }
     }
 
@@ -286,4 +291,4 @@ class SensorManager extends EventEmitter {
     }
 }
 
-module.exports = { SensorManager };
+module.exports = { SensorManager, DEFAULT_SENSOR_RATES };

@@ -76,7 +76,6 @@ class Config {
             // Output directory is optional; if not set, images won't be saved automatically
             outputDir: process.env.CAMERA_OUTPUT_DIR?.trim() || undefined,
             autoPicture: process.env.CAMERA_AUTO_PICTURE === "1",
-            imageFormat: s(process.env.CAMERA_IMAGE_FORMAT) || "jpg",
             quality: n(process.env.CAMERA_QUALITY), // legacy alias
             // Camera resolution is a numeric SDK value, not a width/height object.
             resolution,
