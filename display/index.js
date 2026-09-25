@@ -39,17 +39,17 @@ async function main() {
     const device = await getDevice();
 
     const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_DISPLAY_ENABLE !== "0";
-    const zenoh = publisherEnabled
+    const publisher = publisherEnabled
         ? createPublisher({
             keyPrefix: process.env.ZENOH_DISPLAY_KEY_PREFIX || "bsole/display",
             udsPath: process.env.ZENOH_DISPLAY_UDS_PATH || `/tmp/bsole-zenoh-display-${process.pid}.sock`,
         })
         : null;
-    if (zenoh) {
-        zenoh.on("error", (e) => {
-            if (process.env.DEBUG === "1") console.warn("[Display][Zenoh]", e?.message || e);
+    if (publisher) {
+        publisher.on("error", (e) => {
+            if (process.env.DEBUG === "1") console.warn("[Display][Transport]", e?.message || e);
         });
-        await zenoh.start();
+        await publisher.start();
     }
     
     if (!device.isDisplayAvailable) {
@@ -63,9 +63,9 @@ async function main() {
         console.warn("Warning: Could not get display information");
     }
 
-    if (zenoh) {
+    if (publisher) {
         try {
-            await zenoh.publish(`${zenoh.keyPrefix}/info`, {
+            await publisher.publish(`${publisher.keyPrefix}/info`, {
                 ts: Date.now(),
                 device: { id: device.bluetoothId || device.id, name: device.name },
                 displayInformation: info || null,
@@ -99,9 +99,9 @@ async function main() {
         pixelDepth: dcfg.pixelDepth,
     });
 
-    if (zenoh) {
+    if (publisher) {
         try {
-            await zenoh.publish(`${zenoh.keyPrefix}/shown`, {
+            await publisher.publish(`${publisher.keyPrefix}/shown`, {
                 ts: Date.now(),
                 device: { id: device.bluetoothId || device.id, name: device.name },
                 imagePath: img,
@@ -116,7 +116,7 @@ async function main() {
                 },
             });
         } catch (e) { console.warn("[Display] publish failed:", e?.message || e); }
-        try { await zenoh.stop(); } catch (e) { console.warn("[Display] zenoh.stop failed:", e?.message || e); }
+        try { await publisher.stop(); } catch (e) { console.warn("[Display] publisher.stop failed:", e?.message || e); }
     }
 
     const shutdown = async () => {

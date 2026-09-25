@@ -62,7 +62,6 @@ def main():
 
     print(f"[SubscriberBridge] Connected to UDS: {uds_path}", flush=True)
     print(f"[SubscriberBridge] Subscribing to: {key_expression}", flush=True)
-    print("[SubscriberBridge] READY", flush=True)
 
     def callback(sample):
         try:
@@ -103,6 +102,7 @@ def main():
 
     # Subscribe
     subscriber = session.declare_subscriber(key_expression, callback)
+    print("[SubscriberBridge] READY", flush=True)
 
     try:
         while True:

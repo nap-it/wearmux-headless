@@ -18,12 +18,24 @@ const { MqttSubscriber } = require('../mqtt-subscriber');
 const { ZenohSubscriber } = require('../zenoh-subscriber');
 
 afterEach(() => {
+    delete process.env.MESSAGE_TRANSPORT;
     delete process.env.MQTT_ENABLE;
     delete process.env.ZENOH_ENABLE;
     jest.clearAllMocks();
 });
 
 describe('selectedTransport', () => {
+    test('MESSAGE_TRANSPORT overrides legacy enable flags', () => {
+        process.env.MESSAGE_TRANSPORT = 'mqtt';
+        process.env.ZENOH_ENABLE = '1';
+        expect(selectedTransport()).toBe('mqtt');
+    });
+
+    test('rejects an unknown MESSAGE_TRANSPORT value', () => {
+        process.env.MESSAGE_TRANSPORT = 'unknown';
+        expect(() => selectedTransport()).toThrow(/Invalid MESSAGE_TRANSPORT/);
+    });
+
     test('returns "mqtt" when MQTT_ENABLE=1', () => {
         process.env.MQTT_ENABLE = '1';
         expect(selectedTransport()).toBe('mqtt');

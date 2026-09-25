@@ -17,6 +17,7 @@ class ZenohSubscriber extends EventEmitter {
         this.keyExpression = options.keyExpression || "bsole/**";
         this._child = null;
         this._childReady = false;
+        this._stopping = false;
         this._udsPath = options.udsPath || `/tmp/bsole-zenoh-sub-${process.pid}.sock`;
         this._udsServer = null;
         this._udsSocket = null;
@@ -24,6 +25,7 @@ class ZenohSubscriber extends EventEmitter {
 
     async start() {
         if (this._child) return;
+        this._stopping = false;
 
         // Start UDS server first
         await this._startUDSServer();
@@ -105,7 +107,7 @@ class ZenohSubscriber extends EventEmitter {
         });
 
         child.on("exit", (code, signal) => {
-            if (code !== 0) {
+            if (!this._stopping && code !== 0) {
                 this.emit("error", new Error(`Python subscriber exited with code ${code}`));
             }
             this._child = null;
@@ -141,6 +143,7 @@ class ZenohSubscriber extends EventEmitter {
     }
 
     async stop() {
+        this._stopping = true;
         try {
             if (this._udsSocket) {
                 this._udsSocket.end();

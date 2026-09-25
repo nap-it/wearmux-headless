@@ -30,6 +30,8 @@ services:
       zenoh-router:
         condition: service_healthy
     environment:
+      - MESSAGE_TRANSPORT
+      - MQTT_BROKER_URL
       - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/127.0.0.1:7447}
     volumes:
       - ./config:/config:ro
@@ -75,6 +77,8 @@ services:
         condition: service_healthy
     volumes:
       - ./config:/app/config:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       # Pass through host overrides; config/whisper.ini provides defaults
       - WHISPER_MODEL
@@ -88,8 +92,10 @@ services:
       - WHISPER_WORD_TIMESTAMPS
       - WHISPER_NO_SPEECH_THRESHOLD
       - MQTT_ENABLE
-      - MQTT_BROKER
-      - MQTT_PORT
+      - MESSAGE_TRANSPORT
+      - MQTT_BROKER_URL
+      - MQTT_BROKER=${MQTT_BROKER:-host.docker.internal}
+      - MQTT_PORT=${MQTT_PORT:-1883}
       - DEBUG
       - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/zenoh-router:7447}
     networks:
@@ -108,6 +114,8 @@ services:
         condition: service_healthy
     volumes:
       - ./config:/app/config:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       # Docker defaults: cpu + small model (safe without GPU passthrough).
       # Override on the host: YOLO_DEVICE=cuda YOLO_MODEL=yolov8m.pt docker compose up yolo
@@ -118,8 +126,10 @@ services:
       - YOLO_INPUT_SIZE
       - YOLO_CLASSES
       - MQTT_ENABLE
-      - MQTT_BROKER
-      - MQTT_PORT
+      - MESSAGE_TRANSPORT
+      - MQTT_BROKER_URL
+      - MQTT_BROKER=${MQTT_BROKER:-host.docker.internal}
+      - MQTT_PORT=${MQTT_PORT:-1883}
       - DEBUG
       - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/zenoh-router:7447}
     healthcheck:

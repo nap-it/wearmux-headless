@@ -91,7 +91,9 @@ Common class IDs: `0`=person, `1`=bicycle, `2`=car, `15`=cat, `16`=dog.
 
 | Variable | Default | Description |
 |---|---|---|
+| `MESSAGE_TRANSPORT` | _(unset)_ | Select `mqtt` or `zenoh`; overrides `MQTT_ENABLE` |
 | `MQTT_ENABLE` | `0` | Set to `1` to subscribe via MQTT instead of Zenoh |
+| `MQTT_BROKER_URL` | _(unset)_ | Broker URL for MQTT, including optional credentials or TLS (`mqtts://`) |
 | `MQTT_BROKER` | `localhost` | MQTT broker host |
 | `MQTT_PORT` | `1883` | MQTT broker port |
 | `MQTT_PUB_TOPIC` | _(same as `YOLO_PUB_KEY`)_ | Topic to publish detections to |
@@ -167,4 +169,3 @@ pass never stalls frame reception. The queue is bounded (`maxsize=2`): if
 inference falls behind, the oldest unprocessed frame is dropped.
 
 ---
-

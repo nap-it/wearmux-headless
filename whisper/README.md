@@ -103,7 +103,9 @@ When `WHISPER_LANGUAGE` is empty, the runner samples the first 3 windows (15 s a
 
 | Variable | Default | Description |
 |---|---|---|
+| `MESSAGE_TRANSPORT` | _(unset)_ | Select `mqtt` or `zenoh`; overrides `MQTT_ENABLE` |
 | `MQTT_ENABLE` | `0` | Set to `1` to subscribe via MQTT instead of Zenoh |
+| `MQTT_BROKER_URL` | _(unset)_ | Broker URL for MQTT, including optional credentials or TLS (`mqtts://`) |
 | `MQTT_BROKER` | `localhost` | MQTT broker host |
 | `MQTT_PORT` | `1883` | MQTT broker port |
 | `MQTT_PUB_TOPIC` | _(same as `WHISPER_PUB_KEY`)_ | Topic to publish transcripts to |

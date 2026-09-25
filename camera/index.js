@@ -67,21 +67,21 @@ async function main() {
     let latestImage = null;
     let viewerServer = null;
     const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_CAMERA_ENABLE !== "0";
-    const zenoh = publisherEnabled
+    const publisher = publisherEnabled
         ? createPublisher({
             keyPrefix: process.env.ZENOH_CAMERA_KEY_PREFIX || "bsole/camera",
             udsPath: process.env.ZENOH_CAMERA_UDS_PATH || `/tmp/bsole-zenoh-camera-${process.pid}.sock`,
         })
         : null;
-    const zenohRawEnabled = Boolean(zenoh) && process.env.ZENOH_CAMERA_RAW_ENABLE === "1";
-    const zenohRawChunkSize = Math.max(1024, Number(process.env.ZENOH_RAW_CHUNK_SIZE || 30000));
+    const rawPublishEnabled = Boolean(publisher) && process.env.ZENOH_CAMERA_RAW_ENABLE === "1";
+    const rawChunkSize = Math.max(1024, Number(process.env.ZENOH_RAW_CHUNK_SIZE || 30000));
 
     async function publishRawImage(buffer, meta) {
-        if (!zenohRawEnabled) return;
+        if (!rawPublishEnabled) return;
         const frameId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const b64 = buffer.toString("base64");
-        const totalChunks = Math.ceil(b64.length / zenohRawChunkSize);
-        await zenoh.publish(`${zenoh.keyPrefix}/raw/meta`, {
+        const totalChunks = Math.ceil(b64.length / rawChunkSize);
+        await publisher.publish(`${publisher.keyPrefix}/raw/meta`, {
             ts: Date.now(),
             frameId,
             totalChunks,
@@ -93,8 +93,8 @@ async function main() {
             latencyMs: meta?.latencyMs || null,
         });
         for (let i = 0; i < totalChunks; i += 1) {
-            const part = b64.slice(i * zenohRawChunkSize, (i + 1) * zenohRawChunkSize);
-            await zenoh.publish(`${zenoh.keyPrefix}/raw/chunk`, {
+            const part = b64.slice(i * rawChunkSize, (i + 1) * rawChunkSize);
+            await publisher.publish(`${publisher.keyPrefix}/raw/chunk`, {
                 ts: Date.now(),
                 frameId,
                 idx: i,
@@ -104,11 +104,11 @@ async function main() {
     }
 
     try {
-        if (zenoh) {
-            zenoh.on("error", (e) => {
-                debugWarn("[Camera][Zenoh]", e?.message || e);
+        if (publisher) {
+            publisher.on("error", (e) => {
+                debugWarn("[Camera][Transport]", e?.message || e);
             });
-            await zenoh.start();
+            await publisher.start();
         }
 
         const device = await getDevice();
@@ -314,7 +314,7 @@ async function main() {
                 console.log("[SAVED]", file, bestImage.buffer.length, "bytes");
             }
 
-            if (zenoh) {
+            if (publisher) {
                 try {
                     const meta = {
                         ts: Date.now(),
@@ -326,11 +326,11 @@ async function main() {
                         saved: Boolean(outDir),
                     };
                     await Promise.all([
-                        zenoh.publish(`${zenoh.keyPrefix}/image`, meta),
+                        publisher.publish(`${publisher.keyPrefix}/image`, meta),
                         publishRawImage(bestImage.buffer, meta),
                     ]);
                 } catch (e) {
-                    debugWarn("[Camera][Zenoh] publish failed:", e?.message || e);
+                    debugWarn("[Camera][Transport] publish failed:", e?.message || e);
                 }
             }
             
@@ -461,7 +461,7 @@ async function main() {
                         viewerServer.updateImage(buffer, formatToMime(imgFmt));
                     }
 
-                    if (zenoh) {
+                    if (publisher) {
                         try {
                             const meta = {
                                 ts: Date.now(),
@@ -473,11 +473,11 @@ async function main() {
                                 saved: Boolean(outDir),
                             };
                             await Promise.all([
-                                zenoh.publish(`${zenoh.keyPrefix}/image`, meta),
+                                publisher.publish(`${publisher.keyPrefix}/image`, meta),
                                 publishRawImage(buffer, meta),
                             ]);
                         } catch (e) {
-                            debugWarn("[Camera][Zenoh] publish failed:", e?.message || e);
+                            debugWarn("[Camera][Transport] publish failed:", e?.message || e);
                         }
                     }
                     
@@ -587,8 +587,8 @@ async function main() {
                 console.log("\nShutting down camera...");
                 setTimeout(() => process.exit(0), 3000).unref();
                 isAutoActive = false;
-                if (zenoh) {
-                    try { await zenoh.stop(); } catch (e) { console.warn("[Camera] zenoh.stop failed:", e?.message || e); }
+                if (publisher) {
+                    try { await publisher.stop(); } catch (e) { console.warn("[Camera] publisher.stop failed:", e?.message || e); }
                 }
                 try { await device.disconnect(); } catch (e) { console.warn("[Camera] disconnect failed:", e?.message || e); }
                 if (viewerServer) try { viewerServer.stop(); } catch (e) { console.warn("[Camera] viewerServer.stop failed:", e?.message || e); }

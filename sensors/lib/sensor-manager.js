@@ -26,14 +26,16 @@ class SensorManager extends EventEmitter {
                 ? Boolean(options.publisherEnabled)
                 : this.transport !== "none";
         this.publisherOptions = {
-            keyPrefix: options.publisherKeyPrefix || process.env.ZENOH_KEY_PREFIX
-                || process.env.MQTT_KEY_PREFIX || "bsole/sensors",
+            keyPrefix: options.publisherKeyPrefix || (this.transport === "mqtt"
+                ? process.env.MQTT_KEY_PREFIX
+                : process.env.ZENOH_KEY_PREFIX) || "bsole/sensors",
             prettyJson: true,
         };
         this.publisherAttachAll =
             options.publisherAttachAll !== undefined
                 ? Boolean(options.publisherAttachAll)
-                : process.env.PUBLISHER_ATTACH_ALL !== "0" && process.env.ZENOH_ATTACH_ALL !== "0";
+                : process.env.PUBLISHER_ATTACH_ALL !== "0" &&
+                  (this.transport !== "zenoh" || process.env.ZENOH_ATTACH_ALL !== "0");
         this.publisher = null;
 
         // Available sensor types with their default device rates (SDK expects multiples of 5).

@@ -32,14 +32,14 @@ class NetworkClient {
       keyPrefix: this.options.pubPrefix,
       udsPath: this.options.pubUdsPath,
     });
-    if (!this.publisher) throw new Error("No transport enabled (set MQTT_ENABLE=1 or ZENOH_ENABLE=1)");
+    if (!this.publisher) throw new Error("No messaging transport enabled (set MESSAGE_TRANSPORT=mqtt or zenoh)");
     await this.publisher.start();
 
     this.subscriber = createSubscriber({
       keyExpression: this.options.subExpression,
       udsPath: this.options.subUdsPath,
     });
-    if (!this.subscriber) throw new Error("No transport enabled (set MQTT_ENABLE=1 or ZENOH_ENABLE=1)");
+    if (!this.subscriber) throw new Error("No messaging transport enabled (set MESSAGE_TRANSPORT=mqtt or zenoh)");
 
     this.subscriber.on("message", (msg) => {
       if (this.onMessageCallback) {
@@ -51,7 +51,7 @@ class NetworkClient {
           try {
             parsedPayload = JSON.parse(payload);
           } catch (e) {
-            console.error(`[NetworkClient] Error parsing Zenoh payload for key ${key}:`, e.message);
+            console.error(`[NetworkClient] Error parsing payload for key ${key}:`, e.message);
             return;
           }
         }
@@ -60,7 +60,7 @@ class NetworkClient {
     });
 
     this.subscriber.on("error", (err) => {
-      console.error("[NetworkClient] Zenoh subscriber error:", err.message);
+      console.error("[NetworkClient] subscriber error:", err.message);
     });
 
     await this.subscriber.start();

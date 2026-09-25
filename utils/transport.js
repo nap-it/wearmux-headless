@@ -1,11 +1,11 @@
-// Transport selection — picks Zenoh or MQTT based on env vars.
+// Transport selection — one messaging backend for publishers and subscribers.
 //
 // Env vars:
+//   MESSAGE_TRANSPORT=mqtt|zenoh|none  explicit choice
 //   MQTT_ENABLE=1   use MQTT (MqttManager / MqttSubscriber)
 //   ZENOH_ENABLE=1  use Zenoh (ZenohManager / ZenohSubscriber)
 //
-// If both are set, MQTT wins (explicit opt-in to the newer transport).
-// If neither is set, returns "none".
+// Legacy enable flags remain supported. If both are set, MQTT wins.
 
 const { ZenohManager } = require("./zenoh-manager");
 const { ZenohSubscriber } = require("./zenoh-subscriber");
@@ -13,6 +13,13 @@ const { MqttManager } = require("./mqtt-manager");
 const { MqttSubscriber } = require("./mqtt-subscriber");
 
 function selectedTransport() {
+    const explicit = process.env.MESSAGE_TRANSPORT?.trim().toLowerCase();
+    if (explicit) {
+        if (!["mqtt", "zenoh", "none"].includes(explicit)) {
+            throw new Error(`Invalid MESSAGE_TRANSPORT '${explicit}' (expected mqtt, zenoh, or none)`);
+        }
+        return explicit;
+    }
     if (process.env.MQTT_ENABLE === "1") return "mqtt";
     if (process.env.ZENOH_ENABLE === "1") return "zenoh";
     return "none";

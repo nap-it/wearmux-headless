@@ -19,6 +19,21 @@ function createMockDevice(overrides = {}) {
     };
 }
 
+test("MQTT sensor topics use the MQTT prefix when both legacy prefixes are set", () => {
+    process.env.ZENOH_KEY_PREFIX = "zenoh/sensors";
+    process.env.MQTT_KEY_PREFIX = "mqtt/sensors";
+    try {
+        const sm = new SensorManager(createMockDevice(), {
+            transport: "mqtt",
+            publisherEnabled: false,
+        });
+        expect(sm.publisherOptions.keyPrefix).toBe("mqtt/sensors");
+    } finally {
+        delete process.env.ZENOH_KEY_PREFIX;
+        delete process.env.MQTT_KEY_PREFIX;
+    }
+});
+
 describe("SensorManager._configureSensors", () => {
     test("builds config for enabled sensors only", () => {
         const device = createMockDevice();

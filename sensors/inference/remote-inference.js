@@ -5,9 +5,9 @@
 // PC side:  run this script                               → subscribes, classifies, publishes bsole/inference/gesture
 //
 // Env vars:
-//   MQTT_ENABLE / ZENOH_ENABLE   Select transport (MQTT wins if both set)
-//   ZENOH_SUB_EXPRESSION         Key expression to subscribe to (default: bsole/sensors/acceleration)
-//   ZENOH_PUB_PREFIX             Prefix for inference result topics (default: bsole/inference)
+//   MESSAGE_TRANSPORT            Select mqtt or zenoh (legacy enable flags also work)
+//   SENSOR_INPUT_FILTER          Topic/key to subscribe to (default: bsole/sensors/acceleration)
+//   INFERENCE_TOPIC_PREFIX       Prefix for inference result topics (default: bsole/inference)
 //   ML_WINDOW_SIZE               Sliding window sample count (default: 30 = 1.5s at 20 Hz)
 //   ML_CONFIDENCE                Minimum confidence to publish a result (default: 0.7)
 //   DEBUG                        Set to 1 for verbose logging
@@ -145,8 +145,8 @@ class RemoteInferencePipeline {
 
 async function main() {
     const pipeline = new RemoteInferencePipeline({
-        pubPrefix: process.env.ZENOH_PUB_PREFIX || "bsole/inference",
-        subExpression: process.env.ZENOH_SUB_EXPRESSION || "bsole/sensors/acceleration",
+        pubPrefix: process.env.INFERENCE_TOPIC_PREFIX || process.env.ZENOH_PUB_PREFIX || "bsole/inference",
+        subExpression: process.env.SENSOR_INPUT_FILTER || process.env.ZENOH_SUB_EXPRESSION || "bsole/sensors/acceleration",
         windowSize: Number(process.env.ML_WINDOW_SIZE) || 30,
         confidenceThreshold: Number(process.env.ML_CONFIDENCE) || 0.7,
         debug: process.env.DEBUG === "1",

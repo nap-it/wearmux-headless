@@ -33,6 +33,8 @@ def shutdown(*_):
             except Exception: pass
         session.close()
     finally:
+        try: _cleanup_socket(UDS_PATH)
+        except Exception: pass
         try: sys.stderr.flush()
         except Exception: pass
         os._exit(0)

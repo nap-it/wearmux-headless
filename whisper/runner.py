@@ -24,7 +24,9 @@ Environment variables:
     WHISPER_PUB_KEY             Zenoh key to publish transcripts to (default: bsole/whisper/transcript)
     ZENOH_SUB_MIC               Key expression to subscribe to (default: bsole/microphone/raw/**)
     ZENOH_ROUTER                Zenoh router endpoint override (e.g. tcp/192.168.1.10:7447)
-    MQTT_ENABLE                 Set to 1 to use MQTT instead of Zenoh (default: 0)
+    MESSAGE_TRANSPORT           Select mqtt or zenoh (overrides MQTT_ENABLE)
+    MQTT_ENABLE                 Legacy MQTT selector (default: 0)
+    MQTT_BROKER_URL             MQTT broker URL, optionally mqtts:// with credentials
     MQTT_BROKER                 MQTT broker host (default: localhost)
     MQTT_PORT                   MQTT broker port (default: 1883)
     MQTT_PUB_TOPIC              Topic to publish transcripts to (default: same as WHISPER_PUB_KEY)
@@ -41,6 +43,7 @@ import signal
 import queue
 import threading
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 # Apply config/whisper.ini before reading env vars so the script works when
 # invoked directly (python3 runner.py) or in Docker without the Node launcher.
@@ -99,9 +102,15 @@ NO_SPEECH_THRESH  = float(os.environ.get("WHISPER_NO_SPEECH_THRESHOLD", "0.6"))
 PUB_KEY           = os.environ.get("WHISPER_PUB_KEY", "bsole/whisper/transcript")
 SUB_EXPR          = os.environ.get("ZENOH_SUB_MIC", "bsole/microphone/raw/**")
 ROUTER            = os.environ.get("ZENOH_ROUTER", "")
-MQTT_ENABLE       = os.environ.get("MQTT_ENABLE", "0") == "1"
-MQTT_BROKER       = os.environ.get("MQTT_BROKER", "localhost")
-MQTT_PORT         = int(os.environ.get("MQTT_PORT", "1883"))
+MESSAGE_TRANSPORT = os.environ.get("MESSAGE_TRANSPORT", "").strip().lower()
+if MESSAGE_TRANSPORT not in ("", "mqtt", "zenoh", "none"):
+    raise ValueError("MESSAGE_TRANSPORT must be mqtt, zenoh, or none")
+MQTT_ENABLE       = MESSAGE_TRANSPORT == "mqtt" if MESSAGE_TRANSPORT else os.environ.get("MQTT_ENABLE", "0") == "1"
+_mqtt_url         = urlparse(os.environ.get("MQTT_BROKER_URL", ""))
+if _mqtt_url.scheme not in ("", "mqtt", "mqtts"):
+    raise ValueError("MQTT_BROKER_URL must use mqtt:// or mqtts://")
+MQTT_BROKER       = _mqtt_url.hostname or os.environ.get("MQTT_BROKER", "localhost")
+MQTT_PORT         = _mqtt_url.port or int(os.environ.get("MQTT_PORT", "8883" if _mqtt_url.scheme == "mqtts" else "1883"))
 MQTT_PUB_TOPIC    = os.environ.get("MQTT_PUB_TOPIC", PUB_KEY)
 MQTT_SUB_TOPIC    = os.environ.get("MQTT_SUB_MIC", "bsole/microphone/raw/#")
 DEBUG             = os.environ.get("DEBUG", "0") == "1"
@@ -380,6 +389,10 @@ class InferenceWorker(threading.Thread):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    if MESSAGE_TRANSPORT == "none":
+        log("Messaging is disabled (MESSAGE_TRANSPORT=none)", err=True)
+        sys.exit(1)
+
     log(f"loading model '{MODEL_SIZE}'  device={DEVICE}  compute={COMPUTE_TYPE}")
     t0    = time.monotonic()
     model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
@@ -402,6 +415,11 @@ def main() -> None:
             client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         except AttributeError:
             client = mqtt.Client()  # paho-mqtt < 2.0
+
+        if _mqtt_url.username:
+            client.username_pw_set(unquote(_mqtt_url.username), unquote(_mqtt_url.password or ""))
+        if _mqtt_url.scheme == "mqtts":
+            client.tls_set()
 
         def on_mqtt_message(client, userdata, msg):
             try:

@@ -45,16 +45,16 @@ async function main() {
   console.log('BrilliantSole Frame - Microphone Streaming\n');
 
   const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_MIC_ENABLE !== "0";
-  const zenoh = publisherEnabled
+  const publisher = publisherEnabled
     ? createPublisher({
         keyPrefix: process.env.ZENOH_MIC_KEY_PREFIX || "bsole/microphone",
         udsPath: process.env.ZENOH_MIC_UDS_PATH || `/tmp/bsole-zenoh-mic-${process.pid}.sock`,
       })
     : null;
 
-  const zenohRawEnabled = Boolean(zenoh) && process.env.ZENOH_MIC_RAW_ENABLE === "1";
-  const zenohRawChunkSize = Math.max(1024, Number(process.env.ZENOH_RAW_CHUNK_SIZE || 30000));
-  const zenohRawThrottleMs = Math.max(0, Number(process.env.ZENOH_MIC_RAW_THROTTLE_MS || 200));
+  const rawPublishEnabled = Boolean(publisher) && process.env.ZENOH_MIC_RAW_ENABLE === "1";
+  const rawChunkSize = Math.max(1024, Number(process.env.ZENOH_RAW_CHUNK_SIZE || 30000));
+  const rawThrottleMs = Math.max(0, Number(process.env.ZENOH_MIC_RAW_THROTTLE_MS || 200));
   let lastRawPublishAt = 0;
   const publishRtsp = normalizeRtspPublishUrl(RTSP_URL);
   const rtsp = RTSP_ENABLED
@@ -74,16 +74,16 @@ async function main() {
   let device = null;
 
   async function publishRawAudio(samples, meta) {
-    if (!zenohRawEnabled) return;
+    if (!rawPublishEnabled) return;
     const now = Date.now();
-    if (zenohRawThrottleMs > 0 && now - lastRawPublishAt < zenohRawThrottleMs) return;
+    if (rawThrottleMs > 0 && now - lastRawPublishAt < rawThrottleMs) return;
     lastRawPublishAt = now;
 
     const buf = Buffer.from(samples.buffer, samples.byteOffset, samples.byteLength);
     const frameId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const b64 = buf.toString("base64");
-    const totalChunks = Math.ceil(b64.length / zenohRawChunkSize);
-    await zenoh.publish(`${zenoh.keyPrefix}/raw/meta`, {
+    const totalChunks = Math.ceil(b64.length / rawChunkSize);
+    await publisher.publish(`${publisher.keyPrefix}/raw/meta`, {
       ts: Date.now(),
       frameId,
       totalChunks,
@@ -96,8 +96,8 @@ async function main() {
       samples: meta?.samples || null,
     });
     for (let i = 0; i < totalChunks; i += 1) {
-      const part = b64.slice(i * zenohRawChunkSize, (i + 1) * zenohRawChunkSize);
-      await zenoh.publish(`${zenoh.keyPrefix}/raw/chunk`, {
+      const part = b64.slice(i * rawChunkSize, (i + 1) * rawChunkSize);
+      await publisher.publish(`${publisher.keyPrefix}/raw/chunk`, {
         ts: Date.now(),
         frameId,
         idx: i,
@@ -124,9 +124,9 @@ async function main() {
       }
       console.log(`\nTotal duration: ${totalDuration.toFixed(1)}s`);
       console.log(`Total samples: ${sampleCount}`);
-      if (zenoh) {
+      if (publisher) {
         try {
-          await zenoh.publish(`${zenoh.keyPrefix}/status`, {
+          await publisher.publish(`${publisher.keyPrefix}/status`, {
             ts: Date.now(),
             device: { id: device.bluetoothId || device.id, name: device.name },
             status: exitCode === 0 ? "stopped" : "error",
@@ -148,9 +148,9 @@ async function main() {
       }
     }
 
-    if (zenoh) {
+    if (publisher) {
       try {
-        await zenoh.stop();
+        await publisher.stop();
       } catch {}
     }
 
@@ -163,13 +163,13 @@ async function main() {
   device = await deviceManager.connectToDevice();
   console.log('Device connected.\n');
 
-  if (zenoh) {
-    zenoh.on("error", (e) => {
+  if (publisher) {
+    publisher.on("error", (e) => {
       if (process.env.DEBUG === "1") console.warn("[Microphone][Zenoh]", e?.message || e);
     });
-    await zenoh.start();
+    await publisher.start();
     try {
-      await zenoh.publish(`${zenoh.keyPrefix}/status`, {
+      await publisher.publish(`${publisher.keyPrefix}/status`, {
         ts: Date.now(),
         device: { id: device.bluetoothId || device.id, name: device.name },
         status: "connected",
@@ -230,7 +230,7 @@ async function main() {
     const pad = ' '.repeat(Math.max(0, process.stdout.columns - line.length));
     process.stdout.write(`\r${line}${pad}`);
 
-    if (zenoh) {
+    if (publisher) {
       const meta = {
         ts: Date.now(),
         device: { id: device.bluetoothId || device.id, name: device.name },
@@ -242,9 +242,9 @@ async function main() {
         duration: totalDuration,
         samples: samples?.length || 0,
       };
-      zenoh.publish(`${zenoh.keyPrefix}/level`, meta).catch((e) => { if (process.env.DEBUG === "1") console.error('[Mic/Zenoh] level publish error:', e?.message || e); });
-      if (zenohRawEnabled && samples && samples.buffer) {
-        publishRawAudio(samples, meta).catch((e) => { if (process.env.DEBUG === "1") console.error('[Mic/Zenoh] raw publish error:', e?.message || e); });
+      publisher.publish(`${publisher.keyPrefix}/level`, meta).catch((e) => { if (process.env.DEBUG === "1") console.error('[Mic/Transport] level publish error:', e?.message || e); });
+      if (rawPublishEnabled && samples && samples.buffer) {
+        publishRawAudio(samples, meta).catch((e) => { if (process.env.DEBUG === "1") console.error('[Mic/Transport] raw publish error:', e?.message || e); });
       }
     }
 
@@ -260,8 +260,8 @@ async function main() {
     const { microphoneStatus } = event.message;
     console.log(`\nMicrophone status: ${microphoneStatus}`);
 
-    if (zenoh) {
-      zenoh.publish(`${zenoh.keyPrefix}/status`, {
+    if (publisher) {
+      publisher.publish(`${publisher.keyPrefix}/status`, {
         ts: Date.now(),
         device: { id: device.bluetoothId || device.id, name: device.name },
         microphoneStatus,

@@ -23,6 +23,7 @@ class ZenohManager extends EventEmitter {
         this._deviceInfo = null; // optional info injected via setDeviceInfo
         this._child = null; // python sidecar
         this._childReady = false;
+        this._stopping = false;
         // UDS transport (MessagePack) only
         this._udsPath = options.udsPath || process.env.ZENOH_UDS_PATH || require("path").join(require("os").tmpdir(), "bsole-zenoh.sock");
         this._udsSocket = null;
@@ -34,6 +35,7 @@ class ZenohManager extends EventEmitter {
 
     async start() {
         if (this.session || this._child) return this.session;
+        this._stopping = false;
         await this._startDenoBridge();
         this.emit("ready");
         return this.session;
@@ -57,7 +59,7 @@ class ZenohManager extends EventEmitter {
         this._childReady = true;
         child.on("error", (err) => this.emit("error", new Error(`[ZenohManager] Python sidecar error: ${err?.message || err}`)));
         child.on("exit", (code, signal) => {
-            if (code !== 0) this.emit("error", new Error(`[ZenohManager] Python sidecar exited code=${code} signal=${signal}`));
+            if (!this._stopping && code !== 0) this.emit("error", new Error(`[ZenohManager] Python sidecar exited code=${code} signal=${signal}`));
             this._child = null;
             this._childReady = false;
         });
@@ -98,8 +100,9 @@ class ZenohManager extends EventEmitter {
                 reject(e);
             });
             sock.on("close", () => {
-                // Sidecar closed the socket; keep state but notify
-                this.emit("error", new Error("[ZenohManager] UDS socket closed"));
+                if (!this._stopping) {
+                    this.emit("error", new Error("[ZenohManager] UDS socket closed"));
+                }
             });
             this._udsSocket = sock;
         });
@@ -108,6 +111,7 @@ class ZenohManager extends EventEmitter {
     }
 
     async stop() {
+        this._stopping = true;
         try {
             await this.detachAll(this._sensorManager);
         } catch { }
