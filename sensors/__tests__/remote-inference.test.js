@@ -112,7 +112,7 @@ describe("buildInferencePayload", () => {
 
 describe("RemoteInferencePipeline.handleMessage", () => {
     function makePipeline(opts = {}) {
-        return new RemoteInferencePipeline({ confidenceThreshold: 0.7, ...opts });
+        return new RemoteInferencePipeline({ transport: "zenoh", confidenceThreshold: 0.7, ...opts });
     }
 
     test("feeds valid acceleration to detector", () => {
@@ -155,7 +155,7 @@ describe("RemoteInferencePipeline.handleMessage", () => {
 
 describe("RemoteInferencePipeline.handleInferenceResult", () => {
     function makePipeline(opts = {}) {
-        return new RemoteInferencePipeline({ confidenceThreshold: 0.7, debug: true, ...opts });
+        return new RemoteInferencePipeline({ transport: "zenoh", confidenceThreshold: 0.7, debug: true, ...opts });
     }
 
     test("publishes when top result meets threshold", async () => {

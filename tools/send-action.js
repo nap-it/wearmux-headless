@@ -1,5 +1,3 @@
-const os = require("os");
-const path = require("path");
 const { randomUUID } = require("crypto");
 const { createPublisher, createSubscriber, selectedTransport } = require("../utils/transport");
 const { ACTION_TOPIC, RESULT_TOPIC } = require("../utils/action-dispatcher");
@@ -23,12 +21,10 @@ async function main() {
     }
     command.id ||= randomUUID();
     const publisher = createPublisher({
-        keyPrefix: "bwear/actions",
-        udsPath: path.join(os.tmpdir(), `bwear-action-send-${process.pid}.sock`),
+        keyPrefix: ACTION_TOPIC,
     });
     const subscriber = createSubscriber({
         topicFilter: RESULT_TOPIC,
-        udsPath: path.join(os.tmpdir(), `bwear-action-result-${process.pid}.sock`),
     });
     publisher.on("error", (error) => console.warn("[Actions]", error?.message || error));
     subscriber.on("error", (error) => console.warn("[Actions]", error?.message || error));

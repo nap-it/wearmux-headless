@@ -21,7 +21,7 @@ ENV PYTHON=/usr/bin/python3 \
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --only=production || npm install --only=production --no-audit --no-fund --legacy-peer-deps
 
-# Install Python dependencies
+# Install only the Python dependencies used by the Zenoh bridge
 COPY requirements.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m venv /opt/venv \
@@ -72,4 +72,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 ENTRYPOINT ["/usr/bin/tini", "--"]
 
 # Default command
-CMD ["node", "tools/launcher.js", "--config", "/config"]
+CMD ["node", "tools/launcher.js"]

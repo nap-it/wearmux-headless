@@ -8,7 +8,7 @@ Run sensor collection and ML inference on separate machines over Zenoh.
 RPi (collects)                    PC (classifies)
 ──────────────                    ───────────────
 npm run sensors                   npm run sensors:remote-inference
-  ZENOH_ENABLE=1          →           subscribes to bwear/sensors/acceleration
+  MESSAGE_TRANSPORT=zenoh →          subscribes to bwear/sensors/acceleration
   ZENOH_ROUTER=<pc-ip>:7447           runs MLGestureDetector
   ENABLED_SENSORS=acceleration        publishes to bwear/inference/gesture
 ```
@@ -32,10 +32,15 @@ venv/bin/pip install -r requirements.txt
 
 ### 3. RPi — collect and publish sensors
 
-In `config/zenoh.ini` on the RPi:
+In `config/config.ini` on the RPi:
 
 ```ini
-ZENOH_ENABLE=1
+MESSAGE_TRANSPORT=zenoh
+```
+
+Set the router endpoint in `config/config.ini` if it is on another machine:
+
+```ini
 ZENOH_ROUTER=tcp/<pc-ip>:7447
 ```
 
@@ -58,10 +63,9 @@ Results above the confidence threshold are published to `bwear/inference/gesture
 | Variable | Default | Description |
 |---|---|---|
 | `ZENOH_ROUTER` | *(from peer.json5)* | Override router endpoint, e.g. `tcp/192.168.1.90:7447` |
-| `ZENOH_ENABLE` | `0` | Set to `1` on the RPi to enable sensor publishing |
+| `MESSAGE_TRANSPORT` | `zenoh` | Select Zenoh on both machines |
 | `ENABLED_SENSORS` | `acceleration,...` | Comma-separated list; must include `acceleration` |
-| `ZENOH_SUB_EXPRESSION` | `bwear/sensors/acceleration` | Key expression the PC subscribes to |
-| `ZENOH_PUB_PREFIX` | `bwear/inference` | Prefix for published inference results |
+| `TOPIC_PREFIX` | `bwear` | Root for sensor and inference topics |
 | `ML_WINDOW_SIZE` | `30` | Sliding window size (30 samples = 1.5s at 20 Hz) |
 | `ML_CONFIDENCE` | `0.7` | Minimum confidence to publish a gesture result |
 | `DEBUG` | `0` | Set to `1` for verbose per-sample logging |
@@ -70,7 +74,7 @@ Results above the confidence threshold are published to `bwear/inference/gesture
 
 | Script | Description |
 |---|---|
-| `npm run sensors` | Collect sensors (RPi), publishes if `ZENOH_ENABLE=1` |
+| `npm run sensors` | Collect sensors (RPi), publishes through the selected transport |
 | `npm run sensors:remote-inference` | Distributed inference (PC) |
 | `npm run sensors:ml-gesture` | Local inference — device connected directly |
 | `npm run sensors:tflite` | On-device TFLite inference (Frame only) |

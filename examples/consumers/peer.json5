@@ -1,0 +1,7 @@
+// Client settings for optional examples. Override the endpoint with ZENOH_ROUTER.
+{
+  mode: "client",
+  connect: {
+    endpoints: ["tcp/127.0.0.1:7447"],
+  },
+}

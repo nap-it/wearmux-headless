@@ -18,6 +18,7 @@
  */
 
 const { spawn } = require('child_process');
+const path = require('path');
 
 const features = {
   microphone: 'microphone/index.js',
@@ -43,5 +44,9 @@ if (!arg || !features[arg]) {
   process.exit(1);
 }
 
-const child = spawn('node', [features[arg]], { stdio: 'inherit' });
+const child = spawn(process.execPath, [
+  path.join(__dirname, 'tools/run-with-config.js'),
+  '--config', process.env.WEARMUX_CONFIG_PATH || path.join(__dirname, 'config'),
+  path.join(__dirname, features[arg]),
+], { stdio: 'inherit' });
 child.on('exit', code => process.exit(code));

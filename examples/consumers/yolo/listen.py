@@ -3,11 +3,10 @@
 YOLO Listener — prints detection payloads from bwear/yolo/detections.
 
 Usage:
-    python3 yolo/listen.py
-    npm run yolo:listen
+    python3 examples/consumers/yolo/listen.py
 
 Environment variables:
-    YOLO_PUB_KEY    Key to subscribe to (default: bwear/yolo/detections)
+    TOPIC_PREFIX    Root for message topics (default: bwear)
     ZENOH_ROUTER    Router endpoint override (e.g. tcp/192.168.1.10:7447)
 """
 
@@ -19,39 +18,22 @@ import time
 from pathlib import Path
 
 
-def _load_ini(path: Path) -> None:
-    try:
-        in_env = False
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("["):
-                in_env = line.lower() == "[env]"
-                continue
-            if not in_env or not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, _, val = line.partition("=")
-                key = key.strip()
-                val = val.strip()
-                if key and key not in os.environ:
-                    os.environ[key] = val
-    except OSError:
-        pass
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from python_config import load_config
 
-
-_load_ini(Path(__file__).resolve().parent.parent / "config" / "yolo.ini")
+load_config("yolo")
 
 try:
     import zenoh
 except ImportError:
-    print("[yolo-listen] zenoh not installed — run: npm run yolo:setup", file=sys.stderr)
+    print("[yolo-listen] zenoh not installed — install examples/consumers/yolo/requirements.txt", file=sys.stderr)
     sys.exit(1)
 
-SUB_KEY = os.environ.get("YOLO_PUB_KEY", "bwear/yolo/detections")
+SUB_KEY = f"{(os.environ.get('TOPIC_PREFIX', 'bwear').strip().strip('/') or 'bwear')}/yolo/detections"
 ROUTER  = os.environ.get("ZENOH_ROUTER", "")
 VERBOSE = os.environ.get("YOLO_LISTEN_VERBOSE", "0") == "1"
 
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "peer.json5"
 
 
 def fmt_detection(d: dict) -> str:

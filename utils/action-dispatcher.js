@@ -1,10 +1,9 @@
 const EventEmitter = require("events");
-const os = require("os");
-const path = require("path");
 const { createPublisher, createSubscriber, selectedTransport } = require("./transport");
+const { topic } = require("./topics");
 
-const ACTION_TOPIC = "bwear/actions";
-const RESULT_TOPIC = "bwear/actions/result";
+const ACTION_TOPIC = topic("actions");
+const RESULT_TOPIC = topic("actions", "result");
 const MAX_IMAGE_BYTES = 1024 * 1024;
 
 class ActionDispatcher extends EventEmitter {
@@ -37,13 +36,11 @@ class ActionDispatcher extends EventEmitter {
         }
         this.publisher ||= createPublisher({
             transport: this.transport,
-            keyPrefix: "bwear/actions",
-            udsPath: path.join(os.tmpdir(), `bwear-actions-pub-${process.pid}.sock`),
+            keyPrefix: topic("actions"),
         });
         this.subscriber ||= createSubscriber({
             transport: this.transport,
             topicFilter: this.actionTopic,
-            udsPath: path.join(os.tmpdir(), `bwear-actions-sub-${process.pid}.sock`),
         });
         this.publisher.on("error", this._onTransportError);
         this.subscriber.on("error", this._onTransportError);

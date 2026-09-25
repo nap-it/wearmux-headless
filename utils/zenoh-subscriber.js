@@ -5,6 +5,9 @@ const net = require("net");
 const { Readable } = require("stream");
 const msgpack = require("@msgpack/msgpack");
 const path = require("path");
+const os = require("os");
+const { randomUUID } = require("crypto");
+const { topic } = require("./topics");
 
 /**
  * ZenohSubscriber - Subscribe to Zenoh topics and receive messages
@@ -14,11 +17,11 @@ const path = require("path");
 class ZenohSubscriber extends EventEmitter {
     constructor(options = {}) {
         super();
-        this.keyExpression = options.keyExpression || "bwear/**";
+        this.keyExpression = options.keyExpression || topic("**");
         this._child = null;
         this._childReady = false;
         this._stopping = false;
-        this._udsPath = options.udsPath || `/tmp/bwear-zenoh-sub-${process.pid}.sock`;
+        this._udsPath = options.udsPath || path.join(os.tmpdir(), `wearmux-sub-${process.pid}-${randomUUID()}.sock`);
         this._udsServer = null;
         this._udsSocket = null;
     }
@@ -152,8 +155,9 @@ class ZenohSubscriber extends EventEmitter {
             }
 
             if (this._udsServer) {
-                this._udsServer.close();
+                const server = this._udsServer;
                 this._udsServer = null;
+                await new Promise((resolve) => server.close(resolve));
             }
 
             if (this._child) {
@@ -164,6 +168,8 @@ class ZenohSubscriber extends EventEmitter {
             this._childReady = false;
         } catch (e) {
             this.emit("error", e);
+        } finally {
+            try { require("fs").rmSync(this._udsPath, { force: true }); } catch { }
         }
     }
 }

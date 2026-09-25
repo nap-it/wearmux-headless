@@ -8,7 +8,7 @@ def dec(v):
         return v.decode("utf-8", "replace")
     return str(v)
 
-KEYEXPR = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ZENOH_SUB", "bwear/sensors/**")
+KEYEXPR = sys.argv[1] if len(sys.argv) > 1 else f"{(os.environ.get('TOPIC_PREFIX', 'bwear').strip().strip('/') or 'bwear')}/sensors/**"
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "peer.json5")
 if not os.path.exists(CONFIG_FILE):
     print(f"[PythonSidecar] zenoh peer config not found: {CONFIG_FILE}", file=sys.stderr)

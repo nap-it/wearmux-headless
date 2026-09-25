@@ -3,11 +3,11 @@
 YOLO Runner — object detection consumer for the wearmux-headless pipeline.
 
 Subscribes to bwear/camera/raw/** (chunked JPEG frames published by
-camera/index.js when ZENOH_CAMERA_RAW_ENABLE=1), reassembles frames,
+camera/index.js when CAMERA_RAW_ENABLE=1), reassembles frames,
 runs YOLOv8 inference, and publishes detection results to bwear/yolo/detections.
 
 Usage:
-    python3 yolo/runner.py
+    python3 examples/consumers/yolo/runner.py
 
 Environment variables:
     YOLO_MODEL          Model file or name: yolov8n.pt, yolov8s.pt, ... (default: yolov8n.pt)
@@ -16,16 +16,10 @@ Environment variables:
     YOLO_IOU            IOU threshold for NMS 0–1 (default: 0.45)
     YOLO_INPUT_SIZE     Inference image size in pixels (default: 320)
     YOLO_CLASSES        Comma-separated class IDs to filter, empty = all (default: empty)
-    YOLO_PUB_KEY        Zenoh key to publish detections to (default: bwear/yolo/detections)
-    ZENOH_SUB_CAMERA    Key expression to subscribe to (default: bwear/camera/raw/**)
+    TOPIC_PREFIX        Root for all message topics (default: bwear)
     ZENOH_ROUTER        Zenoh router endpoint override (e.g. tcp/192.168.1.10:7447)
-    MESSAGE_TRANSPORT   Select mqtt or zenoh (overrides MQTT_ENABLE)
-    MQTT_ENABLE         Legacy MQTT selector (default: 0)
+    MESSAGE_TRANSPORT   Select mqtt or zenoh (default: zenoh)
     MQTT_BROKER_URL     MQTT broker URL, optionally mqtts:// with credentials
-    MQTT_BROKER         MQTT broker host (default: localhost)
-    MQTT_PORT           MQTT broker port (default: 1883)
-    MQTT_PUB_TOPIC      Topic to publish detections to (default: same as YOLO_PUB_KEY)
-    MQTT_SUB_CAMERA     Topic filter to subscribe for camera frames (default: bwear/camera/raw/#)
     DEBUG               Set to 1 for verbose frame-level logging
 """
 
@@ -41,32 +35,16 @@ from io import BytesIO
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-def _load_ini(path: Path) -> None:
-    try:
-        in_env = False
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("["):
-                in_env = line.lower() == "[env]"
-                continue
-            if not in_env or not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, _, val = line.partition("=")
-                key = key.strip()
-                val = val.strip()
-                if key and key not in os.environ:
-                    os.environ[key] = val
-    except OSError:
-        pass
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from python_config import load_config
 
-_load_ini(Path(__file__).resolve().parent.parent / "config" / "yolo.ini")
+load_config("yolo")
 
 try:
     from PIL import Image, ImageDraw, ImageOps
     from ultralytics import YOLO
 except ImportError:
-    print("[yolo-runner] missing dependencies — run: npm run yolo:setup", file=sys.stderr)
+    print("[yolo-runner] missing dependencies — install examples/consumers/yolo/requirements.txt", file=sys.stderr)
     sys.exit(1)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
@@ -78,26 +56,26 @@ IOU          = float(os.environ.get("YOLO_IOU", "0.45"))
 INPUT_SIZE   = int(os.environ.get("YOLO_INPUT_SIZE", "320"))
 _classes_raw = os.environ.get("YOLO_CLASSES", "").strip()
 CLASSES      = [int(c) for c in _classes_raw.split(",") if c.strip()] if _classes_raw else None
-PUB_KEY           = os.environ.get("YOLO_PUB_KEY", "bwear/yolo/detections")
-ANNOTATED_PUB_KEY = os.environ.get("YOLO_ANNOTATED_PUB_KEY", "bwear/yolo/annotated")
+TOPIC_PREFIX      = (os.environ.get("TOPIC_PREFIX", "bwear").strip().strip("/") or "bwear")
+PUB_KEY           = f"{TOPIC_PREFIX}/yolo/detections"
+ANNOTATED_PUB_KEY = f"{TOPIC_PREFIX}/yolo/annotated"
 PUBLISH_ANNOTATED = os.environ.get("YOLO_PUBLISH_ANNOTATED", "0") == "1"
-SUB_EXPR     = os.environ.get("ZENOH_SUB_CAMERA", "bwear/camera/raw/**")
+SUB_EXPR     = f"{TOPIC_PREFIX}/camera/raw/**"
 ROUTER       = os.environ.get("ZENOH_ROUTER", "")
-MESSAGE_TRANSPORT = os.environ.get("MESSAGE_TRANSPORT", "").strip().lower()
-if MESSAGE_TRANSPORT not in ("", "mqtt", "zenoh", "none"):
-    raise ValueError("MESSAGE_TRANSPORT must be mqtt, zenoh, or none")
-MQTT_ENABLE  = MESSAGE_TRANSPORT == "mqtt" if MESSAGE_TRANSPORT else os.environ.get("MQTT_ENABLE", "0") == "1"
-_mqtt_url    = urlparse(os.environ.get("MQTT_BROKER_URL", ""))
-if _mqtt_url.scheme not in ("", "mqtt", "mqtts"):
+MESSAGE_TRANSPORT = os.environ.get("MESSAGE_TRANSPORT", "zenoh").strip().lower()
+if MESSAGE_TRANSPORT not in ("mqtt", "zenoh"):
+    raise ValueError("YOLO requires MESSAGE_TRANSPORT=mqtt or zenoh")
+USE_MQTT  = MESSAGE_TRANSPORT == "mqtt"
+_mqtt_url    = urlparse(os.environ.get("MQTT_BROKER_URL", "mqtt://127.0.0.1:1883"))
+if _mqtt_url.scheme not in ("mqtt", "mqtts") or not _mqtt_url.hostname:
     raise ValueError("MQTT_BROKER_URL must use mqtt:// or mqtts://")
-MQTT_BROKER  = _mqtt_url.hostname or os.environ.get("MQTT_BROKER", "localhost")
-MQTT_PORT    = _mqtt_url.port or int(os.environ.get("MQTT_PORT", "8883" if _mqtt_url.scheme == "mqtts" else "1883"))
-MQTT_PUB_TOPIC = os.environ.get("MQTT_PUB_TOPIC", PUB_KEY)
-MQTT_SUB_TOPIC = os.environ.get("MQTT_SUB_CAMERA", "bwear/camera/raw/#")
+MQTT_BROKER  = _mqtt_url.hostname
+MQTT_PORT    = _mqtt_url.port or (8883 if _mqtt_url.scheme == "mqtts" else 1883)
+MQTT_PUB_TOPIC = PUB_KEY
+MQTT_SUB_TOPIC = f"{TOPIC_PREFIX}/camera/raw/#"
 DEBUG        = os.environ.get("DEBUG", "0") == "1"
 
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
-READY_FILE  = os.environ.get("YOLO_READY_FILE", "/tmp/yolo.ready")
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "peer.json5"
 
 _FRAME_TIMEOUT_S = 2.0
 _QUEUE_MAXSIZE   = 2
@@ -107,14 +85,6 @@ _QUEUE_MAXSIZE   = 2
 
 def log(msg: str, *, err: bool = False) -> None:
     print(f"[yolo-runner] {msg}", flush=True, file=sys.stderr if err else sys.stdout)
-
-
-def _signal_ready() -> None:
-    print("[yolo-runner] READY", flush=True)
-    try:
-        Path(READY_FILE).touch()
-    except OSError:
-        pass
 
 
 def decode_frame(chunks_by_idx: dict) -> bytes:
@@ -319,10 +289,6 @@ class InferenceWorker(threading.Thread):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    if MESSAGE_TRANSPORT == "none":
-        log("Messaging is disabled (MESSAGE_TRANSPORT=none)", err=True)
-        sys.exit(1)
-
     log(f"loading model '{MODEL_PATH}'  device={DEVICE}  conf={CONFIDENCE}  iou={IOU}  imgsz={INPUT_SIZE}")
     t0    = time.monotonic()
     model = YOLO(MODEL_PATH)
@@ -332,7 +298,7 @@ def main() -> None:
     model(Image.new("RGB", (INPUT_SIZE, INPUT_SIZE)), device=DEVICE, verbose=False)
     log("warm-up done")
 
-    if MQTT_ENABLE:
+    if USE_MQTT:
         try:
             import paho.mqtt.client as mqtt
         except ImportError:
@@ -378,7 +344,6 @@ def main() -> None:
         log(f"subscribed    '{MQTT_SUB_TOPIC}'")
         log(f"publishing  → '{MQTT_PUB_TOPIC}'")
         log("waiting for camera frames... press Ctrl+C to stop\n")
-        _signal_ready()
 
         _stopping = False
 
@@ -404,7 +369,7 @@ def main() -> None:
 
         if not CONFIG_FILE.exists():
             log(f"zenoh peer config not found: {CONFIG_FILE}", err=True)
-            log("expected at config/peer.json5 (one level above this script)", err=True)
+            log("expected at examples/consumers/peer.json5", err=True)
             sys.exit(1)
 
         conf = zenoh.Config.from_file(str(CONFIG_FILE))
@@ -438,7 +403,6 @@ def main() -> None:
         log(f"publishing → '{PUB_KEY}'")
         log(f"model={MODEL_PATH}  conf={CONFIDENCE}  iou={IOU}  imgsz={INPUT_SIZE}")
         log("waiting for camera frames... press Ctrl+C to stop\n")
-        _signal_ready()
 
         _stopping = False
 

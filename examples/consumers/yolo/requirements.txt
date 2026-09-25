@@ -1,0 +1,4 @@
+eclipse-zenoh==1.6.1
+ultralytics>=8.0.0
+pillow>=10.0.0
+paho-mqtt>=2.0.0

@@ -1,6 +1,7 @@
 // Sensor management for Brilliant Wear device sensors
 const EventEmitter = require("events");
 const { createPublisher, selectedTransport } = require("../../utils/transport");
+const { topic } = require("../../utils/topics");
 
 class SensorManager extends EventEmitter {
     /**
@@ -14,7 +15,6 @@ class SensorManager extends EventEmitter {
         }
         this.device = device;
         this.side = options.side || null; // 'left' | 'right' | null
-        this.sampleRate = options.sampleRate || 50;
         this.enabledSensors = options.enabledSensors || [];
         this.isMonitoring = false;
         this.sensorConfiguration = {};
@@ -26,16 +26,9 @@ class SensorManager extends EventEmitter {
                 ? Boolean(options.publisherEnabled)
                 : this.transport !== "none";
         this.publisherOptions = {
-            keyPrefix: options.publisherKeyPrefix || (this.transport === "mqtt"
-                ? process.env.MQTT_KEY_PREFIX
-                : process.env.ZENOH_KEY_PREFIX) || "bwear/sensors",
+            keyPrefix: options.publisherKeyPrefix || topic("sensors"),
             prettyJson: true,
         };
-        this.publisherAttachAll =
-            options.publisherAttachAll !== undefined
-                ? Boolean(options.publisherAttachAll)
-                : process.env.PUBLISHER_ATTACH_ALL !== "0" &&
-                  (this.transport !== "zenoh" || process.env.ZENOH_ATTACH_ALL !== "0");
         this.publisher = null;
 
         // Available sensor types with their default device rates (SDK expects multiples of 5).
@@ -67,7 +60,7 @@ class SensorManager extends EventEmitter {
 
     async startSensors() {
         // If a transport is selected, start the publisher and attach sensors
-        if (this.publisherEnabled && this.publisherAttachAll && this.transport !== "none") {
+        if (this.publisherEnabled && this.transport !== "none") {
             try {
                 this.publisher = createPublisher({
                     transport: this.transport,

@@ -3,6 +3,7 @@ const { DisplayManager } = require("./lib/display-manager");
 const { Config } = require("../utils/config");
 const { DeviceManager } = require("../utils/device-manager");
 const { createPublisher, selectedTransport } = require("../utils/transport");
+const { topic } = require("../utils/topics");
 
 async function getDevice() {
     const device = await new DeviceManager().connectToDevice();
@@ -38,11 +39,10 @@ async function main() {
     console.log("Connecting to device...");
     const device = await getDevice();
 
-    const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_DISPLAY_ENABLE !== "0";
+    const publisherEnabled = selectedTransport() !== "none";
     const publisher = publisherEnabled
         ? createPublisher({
-            keyPrefix: process.env.ZENOH_DISPLAY_KEY_PREFIX || "bwear/display",
-            udsPath: process.env.ZENOH_DISPLAY_UDS_PATH || `/tmp/bwear-zenoh-display-${process.pid}.sock`,
+            keyPrefix: topic("display"),
         })
         : null;
     if (publisher) {

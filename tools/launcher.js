@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const { loadConfigFile } = require('../utils/ini-config');
@@ -61,9 +60,9 @@ function exitWithCode(code) {
   process.exit(code);
 }
 
-function findArg(flag, def) {
+function findArg(flag) {
   const i = process.argv.indexOf(flag);
-  return i > -1 ? process.argv[i + 1] : def;
+  return i > -1 ? process.argv[i + 1] : undefined;
 }
 
 async function main() {
@@ -72,82 +71,63 @@ async function main() {
   }
   process.on('exit', releaseLauncherLock);
 
-  const explicitConfig = findArg('--config', '/config/config.ini');
+  const explicitConfig = findArg('--config');
   const loadedConfig = loadConfigFile(explicitConfig, { applyEnv: true });
-  let parsed = loadedConfig.parsed;
+  const parsed = loadedConfig.parsed;
   if (loadedConfig.loaded) {
     console.log(`[launcher] loaded config: ${loadedConfig.configPath}`);
   } else {
     console.warn(`[launcher] config not found at ${loadedConfig.configPath}, proceeding with defaults`);
   }
 
-  // Ensure zenoh peer config points at zenoh-router service when running in Docker (override file if present)
-  try {
-    const peerFile = path.resolve(__dirname, '../zenoh/peer.json5');
-    if (fs.existsSync(peerFile)) {
-      const text = fs.readFileSync(peerFile, 'utf8');
-      // naive replace of 127.0.0.1 to zenoh-router hostname if requested
-      if (process.env.ZENOH_DOCKER_ROUTER === '1') {
-        const updated = text.replace(/tcp\/127\.0\.0\.1:7447/g, 'tcp/zenoh-router:7447');
-        if (updated !== text) fs.writeFileSync(peerFile, updated);
-      }
-    }
-  } catch (e) {
-    console.warn('[launcher] zenoh peer config adjustment failed:', e.message || e);
-  }
-
-  // Determine scripts to run strictly from config.ini [scripts]
-  let scripts = parsed._scripts.map(s => s.cmd);
+  const scripts = parsed._scripts.map(s => s.cmd);
   if (!scripts.length) {
     console.error('[launcher] no scripts defined in [scripts] section of config.ini');
     process.exit(1);
   }
 
-  // Spawn scripts sequentially or in parallel based on RUN_MODE
-  const mode = (parsed._env.RUN_MODE || 'sequential').toLowerCase();
-  const children = [];
+  // Every configured script is a service; run them together and keep the lock
+  // until the launcher and its children have stopped.
+  const children = new Set();
+  let stopping = false;
+  let exitCode = 0;
+
+  function shutdown(code = 0) {
+    if (stopping) return;
+    stopping = true;
+    exitCode = code;
+    for (const child of children) {
+      try { child.kill('SIGTERM'); } catch {}
+    }
+    if (children.size === 0) exitWithCode(exitCode);
+    setTimeout(() => exitWithCode(exitCode), 5000).unref();
+  }
 
   function spawnScript(name) {
-    const script = process.env[`NPM_SCRIPT_${name.toUpperCase()}`] || name;
+    const script = name;
     const parts = script.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
     const cmd = 'npm';
     const args = ['run', ...parts.map(p => p.replace(/^"|"$/g, ''))];
     console.log(`[launcher] starting: ${cmd} ${args.map(a => a.includes(' ') ? `"${a}"` : a).join(' ')}`);
     const child = spawn(cmd, args, { stdio: 'inherit', env: process.env });
-    children.push(child);
-    child.on('exit', (code, signal) => {
+    children.add(child);
+    child.on('error', (error) => {
+      console.error(`[launcher] failed to start '${script}': ${error.message}`);
+      shutdown(1);
+    });
+    child.on('close', (code, signal) => {
+      children.delete(child);
       console.log(`[launcher] script '${script}' exited code=${code} signal=${signal}`);
-      if (mode === 'parallel' && code !== 0) exitWithCode(code || 1);
+      if (!stopping && children.size === 0) exitWithCode(code || 0);
+      if (!stopping) shutdown(code || 1);
+      else if (children.size === 0) exitWithCode(exitCode);
     });
     return child;
   }
 
-  function shutdown() {
-    console.log('[launcher] shutting down...');
-    for (const c of children) {
-      try { c.kill('SIGTERM'); } catch {}
-    }
-    setTimeout(() => {
-      releaseLauncherLock();
-      process.exit(0);
-    }, 200);
-  }
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-
-  try {
-    if (mode === 'parallel') {
-      scripts.forEach(spawnScript);
-    } else {
-      for (const s of scripts) {
-        const child = spawnScript(s);
-        const code = await new Promise(resolve => child.on('exit', resolve));
-        if (code !== 0) exitWithCode(code || 1);
-      }
-    }
-  } finally {
-    releaseLauncherLock();
-  }
+  process.on('SIGINT', () => shutdown(130));
+  process.on('SIGTERM', () => shutdown(143));
+  scripts.forEach(spawnScript);
 }
 
 main().catch(err => {

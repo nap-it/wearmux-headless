@@ -1,11 +1,6 @@
 // Transport selection — one messaging backend for publishers and subscribers.
 //
-// Env vars:
-//   MESSAGE_TRANSPORT=mqtt|zenoh|none  explicit choice
-//   MQTT_ENABLE=1   use MQTT (MqttManager / MqttSubscriber)
-//   ZENOH_ENABLE=1  use Zenoh (ZenohManager / ZenohSubscriber)
-//
-// Legacy enable flags remain supported. If both are set, MQTT wins.
+// MESSAGE_TRANSPORT=mqtt|zenoh|none selects one backend for both directions.
 
 const { ZenohManager } = require("./zenoh-manager");
 const { ZenohSubscriber } = require("./zenoh-subscriber");
@@ -13,16 +8,11 @@ const { MqttManager } = require("./mqtt-manager");
 const { MqttSubscriber } = require("./mqtt-subscriber");
 
 function selectedTransport() {
-    const explicit = process.env.MESSAGE_TRANSPORT?.trim().toLowerCase();
-    if (explicit) {
-        if (!["mqtt", "zenoh", "none"].includes(explicit)) {
-            throw new Error(`Invalid MESSAGE_TRANSPORT '${explicit}' (expected mqtt, zenoh, or none)`);
-        }
-        return explicit;
+    const transport = process.env.MESSAGE_TRANSPORT?.trim().toLowerCase() || "none";
+    if (!["mqtt", "zenoh", "none"].includes(transport)) {
+        throw new Error(`Invalid MESSAGE_TRANSPORT '${transport}' (expected mqtt, zenoh, or none)`);
     }
-    if (process.env.MQTT_ENABLE === "1") return "mqtt";
-    if (process.env.ZENOH_ENABLE === "1") return "zenoh";
-    return "none";
+    return transport;
 }
 
 function createPublisher(options = {}) {

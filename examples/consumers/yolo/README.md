@@ -1,13 +1,13 @@
 # yolo — object detection consumer
 
-Real-time object detection for the wearmux-headless pipeline.
+Optional object detection consumer for WearMux Headless. It runs outside the core service and can run on another machine.
 
 Subscribes to the raw camera stream published by `camera/index.js`, reassembles
 JPEG frames, runs [YOLOv8](https://docs.ultralytics.com/) inference via Ultralytics,
 and publishes detection results back onto the transport layer.
 
 ```
-camera/index.js  ──(bwear/camera/raw/**)──►  yolo/runner.py
+camera/index.js  ──(bwear/camera/raw/**)──►  examples/consumers/yolo/runner.py
                                                     │
                                            bwear/yolo/detections
                                                     │
@@ -20,20 +20,21 @@ camera/index.js  ──(bwear/camera/raw/**)──►  yolo/runner.py
 
 ## Prerequisites
 
-1. **Install Python dependencies** (from `wearmux-headless/`):
+1. **Install this example's Python dependencies** (from the repository root or the copied `consumers/` directory):
    ```bash
-   npm run yolo:setup
+   cd examples/consumers  # or the copied consumers/ directory
+   python3 -m venv .venv
+   .venv/bin/pip install -r yolo/requirements.txt
    ```
 
-2. **Verify raw camera publishing is enabled** in `config/zenoh.ini`:
+2. **Verify raw camera publishing is enabled** in `config/camera.ini`:
    ```ini
-   ZENOH_ENABLE=1
-   ZENOH_CAMERA_RAW_ENABLE=1
+   CAMERA_RAW_ENABLE=1
    ```
-   Both are enabled by default. Without `ZENOH_CAMERA_RAW_ENABLE=1` the camera
+   It is enabled by default. Without `CAMERA_RAW_ENABLE=1` the camera
    only publishes image metadata, not the JPEG pixel data needed for inference.
 
-3. **A Zenoh router must be reachable** — default `tcp/127.0.0.1:7447`:
+3. **Start the selected transport.** For Zenoh, start a router (default `tcp/127.0.0.1:7447`):
    ```bash
    docker compose up -d zenoh-router
    ```
@@ -43,47 +44,39 @@ camera/index.js  ──(bwear/camera/raw/**)──►  yolo/runner.py
 ## Running
 
 ```bash
-# Terminal 1 — stream camera frames
+# Terminal 1, from the WearMux Headless repository — stream camera frames
 npm run camera
 
-# Terminal 2 — detect objects
-npm run yolo:runner
+# Terminal 2, from consumers/ — detect objects (can be another host)
+.venv/bin/python yolo/runner.py
 
-# Terminal 3 — read detections
-npm run yolo:listen
+# Terminal 3, from consumers/ — read detections
+.venv/bin/python yolo/listen.py
 ```
 
-To start yolo automatically with `npm start`, add to `config/config.ini`:
-```ini
-run=yolo:runner
-```
-
-Or run the full stack in Docker:
-```bash
-docker compose up --build yolo
-```
+`listen.py` uses Zenoh. For MQTT, subscribe to `bwear/yolo/detections` (or the configured `TOPIC_PREFIX`) with an MQTT client. When running on another machine, set `ZENOH_ROUTER` or `MQTT_BROKER_URL` to the reachable endpoint and set `MESSAGE_TRANSPORT` to match WearMux Headless.
 
 ---
 
-## Configuration (`config/yolo.ini`)
+## Configuration (`examples/consumers/yolo/config.ini`)
 
-Values in `config/yolo.ini` take precedence over code defaults. Shell environment variables override both.
+The example reads shared transport settings from the repository's `config/` directory when present, then reads its own `config.ini`. Shell variables take precedence. A copied `examples/consumers/` directory can run without the main repository configuration.
 
 ### Model
 
-| Variable | `yolo.ini` default | Description |
+| Variable | `config.ini` default | Description |
 |---|---|---|
-| `YOLO_MODEL` | `yolov8m.pt` | Model file or name: `yolov8n`, `yolov8s`, `yolov8m`, `yolov8l`, `yolov8x` |
-| `YOLO_DEVICE` | `cuda` | `cpu`, `cuda`, or `mps` |
+| `YOLO_MODEL` | `yolov8n.pt` | Model file or name: `yolov8n`, `yolov8s`, `yolov8m`, `yolov8l`, `yolov8x` |
+| `YOLO_DEVICE` | `cpu` | `cpu`, `cuda`, or `mps` |
 
 ### Detection thresholds
 
-| Variable | `yolo.ini` default | Description |
+| Variable | `config.ini` default | Description |
 |---|---|---|
 | `YOLO_CONFIDENCE` | `0.40` | Minimum detection confidence (0–1); lower = more detections, more noise |
 | `YOLO_IOU` | `0.45` | NMS IOU threshold (0–1); lower = fewer overlapping boxes |
-| `YOLO_INPUT_SIZE` | `640` | Inference image size in pixels (must be multiple of 32) |
-| `YOLO_CLASSES` | `0,1,2` | Comma-separated COCO class IDs to detect; empty = all 80 classes |
+| `YOLO_INPUT_SIZE` | `320` | Inference image size in pixels (must be multiple of 32) |
+| `YOLO_CLASSES` | _(empty)_ | Comma-separated COCO class IDs to detect; empty = all 80 classes |
 
 Common class IDs: `0`=person, `1`=bicycle, `2`=car, `15`=cat, `16`=dog.
 
@@ -91,16 +84,10 @@ Common class IDs: `0`=person, `1`=bicycle, `2`=car, `15`=cat, `16`=dog.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MESSAGE_TRANSPORT` | _(unset)_ | Select `mqtt` or `zenoh`; overrides `MQTT_ENABLE` |
-| `MQTT_ENABLE` | `0` | Set to `1` to subscribe via MQTT instead of Zenoh |
-| `MQTT_BROKER_URL` | _(unset)_ | Broker URL for MQTT, including optional credentials or TLS (`mqtts://`) |
-| `MQTT_BROKER` | `localhost` | MQTT broker host |
-| `MQTT_PORT` | `1883` | MQTT broker port |
-| `MQTT_PUB_TOPIC` | _(same as `YOLO_PUB_KEY`)_ | Topic to publish detections to |
-| `MQTT_SUB_CAMERA` | `bwear/camera/raw/#` | Topic filter for camera subscription |
-| `ZENOH_SUB_CAMERA` | `bwear/camera/raw/**` | Zenoh key expression to subscribe to |
-| `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Router endpoint |
-| `YOLO_PUB_KEY` | `bwear/yolo/detections` | Zenoh key for detection output |
+| `MESSAGE_TRANSPORT` | `zenoh` | Select `mqtt` or `zenoh`; set in the shell on a separate host |
+| `TOPIC_PREFIX` | `bwear` | Shared root for input and output topics |
+| `MQTT_BROKER_URL` | `mqtt://127.0.0.1:1883` | MQTT broker URL, including optional credentials or TLS (`mqtts://`) |
+| `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Zenoh router endpoint override; default in `examples/consumers/peer.json5` |
 
 ### CPU performance guide
 

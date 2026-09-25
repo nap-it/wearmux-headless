@@ -1,22 +1,21 @@
-// Zenoh integration: session management and publishing helpers
-// Supports multiple package names: '@eclipse-zenoh/zenoh-ts', 'zenoh-ts', 'zenoh', '@eclipse-zenoh/zenoh-node'
+// Zenoh publisher using a Python sidecar and a local MessagePack socket.
 const EventEmitter = require("events");
 const { spawn } = require("child_process");
 const net = require("net");
 const msgpack = require("@msgpack/msgpack");
 const path = require("path");
+const os = require("os");
+const { randomUUID } = require("crypto");
+const { topic } = require("./topics");
 
 // Native bindings are not supported in Node here; we use a small Python sidecar.
 
 class ZenohManager extends EventEmitter {
     constructor(options = {}) {
         super();
-        this.keyPrefix = options.keyPrefix || "bwear/sensors";
+        this.keyPrefix = options.keyPrefix || topic("sensors");
         this.prettyJson = true;
-        this.locator = "tcp/127.0.0.1:7447";
         this.session = null;
-        this._mode = "python"; // always python sidecar
-        this._pubCache = new Map(); // key => publisher or null for session.put
         this._attached = false;
         this._attachedHandlers = new Map(); // sensorType => handler fn
         this._sensorManager = null;
@@ -25,7 +24,7 @@ class ZenohManager extends EventEmitter {
         this._childReady = false;
         this._stopping = false;
         // UDS transport (MessagePack) only
-        this._udsPath = options.udsPath || process.env.ZENOH_UDS_PATH || require("path").join(require("os").tmpdir(), "bwear-zenoh.sock");
+        this._udsPath = options.udsPath || path.join(os.tmpdir(), `wearmux-pub-${process.pid}-${randomUUID()}.sock`);
         this._udsSocket = null;
     }
 
@@ -36,12 +35,12 @@ class ZenohManager extends EventEmitter {
     async start() {
         if (this.session || this._child) return this.session;
         this._stopping = false;
-        await this._startDenoBridge();
+        await this._startPythonBridge();
         this.emit("ready");
         return this.session;
     }
 
-    async _startDenoBridge() { // historical name; starts the Python sidecar
+    async _startPythonBridge() {
         const script = path.resolve(__dirname, "../tools/zenoh_py_publisher.py");
         const fs = require("fs");
         const isWin = process.platform === "win32";
@@ -107,7 +106,7 @@ class ZenohManager extends EventEmitter {
             this._udsSocket = sock;
         });
         // Placeholder session descriptor for python mode
-        this.session = { bridge: "python", locator: this.locator };
+        this.session = { bridge: "python" };
     }
 
     async stop() {
@@ -129,35 +128,14 @@ class ZenohManager extends EventEmitter {
             this.emit("error", e);
         } finally {
             this.session = null;
-            this._pubCache.clear();
             this._child = null;
             this._childReady = false;
-            this._mode = "python";
             this._sensorManager = null;
         }
     }
 
     _topicFor(sensorType) {
         return `${this.keyPrefix}/${sensorType}`;
-    }
-
-    async _getPublisher(key) {
-        if (this._pubCache.has(key)) return this._pubCache.get(key);
-        // Prefer a declared publisher if available
-        const declare = this.session?.declare_publisher || this.session?.declarePublisher;
-        if (declare && typeof declare === "function") {
-            try {
-                const pub = await declare.call(this.session, key);
-                this._pubCache.set(key, pub);
-                return pub;
-            } catch (e) {
-                // Fall through to session.put path if declare fails
-                this._pubCache.set(key, null);
-                return null;
-            }
-        }
-        this._pubCache.set(key, null);
-        return null;
     }
 
     _serialize(payload) {

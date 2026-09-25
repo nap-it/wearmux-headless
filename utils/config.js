@@ -1,58 +1,4 @@
 class Config {
-    static getAudioConfig() {
-        return {
-            sampleRate: Number.parseInt(process.env.SAMPLE_RATE || "16000", 10),
-            channels: Number.parseInt(process.env.CHANNELS || "1", 10),
-            sampleFormat: process.env.SAMPLE_FORMAT || "s16le",
-            audioBitrate: process.env.AUDIO_BITRATE || "64k",
-        };
-    }
-
-    static getRtspConfig() {
-        return {
-            rtspUrl: process.env.RTSP_URL || "rtsp://127.0.0.1:8554/mic",
-        };
-    }
-
-    static getFfmpegConfig() {
-        return {
-            ffmpegPath: process.env.FFMPEG_PATH || "ffmpeg",
-            ffmpegLogLevel: process.env.FFMPEG_LOGLEVEL || "error",
-        };
-    }
-
-    static getDeviceConfig() {
-        return {
-            deviceId: process.env.MIC_DEVICE_ID || "",
-            deviceName: process.env.MIC_DEVICE_NAME || "",
-            connectOnly: process.env.MIC_CONNECT_ONLY === "1",
-        };
-    }
-
-    static getMicrophoneConfig() {
-        return {
-            sensorConfig: { microphone: 5 },
-            microphoneConfig: {
-                sampleRate: String(this.getAudioConfig().sampleRate),
-                bitDepth: "16",
-            },
-        };
-    }
-
-    static getSensorConfig() {
-        return {
-            sampleRate: Number.parseInt(process.env.SENSOR_SAMPLE_RATE || "50", 10),
-            enabledSensors: process.env.ENABLED_SENSORS
-                ? process.env.ENABLED_SENSORS.split(",").map((s) => s.trim())
-                : [],
-            acceleration: Number.parseInt(process.env.ACCELERATION_RATE || "50", 10),
-            gyroscope: Number.parseInt(process.env.GYROSCOPE_RATE || "50", 10),
-            magnetometer: Number.parseInt(process.env.MAGNETOMETER_RATE || "50", 10),
-            orientation: Number.parseInt(process.env.ORIENTATION_RATE || "50", 10),
-            tapDetector: Number.parseInt(process.env.TAP_DETECTOR_RATE || "5", 10),
-        };
-    }
-
     // Returns per-sensor rates (null when env var is not set) with Hz/"Xms" parsing.
     static getSensorRates() {
         const parseRateHz = (raw) => {
@@ -156,37 +102,6 @@ class Config {
             viewMjpeg: process.env.CAMERA_VIEW_MJPEG === "1",
             // Camera sensor sampling rate (if device uses sensorConfiguration for camera)
             rate: n(process.env.CAMERA_RATE) ?? n(process.env.CAMERA_SENSOR_RATE) ?? 5,
-        };
-    }
-
-    static getZenohConfig() {
-        // Single endpoint via ZENOH_LOCATOR (e.g., "tcp/127.0.0.1:7447")
-    const enabled = process.env.ZENOH_ENABLE === "1";
-    const keyPrefix = process.env.ZENOH_KEY_PREFIX || "bwear/sensors";
-    const prettyJson = true; // Always pretty-print
-    const attachAll = process.env.ZENOH_ATTACH_ALL !== "0"; // default on: publish all events from SensorManager
-    const locator = "tcp/127.0.0.1:7447"; // Fixed default
-
-        return {
-            enabled,
-            keyPrefix,
-            prettyJson,
-            attachAll,
-            locator,
-        };
-    }
-
-    static getAllConfig() {
-        return {
-            audio: this.getAudioConfig(),
-            rtsp: this.getRtspConfig(),
-            ffmpeg: this.getFfmpegConfig(),
-            device: this.getDeviceConfig(),
-            microphone: this.getMicrophoneConfig(),
-            sensors: this.getSensorConfig(),
-            display: this.getDisplayConfig(),
-            camera: this.getCameraConfig(),
-            zenoh: this.getZenohConfig(),
         };
     }
 }

@@ -1,6 +1,6 @@
 # WearMux Headless
 
-Node.js + Python tooling to connect to Brilliant Wear devices, stream sensor data, run AI inference (speech-to-text, object detection), and exchange data and device actions over MQTT or Zenoh.
+Node.js tooling to connect to Brilliant Wear devices and exchange modality data and device actions over MQTT or Zenoh. Optional consumer examples show how to run speech-to-text and object detection on another process or machine.
 
 ## Project Structure
 
@@ -12,9 +12,7 @@ wearmux-headless/
 │   ├── config.ini                  # App configuration (for Docker)
 │   ├── peer.json5                  # Zenoh peer configuration
 │   ├── peer.docker.json5           # Zenoh peer configuration (for Docker)
-│   ├── router.json5                # Zenoh router configuration
-│   ├── whisper.ini                 # Whisper STT configuration
-│   └── yolo.ini                    # YOLO object detection configuration
+│   └── router.json5                # Zenoh router configuration
 ├── display/
 │   ├── index.js                    # Show images on device display
 │   └── lib/display-manager.js      # Display rendering & tiling
@@ -48,19 +46,13 @@ wearmux-headless/
 │   └── lib/
 │       ├── image-validator.js      # Image validation utilities
 │       └── viewer-server.js        # HTTP/MJPEG browser viewer
-├── whisper/
-│   ├── runner.py                   # Speech-to-text inference (faster-whisper)
-│   ├── launcher.js                 # Node entry point for whisper runner
-│   ├── Dockerfile                  # Standalone whisper Docker image
-│   └── README.md                   # Whisper configuration & payload docs
-├── yolo/
-│   ├── runner.py                   # Object detection inference (YOLOv8)
-│   ├── launcher.js                 # Node entry point for yolo runner
-│   ├── Dockerfile                  # Standalone yolo Docker image
-│   └── README.md                   # YOLO configuration & payload docs
 ├── examples/
 │   ├── car-interaction/            # Car interaction example + tests
-│   └── latency-evaluation/         # Display-to-camera latency evaluation example
+│   ├── latency-evaluation/         # Display-to-camera latency evaluation example
+│   └── consumers/                  # Optional off-device consumer adapters
+│       ├── whisper/                # Speech-to-text example and dependencies
+│       ├── yolo/                   # Object detection example and dependencies
+│       └── README.md               # Message contract and deployment guide
 ├── tools/
 │   ├── launcher.js                 # Config parser and script launcher
 │   ├── run-with-config.js          # Env-injecting script runner
@@ -77,10 +69,12 @@ wearmux-headless/
 │   ├── mqtt-manager.js             # MQTT publisher
 │   ├── mqtt-subscriber.js          # MQTT subscriber
 │   ├── transport.js                # Transport abstraction (Zenoh/MQTT)
+│   ├── topics.js                   # Shared topic root and names
 │   ├── action-dispatcher.js        # Route incoming actions to device outputs
 │   ├── zenoh-manager.js            # Node→Python sidecar bridge (UDS)
 │   └── zenoh-subscriber.js         # Zenoh subscriber helper
 ├── docker-compose.yml              # Docker for Linux
+├── requirements.txt                 # Core Zenoh bridge dependencies only
 ├── package.json
 └── README.md
 ```
@@ -134,20 +128,9 @@ npm run camera
 
 # Display-to-camera latency example
 npm run examples:latency
-
-# --- AI Inference ---
-
-# Install Python dependencies (shared venv for whisper + yolo)
-npm run whisper:setup   # or npm run yolo:setup — same venv
-
-# Speech-to-text (requires ZENOH_MIC_RAW_ENABLE=1)
-npm run whisper:runner
-npm run whisper:listen  # read transcripts in another terminal
-
-# Object detection (requires ZENOH_CAMERA_RAW_ENABLE=1)
-npm run yolo:runner
-npm run yolo:listen     # read detections in another terminal
 ```
+
+For off-device inference, see the [consumer guide](examples/consumers/README.md). Whisper and YOLO are optional examples with separate Python dependencies; the default Docker build does not install or start them.
 
 
 ## Features
@@ -155,14 +138,14 @@ npm run yolo:listen     # read detections in another terminal
 ### 🎤 Audio Streaming
 - **Real-time RTSP streaming** at 8kHz or 16kHz
 - **Recording** to WAV files with configurable quality
-- **Audio level monitoring** via Zenoh
+- **Audio level monitoring** via MQTT or Zenoh
 - Supports multiple concurrent listeners
 
 ### 📊 Sensor Monitoring
 - **Motion sensors**: acceleration, gyroscope, magnetometer
 - **Activity detection**: step counting, activity classification
 - **ML gesture recognition**: powered by Edge Impulse models
-- Real-time data publishing via Zenoh
+- Real-time data publishing via MQTT or Zenoh
 
 ### 📷 Camera Integration
 - Single capture or continuous auto-capture mode
@@ -178,7 +161,7 @@ npm run yolo:listen     # read detections in another terminal
 - Performance timing diagnostics
 - Supports PNG and JPEG formats
 
-### 🧠 AI Inference
+### 🧠 Optional consumer examples
 
 #### Speech-to-Text (Whisper)
 
@@ -188,7 +171,7 @@ npm run yolo:listen     # read detections in another terminal
 - **Automatic language detection** with majority-vote locking across windows
 - **No-speech filtering** suppresses silent-window hallucinations
 - Configurable window size, overlap, model size, and compute type
-- See [whisper/README.md](whisper/README.md) for full configuration
+- See the [Whisper example](examples/consumers/whisper/README.md) for setup and configuration
 
 #### Object Detection (YOLO)
 
@@ -197,16 +180,16 @@ npm run yolo:listen     # read detections in another terminal
 - Publishes detections to `bwear/yolo/detections` (Zenoh or MQTT)
 - Configurable model size (n/s/m/l/x), confidence threshold, IOU, and class filter
 - Detection payload includes bounding boxes, class names, and confidence scores
-- See [yolo/README.md](yolo/README.md) for full configuration
+- See the [YOLO example](examples/consumers/yolo/README.md) for setup and configuration
 
 
 ## Messaging and reverse actions
 
-WearMux Headless uses one messaging transport at a time. Set `MESSAGE_TRANSPORT=mqtt` or `MESSAGE_TRANSPORT=zenoh`; the existing `MQTT_ENABLE=1` and `ZENOH_ENABLE=1` settings still work. `config/zenoh.ini` selects Zenoh by default. MQTT uses `mqtt://127.0.0.1:1883` unless `MQTT_BROKER_URL` is set. No action-specific configuration is required.
+WearMux Headless uses one messaging transport at a time. Set `MESSAGE_TRANSPORT=mqtt`, `zenoh`, or `none`; `config/config.ini` selects Zenoh by default. MQTT uses `mqtt://127.0.0.1:1883` unless `MQTT_BROKER_URL` is set. No action-specific configuration is required.
 
-The default topic root for both transports is `bwear/`. Update external publishers and subscribers to use the new topic names, including `bwear/actions` and `bwear/actions/result`.
+The default topic root for both transports is `bwear/`. Set `TOPIC_PREFIX` only when all publishers and subscribers need another root. Update external publishers and subscribers to use the selected root, including its `actions` and `actions/result` topics.
 
-The older `ZENOH_MIC_*` and `ZENOH_CAMERA_*` options in the configuration files still control raw audio and image publishing for either transport. Their names are retained so existing setups continue to work.
+For existing configurations, replace `MQTT_ENABLE` or `ZENOH_ENABLE` with `MESSAGE_TRANSPORT`, and replace transport-specific topic prefixes with `TOPIC_PREFIX`. Raw media publishing uses `MIC_RAW_ENABLE` and `CAMERA_RAW_ENABLE`. Set these in `config/` or your shell; the old flags are no longer read.
 
 The normal sensor command (`npm run sensors`) publishes sensor data and listens for actions on the same device connection. If sensors are not running, `npm run actions` starts a standalone action receiver. Run one action receiver per device connection.
 
@@ -229,8 +212,6 @@ npm run actions:send -- '{"action":"display.text","text":"Hello"}'
 MESSAGE_TRANSPORT=mqtt npm run sensors
 MESSAGE_TRANSPORT=mqtt npm run actions:send -- '{"action":"haptic.vibrate"}'
 ```
-
-With Docker Compose, a broker listening on the host's port 1883 is reachable from the Whisper and YOLO containers as `host.docker.internal`. Pass `MESSAGE_TRANSPORT=mqtt` to select MQTT for all services.
 
 The transport sends modality data from the device to applications. The reverse path is `bwear/actions` → subscriber → action dispatcher → device display or haptics. The result topic lets an application distinguish an accepted command from one the device could not perform.
 
@@ -262,21 +243,21 @@ Each message includes:
 ```
 
 #### Microphone (`bwear/microphone/`)
-When messaging is enabled and `ZENOH_MIC_ENABLE` is not `0`:
+When messaging is enabled and the microphone command is running:
 - **`bwear/microphone/status`** - Microphone connection status
 - **`bwear/microphone/level`** - Real-time audio level (RMS, peak, timestamp)
-- **`bwear/microphone/raw/meta`** - Raw audio metadata (when `ZENOH_MIC_RAW_ENABLE=1`)
-- **`bwear/microphone/raw/chunk`** - Raw audio data chunks in base64 (when `ZENOH_MIC_RAW_ENABLE=1`)
+- **`bwear/microphone/raw/meta`** - Raw audio metadata (when `MIC_RAW_ENABLE=1`)
+- **`bwear/microphone/raw/chunk`** - Raw audio data chunks in base64 (when `MIC_RAW_ENABLE=1`)
 
 #### Camera (`bwear/camera/`)
-When messaging is enabled and `ZENOH_CAMERA_ENABLE` is not `0`:
+When messaging is enabled and the camera command is running:
 - **`bwear/camera/image`** - Image metadata (timestamp, filename, dimensions, etc.)
-- **`bwear/camera/raw/meta`** - Raw image metadata (when `ZENOH_CAMERA_RAW_ENABLE=1`)
-- **`bwear/camera/raw/chunk`** - Raw image data chunks in base64 (when `ZENOH_CAMERA_RAW_ENABLE=1`)
+- **`bwear/camera/raw/meta`** - Raw image metadata (when `CAMERA_RAW_ENABLE=1`)
+- **`bwear/camera/raw/chunk`** - Raw image data chunks in base64 (when `CAMERA_RAW_ENABLE=1`)
 
 #### Whisper (`bwear/whisper/`)
 
-Published by `whisper/runner.py` when running (`npm run whisper:runner`):
+Published by the optional [Whisper consumer](examples/consumers/whisper/README.md) when running:
 
 - **`bwear/whisper/transcript`** - Transcription result per audio window
 
@@ -294,7 +275,7 @@ Published by `whisper/runner.py` when running (`npm run whisper:runner`):
 
 #### YOLO (`bwear/yolo/`)
 
-Published by `yolo/runner.py` when running (`npm run yolo:runner`):
+Published by the optional [YOLO consumer](examples/consumers/yolo/README.md) when running:
 
 - **`bwear/yolo/detections`** - Object detection results per camera frame
 
@@ -306,16 +287,16 @@ Published by `yolo/runner.py` when running (`npm run yolo:runner`):
   "image_w": 320,
   "image_h": 240,
   "model": "yolov8n",
-  "device": "BrilliantFrame",
+  "device": "cpu",
   "detections": [
-    { "class": "person", "class_id": 0, "confidence": 0.9213, "x1": 10.0, "y1": 20.0, "x2": 150.0, "y2": 300.0 }
+    { "class": "person", "class_id": 0, "confidence": 0.9213, "x1": 10.0, "y1": 20.0, "x2": 150.0, "y2": 200.0 }
   ]
 }
 ```
 
 ### Configuration
 
-See the [Zenoh](#zenoh) subsection in [Environment Variables](#environment-variables) for all configuration options.
+See [Messaging](#messaging) for the shared transport settings and the [consumer guide](examples/consumers/README.md) for the payload contract.
 
 ### Python Helpers
 
@@ -330,12 +311,12 @@ python3 tools/zenoh_py_subscriber.py --key "bwear/sensors/**"
 
 ## Docker
 
-This project provides a `docker-compose.yml` for running WearMux Headless in a containerized environment. All configuration is managed through `config/config.ini`.
+This project provides a `docker-compose.yml` for running WearMux Headless and its Zenoh router. Configuration is loaded from the INI files in `config/`. The Compose file does not build or start inference consumers.
 
 ### Quick Start
 
 1. **Configure your settings:**
-  - Edit `config/config.ini` to set environment variables and scripts to run
+  - Edit `config/config.ini` for shared settings and startup scripts; use the module INI files for device settings
   - See the [Environment Variables](#environment-variables) section for all available options
 
 2. **Build and start the container:**
@@ -350,14 +331,14 @@ This project provides a `docker-compose.yml` for running WearMux Headless in a c
 
 ### Configuration
 
-All settings are defined in `config/config.ini`:
+The launcher reads the INI files in `config/`. Shared settings and the startup scripts are in `config/config.ini`:
 - **`[env]` section**: Environment variables (device ID, sensors, Zenoh settings, etc.)
 - **`[scripts]` section**: Scripts to run on startup (e.g., `sensors`, `camera`, `microphone:rtsp`)
 
 Example `config/config.ini`:
 ```ini
 [env]
-ZENOH_ENABLE=1
+MESSAGE_TRANSPORT=zenoh
 ENABLED_SENSORS=acceleration,magnetometer,orientation
 DEVICE_ID=CE:59:C3:0F:4D:C9
 
@@ -396,8 +377,8 @@ See the Troubleshooting section below for more details on BLE and device access 
 
 Below is a comprehensive list of environment variables, grouped by function. 
 
-**For Docker usage:** All variables should be set in `config/config.ini` under the `[env]` section.  
-**For local development:** Set variables in your shell or use npm scripts with inline variables (e.g., `ZENOH_ENABLE=1 npm run sensors`).
+**For Docker usage:** Set shared variables in `config/config.ini` and module settings in their respective INI files.
+**For local development:** Set variables in your shell or use npm scripts with inline variables (e.g., `MESSAGE_TRANSPORT=mqtt npm run sensors`).
 Set `WEARMUX_CONFIG_PATH` to load a different configuration directory or INI file.
 
 ### Audio / RTSP
@@ -430,7 +411,6 @@ Set `WEARMUX_CONFIG_PATH` to load a different configuration directory or INI fil
 | Variable                    | Description                                 | Default | Example/Values              |
 |-----------------------------|---------------------------------------------|---------|----------------------------|
 | `ENABLED_SENSORS`           | Comma-separated list of sensors             | -       | `acceleration,gyroscope`    |
-| `SENSOR_SAMPLE_RATE`        | Default rate for all sensors (Hz)           | `50`    | `100`                      |
 | `ACCELERATION_RATE`         | Acceleration sensor rate (Hz)               | `50`    | `100`                      |
 | `GYROSCOPE_RATE`            | Gyroscope sensor rate (Hz)                  | `50`    | `100`                      |
 | `MAGNETOMETER_RATE`         | Magnetometer sensor rate (Hz)               | `50`    | `100`                      |
@@ -440,23 +420,18 @@ Set `WEARMUX_CONFIG_PATH` to load a different configuration directory or INI fil
 | `GAME_ROTATION_RATE`        | Game rotation rate (Hz)                     | `50`    | `100`                      |
 | `ROTATION_RATE`             | Rotation rate (Hz)                          | `50`    | `100`                      |
 
-### Zenoh
+### Messaging
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MESSAGE_TRANSPORT` | Select `mqtt`, `zenoh`, or `none`; overrides legacy enable flags | _(unset)_ |
-| `ZENOH_ENABLE` | Legacy Zenoh selection | `1` |
-| `ZENOH_KEY_PREFIX` | Sensor topic prefix | `bwear/sensors` |
-| `ZENOH_ATTACH_ALL` | Publish all enabled sensors | `1` |
-| `ZENOH_MIC_ENABLE` | Enable microphone publishing | `1` (if ZENOH_ENABLE=1) |
-| `ZENOH_MIC_KEY_PREFIX` | Microphone topic prefix | `bwear/microphone` |
-| `ZENOH_MIC_RAW_ENABLE` | Publish raw audio data | `0` |
-| `ZENOH_MIC_RAW_THROTTLE_MS` | Throttle raw audio (ms) | `200` |
-| `ZENOH_CAMERA_ENABLE` | Enable camera publishing | `1` (if ZENOH_ENABLE=1) |
-| `ZENOH_CAMERA_KEY_PREFIX` | Camera topic prefix | `bwear/camera` |
-| `ZENOH_CAMERA_RAW_ENABLE` | Publish raw image data | `1` |
-| `ZENOH_RAW_CHUNK_SIZE` | Chunk size for raw data | `30000` |
-| `ZENOH_UDS_PATH` | Unix socket path for sidecar | `/tmp/bwear-zenoh.sock` |
+| `MESSAGE_TRANSPORT` | Select `mqtt`, `zenoh`, or `none` | `zenoh` (config.ini) |
+| `TOPIC_PREFIX` | Root for all published and subscribed topics | `bwear` |
+| `MQTT_BROKER_URL` | MQTT broker URL, including optional credentials and TLS | `mqtt://127.0.0.1:1883` |
+| `ZENOH_ROUTER` | Zenoh router endpoint override | `config/peer.json5` |
+| `MIC_RAW_ENABLE` | Publish audio chunks for external consumers | `1` (audio.ini) |
+| `CAMERA_RAW_ENABLE` | Publish image chunks for external consumers | `1` (camera.ini) |
+| `MIC_RAW_THROTTLE_MS` | Minimum interval between raw audio publishes | `200` |
+| `RAW_CHUNK_SIZE` | Base64 characters per raw chunk | `30000` |
 
 ### Camera
 
@@ -487,48 +462,4 @@ Set `WEARMUX_CONFIG_PATH` to load a different configuration directory or INI fil
 |------------------|---------------------------|---------|---------|
 | `DISPLAY_TIMING` | Log display timing         | `0`     | `1`     |
 
-### Whisper (Speech-to-Text)
-
-Defaults are set in `config/whisper.ini`. See [whisper/README.md](whisper/README.md) for full details.
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `WHISPER_MODEL` | `tiny` | Model size: `tiny` `base` `small` `medium` `large-v3` |
-| `WHISPER_DEVICE` | `cpu` | `cpu`, `cuda`, or `auto` |
-| `WHISPER_COMPUTE_TYPE` | `int8` | `int8`, `float16`, `float32` |
-| `WHISPER_LANGUAGE` | _(empty)_ | BCP-47 language code or empty for auto-detect |
-| `WHISPER_AUTODETECT_WINDOWS` | `3` | Windows to sample before locking language |
-| `WHISPER_AUTODETECT_EVERY` | `0` | Re-detect every N windows; `0` = lock forever |
-| `WHISPER_WINDOW_S` | `5` | Seconds of audio per inference window |
-| `WHISPER_OVERLAP` | `0` | Overlap fraction between windows (0–0.9) |
-| `WHISPER_NO_SPEECH_THRESHOLD` | `0.6` | Drop windows where all segments exceed this no-speech probability |
-| `WHISPER_WORD_TIMESTAMPS` | `0` | Set to `1` for per-word timing in payload |
-| `WHISPER_PUB_KEY` | `bwear/whisper/transcript` | Zenoh key for transcript output |
-| `ZENOH_SUB_MIC` | `bwear/microphone/raw/**` | Zenoh key expression to subscribe to |
-| `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Zenoh router endpoint |
-| `MQTT_ENABLE` | `0` | Set to `1` to use MQTT instead of Zenoh |
-| `MQTT_BROKER` | `localhost` | MQTT broker host |
-| `MQTT_PORT` | `1883` | MQTT broker port |
-
-### YOLO (Object Detection)
-
-Defaults are set in `config/yolo.ini`. See [yolo/README.md](yolo/README.md) for full details.
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `YOLO_MODEL` | `yolov8n.pt` | Model file: `yolov8n`, `yolov8s`, `yolov8m`, `yolov8l`, `yolov8x` |
-| `YOLO_DEVICE` | `cpu` | `cpu`, `cuda`, or `mps` |
-| `YOLO_CONFIDENCE` | `0.5` | Minimum detection confidence (0–1) |
-| `YOLO_IOU` | `0.45` | NMS IOU threshold (0–1) |
-| `YOLO_INPUT_SIZE` | `320` | Inference image size in pixels (multiple of 32) |
-| `YOLO_CLASSES` | _(empty)_ | Comma-separated COCO class IDs; empty = all 80 |
-| `YOLO_PUB_KEY` | `bwear/yolo/detections` | Zenoh key for detection output |
-| `ZENOH_SUB_CAMERA` | `bwear/camera/raw/**` | Zenoh key expression to subscribe to |
-| `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Zenoh router endpoint |
-| `MQTT_ENABLE` | `0` | Set to `1` to use MQTT instead of Zenoh |
-| `MQTT_BROKER` | `localhost` | MQTT broker host |
-| `MQTT_PORT` | `1883` | MQTT broker port |
-
----
-
-For more details, see the README in each subfolder.
+Whisper and YOLO settings are documented with their optional [consumer examples](examples/consumers/README.md). They are not loaded by the main service.

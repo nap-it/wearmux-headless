@@ -1,13 +1,13 @@
 # whisper — speech-to-text consumer
 
-Real-time transcription for the wearmux-headless pipeline.
+Optional real-time transcription consumer for WearMux Headless. It runs outside the core service and can run on another machine.
 
 Subscribes to the raw audio stream published by `microphone/index.js`, accumulates
 fixed-size windows, runs [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 inference, and publishes transcripts back onto the transport layer.
 
 ```
-microphone/index.js  ──(bwear/microphone/raw/**)──►  whisper/runner.py
+microphone/index.js  ──(bwear/microphone/raw/**)──►  examples/consumers/whisper/runner.py
                                                             │
                                                    bwear/whisper/transcript
                                                             │
@@ -20,20 +20,20 @@ microphone/index.js  ──(bwear/microphone/raw/**)──►  whisper/runner.py
 
 ## Prerequisites
 
-1. **Install Python dependencies** (from `wearmux-headless/`):
+1. **Install this example's Python dependencies** (from the repository root or the copied `consumers/` directory):
    ```bash
-   npm run whisper:setup
+   cd examples/consumers  # or the copied consumers/ directory
+   python3 -m venv .venv
+   .venv/bin/pip install -r whisper/requirements.txt
    ```
 
-2. **Enable raw audio publishing** in `config/zenoh.ini`:
+2. **Enable raw audio publishing** in `config/audio.ini`:
    ```ini
-   ZENOH_MIC_ENABLE=1
-   ZENOH_MIC_RAW_ENABLE=1
-   ZENOH_MIC_RAW_THROTTLE_MS=0
+   MIC_RAW_ENABLE=1
    ```
-   Without these the microphone only publishes level metrics, not samples.
+   This is enabled by default. Without it the microphone only publishes level metrics, not samples.
 
-3. **A Zenoh router must be reachable** — default `tcp/127.0.0.1:7447`:
+3. **Start the selected transport.** For Zenoh, start a router (default `tcp/127.0.0.1:7447`):
    ```bash
    docker compose up -d zenoh-router
    ```
@@ -43,29 +43,23 @@ microphone/index.js  ──(bwear/microphone/raw/**)──►  whisper/runner.py
 ## Running
 
 ```bash
-# Terminal 1 — stream mic audio
+# Terminal 1, from the WearMux Headless repository — stream mic audio
 npm run microphone:rtsp
 
-# Terminal 2 — transcribe
-npm run whisper:runner
+# Terminal 2, from consumers/ — transcribe (can be another host)
+.venv/bin/python whisper/runner.py
 
-# Terminal 3 — read transcripts
-npm run whisper:listen
+# Terminal 3, from consumers/ — read transcripts
+.venv/bin/python whisper/listen.py
 ```
 
-To start whisper automatically with `npm start`, uncomment in `config/config.ini`:
-```ini
-run=whisper:runner
-```
-
-Or run the full stack in Docker:
-```bash
-docker compose up --build whisper
-```
+`listen.py` uses Zenoh. For MQTT, subscribe to `bwear/whisper/transcript` (or the configured `TOPIC_PREFIX`) with an MQTT client. When running on another machine, set `ZENOH_ROUTER` or `MQTT_BROKER_URL` to the reachable endpoint and set `MESSAGE_TRANSPORT` to match WearMux Headless.
 
 ---
 
-## Configuration (`config/whisper.ini`)
+## Configuration (`examples/consumers/whisper/config.ini`)
+
+The example reads shared transport settings from the repository's `config/` directory when present, then reads its own `config.ini`. Shell variables take precedence. A copied `examples/consumers/` directory can run without the main repository configuration.
 
 ### Model
 
@@ -103,16 +97,10 @@ When `WHISPER_LANGUAGE` is empty, the runner samples the first 3 windows (15 s a
 
 | Variable | Default | Description |
 |---|---|---|
-| `MESSAGE_TRANSPORT` | _(unset)_ | Select `mqtt` or `zenoh`; overrides `MQTT_ENABLE` |
-| `MQTT_ENABLE` | `0` | Set to `1` to subscribe via MQTT instead of Zenoh |
-| `MQTT_BROKER_URL` | _(unset)_ | Broker URL for MQTT, including optional credentials or TLS (`mqtts://`) |
-| `MQTT_BROKER` | `localhost` | MQTT broker host |
-| `MQTT_PORT` | `1883` | MQTT broker port |
-| `MQTT_PUB_TOPIC` | _(same as `WHISPER_PUB_KEY`)_ | Topic to publish transcripts to |
-| `MQTT_SUB_MIC` | `bwear/microphone/raw/#` | Topic filter for audio subscription |
-| `ZENOH_SUB_MIC` | `bwear/microphone/raw/**` | Zenoh key expression to subscribe to |
-| `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Router endpoint |
-| `WHISPER_PUB_KEY` | `bwear/whisper/transcript` | Zenoh key for transcript output |
+| `MESSAGE_TRANSPORT` | `zenoh` | Select `mqtt` or `zenoh`; set in the shell on a separate host |
+| `TOPIC_PREFIX` | `bwear` | Shared root for input and output topics |
+| `MQTT_BROKER_URL` | `mqtt://127.0.0.1:1883` | MQTT broker URL, including optional credentials or TLS (`mqtts://`) |
+| `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Zenoh router endpoint override; default in `examples/consumers/peer.json5` |
 
 ### CPU performance guide
 

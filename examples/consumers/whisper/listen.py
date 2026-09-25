@@ -3,11 +3,10 @@
 Whisper Listener — prints transcripts from bwear/whisper/transcript.
 
 Usage:
-    python3 whisper/listen.py
-    npm run whisper:listen
+    python3 examples/consumers/whisper/listen.py
 
 Environment variables:
-    WHISPER_PUB_KEY         Key to subscribe to (default: bwear/whisper/transcript)
+    TOPIC_PREFIX            Root for message topics (default: bwear)
     ZENOH_ROUTER            Router endpoint override (e.g. tcp/192.168.1.10:7447)
     WHISPER_LISTEN_VERBOSE  Set to 1 to print full JSON payload instead of text only
 """
@@ -20,39 +19,22 @@ import time
 from pathlib import Path
 
 
-def _load_ini(path: Path) -> None:
-    try:
-        in_env = False
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("["):
-                in_env = line.lower() == "[env]"
-                continue
-            if not in_env or not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, _, val = line.partition("=")
-                key = key.strip()
-                val = val.strip()
-                if key and key not in os.environ:
-                    os.environ[key] = val
-    except OSError:
-        pass
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from python_config import load_config
 
-
-_load_ini(Path(__file__).resolve().parent.parent / "config" / "whisper.ini")
+load_config("whisper")
 
 try:
     import zenoh
 except ImportError:
-    print("[whisper-listen] zenoh not installed — run: npm run whisper:setup", file=sys.stderr)
+    print("[whisper-listen] zenoh not installed — install examples/consumers/whisper/requirements.txt", file=sys.stderr)
     sys.exit(1)
 
-SUB_KEY = os.environ.get("WHISPER_PUB_KEY", "bwear/whisper/transcript")
+SUB_KEY = f"{(os.environ.get('TOPIC_PREFIX', 'bwear').strip().strip('/') or 'bwear')}/whisper/transcript"
 ROUTER  = os.environ.get("ZENOH_ROUTER", "")
 VERBOSE = os.environ.get("WHISPER_LISTEN_VERBOSE", "0") == "1"
 
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "peer.json5"
 
 
 def on_message(sample) -> None:

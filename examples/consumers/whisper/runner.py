@@ -3,12 +3,12 @@
 Whisper Runner — speech-to-text consumer for the wearmux-headless pipeline.
 
 Subscribes to bwear/microphone/raw/** (chunked Float32 PCM frames published
-by microphone/index.js when ZENOH_MIC_RAW_ENABLE=1), reassembles audio
+by microphone/index.js when MIC_RAW_ENABLE=1), reassembles audio
 windows, runs faster-whisper inference, and publishes transcripts to
 bwear/whisper/transcript.
 
 Usage:
-    python3 whisper/runner.py
+    python3 examples/consumers/whisper/runner.py
 
 Environment variables:
     WHISPER_MODEL               Model size: tiny, base, small, medium, large-v3 (default: tiny)
@@ -21,16 +21,10 @@ Environment variables:
     WHISPER_OVERLAP             Fraction of window kept as overlap between windows, 0–0.9 (default: 0)
     WHISPER_WORD_TIMESTAMPS     Set to 1 for per-word timing in transcript payload (default: 0)
     WHISPER_NO_SPEECH_THRESHOLD Drop windows where all segments exceed this prob (default: 0.6)
-    WHISPER_PUB_KEY             Zenoh key to publish transcripts to (default: bwear/whisper/transcript)
-    ZENOH_SUB_MIC               Key expression to subscribe to (default: bwear/microphone/raw/**)
+    TOPIC_PREFIX                Root for all message topics (default: bwear)
     ZENOH_ROUTER                Zenoh router endpoint override (e.g. tcp/192.168.1.10:7447)
-    MESSAGE_TRANSPORT           Select mqtt or zenoh (overrides MQTT_ENABLE)
-    MQTT_ENABLE                 Legacy MQTT selector (default: 0)
+    MESSAGE_TRANSPORT           Select mqtt or zenoh (default: zenoh)
     MQTT_BROKER_URL             MQTT broker URL, optionally mqtts:// with credentials
-    MQTT_BROKER                 MQTT broker host (default: localhost)
-    MQTT_PORT                   MQTT broker port (default: 1883)
-    MQTT_PUB_TOPIC              Topic to publish transcripts to (default: same as WHISPER_PUB_KEY)
-    MQTT_SUB_MIC                Topic filter to subscribe for audio (default: bwear/microphone/raw/#)
     DEBUG                       Set to 1 for verbose frame-level logging
 """
 
@@ -45,40 +39,22 @@ import threading
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-# Apply config/whisper.ini before reading env vars so the script works when
-# invoked directly (python3 runner.py) or in Docker without the Node launcher.
-# Existing env vars always take precedence (shell / docker-compose explicit values).
-def _load_ini(path: Path) -> None:
-    try:
-        in_env = False
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("["):
-                in_env = line.lower() == "[env]"
-                continue
-            if not in_env or not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, _, val = line.partition("=")
-                key = key.strip()
-                val = val.strip()
-                if key and key not in os.environ:
-                    os.environ[key] = val
-    except OSError:
-        pass
+# Read the shared config before importing model dependencies.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from python_config import load_config
 
-_load_ini(Path(__file__).resolve().parent.parent / "config" / "whisper.ini")
+load_config("whisper")
 
 try:
     import numpy as np
 except ImportError:
-    print("[whisper-runner] missing dependencies — run: npm run whisper:setup", file=sys.stderr)
+    print("[whisper-runner] missing dependencies — install examples/consumers/whisper/requirements.txt", file=sys.stderr)
     sys.exit(1)
 
 try:
     from faster_whisper import WhisperModel
 except ImportError:
-    print("[whisper-runner] missing dependencies — run: npm run whisper:setup", file=sys.stderr)
+    print("[whisper-runner] missing dependencies — install examples/consumers/whisper/requirements.txt", file=sys.stderr)
     sys.exit(1)
 
 try:
@@ -99,24 +75,25 @@ WINDOW_S          = float(os.environ.get("WHISPER_WINDOW_S", "5"))
 OVERLAP           = float(os.environ.get("WHISPER_OVERLAP", "0"))
 WORD_TIMESTAMPS   = os.environ.get("WHISPER_WORD_TIMESTAMPS", "0") == "1"
 NO_SPEECH_THRESH  = float(os.environ.get("WHISPER_NO_SPEECH_THRESHOLD", "0.6"))
-PUB_KEY           = os.environ.get("WHISPER_PUB_KEY", "bwear/whisper/transcript")
-SUB_EXPR          = os.environ.get("ZENOH_SUB_MIC", "bwear/microphone/raw/**")
+TOPIC_PREFIX      = (os.environ.get("TOPIC_PREFIX", "bwear").strip().strip("/") or "bwear")
+PUB_KEY           = f"{TOPIC_PREFIX}/whisper/transcript"
+SUB_EXPR          = f"{TOPIC_PREFIX}/microphone/raw/**"
 ROUTER            = os.environ.get("ZENOH_ROUTER", "")
-MESSAGE_TRANSPORT = os.environ.get("MESSAGE_TRANSPORT", "").strip().lower()
-if MESSAGE_TRANSPORT not in ("", "mqtt", "zenoh", "none"):
-    raise ValueError("MESSAGE_TRANSPORT must be mqtt, zenoh, or none")
-MQTT_ENABLE       = MESSAGE_TRANSPORT == "mqtt" if MESSAGE_TRANSPORT else os.environ.get("MQTT_ENABLE", "0") == "1"
-_mqtt_url         = urlparse(os.environ.get("MQTT_BROKER_URL", ""))
-if _mqtt_url.scheme not in ("", "mqtt", "mqtts"):
+MESSAGE_TRANSPORT = os.environ.get("MESSAGE_TRANSPORT", "zenoh").strip().lower()
+if MESSAGE_TRANSPORT not in ("mqtt", "zenoh"):
+    raise ValueError("Whisper requires MESSAGE_TRANSPORT=mqtt or zenoh")
+USE_MQTT       = MESSAGE_TRANSPORT == "mqtt"
+_mqtt_url         = urlparse(os.environ.get("MQTT_BROKER_URL", "mqtt://127.0.0.1:1883"))
+if _mqtt_url.scheme not in ("mqtt", "mqtts") or not _mqtt_url.hostname:
     raise ValueError("MQTT_BROKER_URL must use mqtt:// or mqtts://")
-MQTT_BROKER       = _mqtt_url.hostname or os.environ.get("MQTT_BROKER", "localhost")
-MQTT_PORT         = _mqtt_url.port or int(os.environ.get("MQTT_PORT", "8883" if _mqtt_url.scheme == "mqtts" else "1883"))
-MQTT_PUB_TOPIC    = os.environ.get("MQTT_PUB_TOPIC", PUB_KEY)
-MQTT_SUB_TOPIC    = os.environ.get("MQTT_SUB_MIC", "bwear/microphone/raw/#")
+MQTT_BROKER       = _mqtt_url.hostname
+MQTT_PORT         = _mqtt_url.port or (8883 if _mqtt_url.scheme == "mqtts" else 1883)
+MQTT_PUB_TOPIC    = PUB_KEY
+MQTT_SUB_TOPIC    = f"{TOPIC_PREFIX}/microphone/raw/#"
 DEBUG             = os.environ.get("DEBUG", "0") == "1"
 
-# Zenoh peer config — only needed when MQTT_ENABLE=0
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
+# Zenoh peer config — only needed when USE_MQTT=0
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "peer.json5"
 
 _FRAME_TIMEOUT_S = 2.0
 _QUEUE_MAXSIZE   = 4
@@ -389,16 +366,12 @@ class InferenceWorker(threading.Thread):
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    if MESSAGE_TRANSPORT == "none":
-        log("Messaging is disabled (MESSAGE_TRANSPORT=none)", err=True)
-        sys.exit(1)
-
     log(f"loading model '{MODEL_SIZE}'  device={DEVICE}  compute={COMPUTE_TYPE}")
     t0    = time.monotonic()
     model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
     log(f"model ready ({time.monotonic() - t0:.1f}s)")
 
-    if MQTT_ENABLE:
+    if USE_MQTT:
         try:
             import paho.mqtt.client as mqtt
         except ImportError:
@@ -461,7 +434,7 @@ def main() -> None:
 
         if not CONFIG_FILE.exists():
             log(f"zenoh peer config not found: {CONFIG_FILE}", err=True)
-            log("expected at config/peer.json5 (one level above this script)", err=True)
+            log("expected at examples/consumers/peer.json5", err=True)
             sys.exit(1)
 
         conf = zenoh.Config.from_file(str(CONFIG_FILE))

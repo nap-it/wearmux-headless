@@ -377,3 +377,6 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Optional off-device inference consumers are not part of the core image.
+examples/consumers/

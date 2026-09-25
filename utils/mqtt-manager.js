@@ -2,15 +2,16 @@
 //
 // Env vars:
 //   MQTT_BROKER_URL   e.g. mqtt://127.0.0.1:1883 (default)
-//   MQTT_KEY_PREFIX   Topic prefix (default: bwear/sensors)
+//   TOPIC_PREFIX      Topic root (default: bwear)
 
 const EventEmitter = require("events");
 const mqtt = require("mqtt");
+const { topic } = require("./topics");
 
 class MqttManager extends EventEmitter {
     constructor(options = {}) {
         super();
-        this.keyPrefix = options.keyPrefix || process.env.MQTT_KEY_PREFIX || "bwear/sensors";
+        this.keyPrefix = options.keyPrefix || topic("sensors");
         this.brokerUrl = options.brokerUrl || process.env.MQTT_BROKER_URL || "mqtt://127.0.0.1:1883";
         this.prettyJson = true;
         this.client = null;

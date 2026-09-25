@@ -17,6 +17,7 @@ const { DeviceManager } = require('../utils/device-manager');
 const { calculateRMS, calculatePeak, formatLevelBar } = require('./lib/audio-utils');
 const { RtspPublisher } = require("./lib/rtsp-publisher");
 const { createPublisher, selectedTransport } = require("../utils/transport");
+const { topic } = require("../utils/topics");
 
 // Configuration
 const SAMPLE_RATE = Number(process.env.SAMPLE_RATE || "16000");
@@ -44,17 +45,16 @@ function normalizeRtspPublishUrl(url) {
 async function main() {
   console.log('Brilliant Wear Frame - Microphone Streaming\n');
 
-  const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_MIC_ENABLE !== "0";
+  const publisherEnabled = selectedTransport() !== "none";
   const publisher = publisherEnabled
     ? createPublisher({
-        keyPrefix: process.env.ZENOH_MIC_KEY_PREFIX || "bwear/microphone",
-        udsPath: process.env.ZENOH_MIC_UDS_PATH || `/tmp/bwear-zenoh-mic-${process.pid}.sock`,
+        keyPrefix: topic("microphone"),
       })
     : null;
 
-  const rawPublishEnabled = Boolean(publisher) && process.env.ZENOH_MIC_RAW_ENABLE === "1";
-  const rawChunkSize = Math.max(1024, Number(process.env.ZENOH_RAW_CHUNK_SIZE || 30000));
-  const rawThrottleMs = Math.max(0, Number(process.env.ZENOH_MIC_RAW_THROTTLE_MS || 200));
+  const rawPublishEnabled = Boolean(publisher) && process.env.MIC_RAW_ENABLE === "1";
+  const rawChunkSize = Math.max(1024, Number(process.env.RAW_CHUNK_SIZE || 30000));
+  const rawThrottleMs = Math.max(0, Number(process.env.MIC_RAW_THROTTLE_MS || 200));
   let lastRawPublishAt = 0;
   const publishRtsp = normalizeRtspPublishUrl(RTSP_URL);
   const rtsp = RTSP_ENABLED

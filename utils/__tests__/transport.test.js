@@ -19,15 +19,12 @@ const { ZenohSubscriber } = require('../zenoh-subscriber');
 
 afterEach(() => {
     delete process.env.MESSAGE_TRANSPORT;
-    delete process.env.MQTT_ENABLE;
-    delete process.env.ZENOH_ENABLE;
     jest.clearAllMocks();
 });
 
 describe('selectedTransport', () => {
-    test('MESSAGE_TRANSPORT overrides legacy enable flags', () => {
+    test('selects MQTT from MESSAGE_TRANSPORT', () => {
         process.env.MESSAGE_TRANSPORT = 'mqtt';
-        process.env.ZENOH_ENABLE = '1';
         expect(selectedTransport()).toBe('mqtt');
     });
 
@@ -36,24 +33,13 @@ describe('selectedTransport', () => {
         expect(() => selectedTransport()).toThrow(/Invalid MESSAGE_TRANSPORT/);
     });
 
-    test('returns "mqtt" when MQTT_ENABLE=1', () => {
-        process.env.MQTT_ENABLE = '1';
-        expect(selectedTransport()).toBe('mqtt');
-    });
-
-    test('returns "zenoh" when ZENOH_ENABLE=1', () => {
-        process.env.ZENOH_ENABLE = '1';
+    test('selects Zenoh from MESSAGE_TRANSPORT', () => {
+        process.env.MESSAGE_TRANSPORT = 'zenoh';
         expect(selectedTransport()).toBe('zenoh');
     });
 
-    test('returns "none" when neither env var is set', () => {
+    test('returns "none" when transport is unset', () => {
         expect(selectedTransport()).toBe('none');
-    });
-
-    test('MQTT wins when both MQTT_ENABLE=1 and ZENOH_ENABLE=1 are set', () => {
-        process.env.MQTT_ENABLE = '1';
-        process.env.ZENOH_ENABLE = '1';
-        expect(selectedTransport()).toBe('mqtt');
     });
 });
 
@@ -75,7 +61,7 @@ describe('createPublisher', () => {
     });
 
     test('reads transport from env when not specified in options', () => {
-        process.env.MQTT_ENABLE = '1';
+        process.env.MESSAGE_TRANSPORT = 'mqtt';
         const pub = createPublisher();
         expect(MqttManager).toHaveBeenCalled();
         expect(pub).not.toBeNull();
@@ -124,7 +110,7 @@ describe('createSubscriber', () => {
     });
 
     test('reads transport from env when not specified in options', () => {
-        process.env.ZENOH_ENABLE = '1';
+        process.env.MESSAGE_TRANSPORT = 'zenoh';
         const sub = createSubscriber({ keyExpression: 'bwear/**' });
         expect(ZenohSubscriber).toHaveBeenCalled();
         expect(sub).not.toBeNull();

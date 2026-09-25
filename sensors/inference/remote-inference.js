@@ -1,18 +1,18 @@
 // Distributed inference: subscribe to sensor data, run ML, publish results back.
-// Transport is auto-selected by env (MQTT_ENABLE=1 or ZENOH_ENABLE=1).
+// MESSAGE_TRANSPORT selects the same backend as the sensor collector.
 //
 // RPi side: run sensors/index.js with a transport enabled → publishes bwear/sensors/acceleration
 // PC side:  run this script                               → subscribes, classifies, publishes bwear/inference/gesture
 //
 // Env vars:
-//   MESSAGE_TRANSPORT            Select mqtt or zenoh (legacy enable flags also work)
-//   SENSOR_INPUT_FILTER          Topic/key to subscribe to (default: bwear/sensors/acceleration)
-//   INFERENCE_TOPIC_PREFIX       Prefix for inference result topics (default: bwear/inference)
+//   MESSAGE_TRANSPORT            Select mqtt or zenoh
+//   TOPIC_PREFIX                 Root for sensor and inference topics
 //   ML_WINDOW_SIZE               Sliding window sample count (default: 30 = 1.5s at 20 Hz)
 //   ML_CONFIDENCE                Minimum confidence to publish a result (default: 0.7)
 //   DEBUG                        Set to 1 for verbose logging
 
 const { createPublisher, createSubscriber, selectedTransport } = require("../../utils/transport");
+const { topic } = require("../../utils/topics");
 const MLGestureDetector = require("../lib/ml/ml-gesture-detector");
 
 // Extract acceleration from a Zenoh sensor message payload.
@@ -44,8 +44,8 @@ function buildInferencePayload(top, results) {
 
 class RemoteInferencePipeline {
     constructor(options = {}) {
-        this.pubPrefix = options.pubPrefix || "bwear/inference";
-        this.subExpression = options.subExpression || "bwear/sensors/acceleration";
+        this.pubPrefix = options.pubPrefix || topic("inference");
+        this.subExpression = options.subExpression || topic("sensors", "acceleration");
         this.windowSize = options.windowSize || 30;
         this.confidenceThreshold = options.confidenceThreshold || 0.7;
         this.debug = options.debug || false;
@@ -55,10 +55,7 @@ class RemoteInferencePipeline {
         this._lastResultLines = 0;
 
         this.transport = options.transport || selectedTransport();
-        if (this.transport === "none") {
-            // Default to zenoh if no env var is set, so the legacy command still works
-            this.transport = "zenoh";
-        }
+        if (this.transport === "none") throw new Error("Set MESSAGE_TRANSPORT=mqtt or zenoh");
 
         this.detector = options.detector || new MLGestureDetector(this.windowSize);
         this.publisher = options.publisher || createPublisher({
@@ -145,8 +142,6 @@ class RemoteInferencePipeline {
 
 async function main() {
     const pipeline = new RemoteInferencePipeline({
-        pubPrefix: process.env.INFERENCE_TOPIC_PREFIX || process.env.ZENOH_PUB_PREFIX || "bwear/inference",
-        subExpression: process.env.SENSOR_INPUT_FILTER || process.env.ZENOH_SUB_EXPRESSION || "bwear/sensors/acceleration",
         windowSize: Number(process.env.ML_WINDOW_SIZE) || 30,
         confidenceThreshold: Number(process.env.ML_CONFIDENCE) || 0.7,
         debug: process.env.DEBUG === "1",

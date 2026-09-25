@@ -12,7 +12,7 @@ jest.mock('mqtt', () => ({
 const { MqttManager } = require('../mqtt-manager');
 
 afterEach(() => {
-    delete process.env.MQTT_KEY_PREFIX;
+    delete process.env.TOPIC_PREFIX;
     delete process.env.MQTT_BROKER_URL;
 });
 
@@ -29,10 +29,10 @@ describe('MqttManager constructor', () => {
         expect(mm.brokerUrl).toBe('mqtt://host:9999');
     });
 
-    test('reads keyPrefix from env when not in options', () => {
-        process.env.MQTT_KEY_PREFIX = 'env/prefix';
+    test('derives keyPrefix from the shared topic root', () => {
+        process.env.TOPIC_PREFIX = 'env';
         const mm = new MqttManager();
-        expect(mm.keyPrefix).toBe('env/prefix');
+        expect(mm.keyPrefix).toBe('env/sensors');
     });
 
     test('reads brokerUrl from env when not in options', () => {

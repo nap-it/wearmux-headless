@@ -55,7 +55,8 @@ async function main() {
     console.log("Connecting to device...");
     const device = await new DeviceManager().connectToDevice();
 
-    const sensorManager = new SensorManager(device, { enabledSensors: ["pressure"], sampleRate: 20 });
+    const sensorManager = new SensorManager(device, { enabledSensors: ["pressure"] });
+    sensorManager.setSensorRate("pressure", 20);
     await sensorManager.startSensors();
 
     const state = {

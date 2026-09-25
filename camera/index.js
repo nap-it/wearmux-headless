@@ -3,6 +3,7 @@ const path = require("path");
 const { Config } = require("../utils/config");
 const { DeviceManager } = require("../utils/device-manager");
 const { createPublisher, selectedTransport } = require("../utils/transport");
+const { topic } = require("../utils/topics");
 const { isValidJpeg, hasValidJpegStructure, formatToMime } = require("./lib/image-validator");
 const { ViewerServer } = require("./lib/viewer-server");
 
@@ -21,28 +22,28 @@ async function getDevice() {
 }
 
 async function main() {
-    const config = Config.getAllConfig();
-    const outDir = config.camera.outputDir;
-    const auto = config.camera.autoPicture;
-    const imgFmt = config.camera.imageFormat;
-    const quality = config.camera.quality;
-    const resolution = config.camera.resolution;
-    const qualityFactor = config.camera.qualityFactor ?? quality;
-    const shutter = config.camera.shutter;
-    const gain = config.camera.gain;
-    const redGain = config.camera.redGain;
-    const greenGain = config.camera.greenGain;
-    const blueGain = config.camera.blueGain;
-    const autoWhiteBalanceEnabled = config.camera.autoWhiteBalanceEnabled;
-    const autoGainEnabled = config.camera.autoGainEnabled;
-    const exposure = config.camera.exposure;
-    const autoExposureEnabled = config.camera.autoExposureEnabled;
-    const autoExposureLevel = config.camera.autoExposureLevel;
-    const brightness = config.camera.brightness;
-    const saturation = config.camera.saturation;
-    const contrast = config.camera.contrast;
-    const sharpness = config.camera.sharpness;
-    const cameraRate = config.camera.rate;
+    const config = Config.getCameraConfig();
+    const outDir = config.outputDir;
+    const auto = config.autoPicture;
+    const imgFmt = config.imageFormat;
+    const quality = config.quality;
+    const resolution = config.resolution;
+    const qualityFactor = config.qualityFactor ?? quality;
+    const shutter = config.shutter;
+    const gain = config.gain;
+    const redGain = config.redGain;
+    const greenGain = config.greenGain;
+    const blueGain = config.blueGain;
+    const autoWhiteBalanceEnabled = config.autoWhiteBalanceEnabled;
+    const autoGainEnabled = config.autoGainEnabled;
+    const exposure = config.exposure;
+    const autoExposureEnabled = config.autoExposureEnabled;
+    const autoExposureLevel = config.autoExposureLevel;
+    const brightness = config.brightness;
+    const saturation = config.saturation;
+    const contrast = config.contrast;
+    const sharpness = config.sharpness;
+    const cameraRate = config.rate;
     const debug = process.env.DEBUG === "1" || process.env.CAMERA_DEBUG === "1";
     const autoCaptureDelay = parseInt(process.env.CAMERA_AUTO_DELAY || "0", 10);
     const autoFocus = process.env.CAMERA_AUTO_FOCUS !== "0"; // Enabled by default
@@ -60,21 +61,20 @@ async function main() {
 
     if (outDir) await ensureDir(outDir);
 
-    const viewEnable = config.camera.viewEnable;
-    const viewPort = config.camera.viewPort || 8099;
-    const viewHost = config.camera.viewHost || "0.0.0.0";
-    const viewMjpeg = config.camera.viewMjpeg;
+    const viewEnable = config.viewEnable;
+    const viewPort = config.viewPort || 8099;
+    const viewHost = config.viewHost || "0.0.0.0";
+    const viewMjpeg = config.viewMjpeg;
     let latestImage = null;
     let viewerServer = null;
-    const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_CAMERA_ENABLE !== "0";
+    const publisherEnabled = selectedTransport() !== "none";
     const publisher = publisherEnabled
         ? createPublisher({
-            keyPrefix: process.env.ZENOH_CAMERA_KEY_PREFIX || "bwear/camera",
-            udsPath: process.env.ZENOH_CAMERA_UDS_PATH || `/tmp/bwear-zenoh-camera-${process.pid}.sock`,
+            keyPrefix: topic("camera"),
         })
         : null;
-    const rawPublishEnabled = Boolean(publisher) && process.env.ZENOH_CAMERA_RAW_ENABLE === "1";
-    const rawChunkSize = Math.max(1024, Number(process.env.ZENOH_RAW_CHUNK_SIZE || 30000));
+    const rawPublishEnabled = Boolean(publisher) && process.env.CAMERA_RAW_ENABLE === "1";
+    const rawChunkSize = Math.max(1024, Number(process.env.RAW_CHUNK_SIZE || 30000));
 
     async function publishRawImage(buffer, meta) {
         if (!rawPublishEnabled) return;

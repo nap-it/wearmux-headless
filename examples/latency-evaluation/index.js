@@ -99,17 +99,15 @@ async function prepareCamera(device, config, cameraRate) {
 }
 
 async function main() {
-    const config = Config.getAllConfig();
+    const config = Config.getCameraConfig();
     const debug = process.env.DEBUG === "1" || process.env.CAMERA_DEBUG === "1";
-    const measurementsTarget = normalizeMeasurementCount(
-        process.env.CAMERA_LATENCY_MEASUREMENTS ?? config.camera.latencyMeasurements
-    );
+    const measurementsTarget = normalizeMeasurementCount(process.env.CAMERA_LATENCY_MEASUREMENTS);
     const outputPath = process.env.CAMERA_LATENCY_OUTPUT;
-    const cameraRate = config.camera.rate ?? 10;
-    const viewEnable = config.camera.viewEnable;
-    const viewPort = config.camera.viewPort || 8099;
-    const viewHost = config.camera.viewHost || "0.0.0.0";
-    const viewMjpeg = config.camera.viewMjpeg;
+    const cameraRate = config.rate ?? 10;
+    const viewEnable = config.viewEnable;
+    const viewPort = config.viewPort || 8099;
+    const viewHost = config.viewHost || "0.0.0.0";
+    const viewMjpeg = config.viewMjpeg;
 
     let stopRequested = false;
     let shuttingDown = false;
@@ -215,7 +213,7 @@ async function main() {
             throw new Error("Device does not have a camera");
         }
 
-        await prepareCamera(device, config.camera, cameraRate);
+        await prepareCamera(device, config, cameraRate);
 
         if (viewEnable) {
             viewerServer = new ViewerServer({ mjpeg: viewMjpeg });

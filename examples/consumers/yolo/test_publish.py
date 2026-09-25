@@ -3,15 +3,14 @@
 YOLO Pipeline Tester — publishes a JPEG to Zenoh as if the camera sent it.
 
 Usage:
-    python3 yolo/test_publish.py [image_path] [--loop]
+    python3 examples/consumers/yolo/test_publish.py [image_path] [--loop]
 
     image_path  JPEG/PNG to publish (default: downloads a sample person image)
     --loop      Repeat every second until Ctrl+C
 
 Environment variables:
-    ZENOH_ROUTER    Router endpoint override (default: from yolo.ini)
-    YOLO_PUB_KEY    Key to subscribe for results (default: bwear/yolo/detections)
-    ZENOH_SUB_CAMERA Key to publish frames to (default: bwear/camera/raw)
+    ZENOH_ROUTER    Router endpoint override (default: consumers/peer.json5)
+    TOPIC_PREFIX    Root for message topics (default: bwear)
 """
 
 import os
@@ -25,44 +24,28 @@ from pathlib import Path
 from io import BytesIO
 
 
-def _load_ini(path: Path) -> None:
-    try:
-        in_env = False
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("["):
-                in_env = line.lower() == "[env]"
-                continue
-            if not in_env or not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, _, val = line.partition("=")
-                key = key.strip()
-                val = val.strip()
-                if key and key not in os.environ:
-                    os.environ[key] = val
-    except OSError:
-        pass
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from python_config import load_config
 
-
-_load_ini(Path(__file__).resolve().parent.parent / "config" / "yolo.ini")
+load_config("yolo")
 
 try:
     import zenoh
 except ImportError:
-    print("[yolo-test] zenoh not installed — run: npm run yolo:setup", file=sys.stderr)
+    print("[yolo-test] zenoh not installed — install examples/consumers/yolo/requirements.txt", file=sys.stderr)
     sys.exit(1)
 
 try:
     from PIL import Image
 except ImportError:
-    print("[yolo-test] Pillow not installed — run: npm run yolo:setup", file=sys.stderr)
+    print("[yolo-test] Pillow not installed — install examples/consumers/yolo/requirements.txt", file=sys.stderr)
     sys.exit(1)
 
 ROUTER       = os.environ.get("ZENOH_ROUTER", "")
-PUB_BASE     = os.environ.get("ZENOH_SUB_CAMERA", "bwear/camera/raw").rstrip("/*")
-RESULTS_KEY  = os.environ.get("YOLO_PUB_KEY", "bwear/yolo/detections")
-CONFIG_FILE  = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
+TOPIC_PREFIX = (os.environ.get("TOPIC_PREFIX", "bwear").strip().strip("/") or "bwear")
+PUB_BASE     = f"{TOPIC_PREFIX}/camera/raw"
+RESULTS_KEY  = f"{TOPIC_PREFIX}/yolo/detections"
+CONFIG_FILE  = Path(__file__).resolve().parent.parent / "peer.json5"
 CHUNK_SIZE   = 32 * 1024  # 32 KB per chunk (base64 chars)
 
 

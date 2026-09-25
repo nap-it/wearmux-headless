@@ -7,14 +7,13 @@ YOLO_PUBLISH_ANNOTATED=1), decodes base64 JPEG frames, and serves
 them as an MJPEG stream at http://localhost:<PORT>.
 
 Usage:
-    python3 yolo/view.py
-    npm run yolo:view
+    python3 examples/consumers/yolo/view.py
 
     Then open http://localhost:8080 in a browser.
 
 Environment variables:
     YOLO_VIEW_PORT      HTTP port to serve on (default: 8080)
-    YOLO_ANNOTATED_PUB_KEY  Zenoh key to subscribe to (default: bwear/yolo/annotated)
+    TOPIC_PREFIX      Root for message topics (default: bwear)
     ZENOH_ROUTER        Router endpoint override
 """
 
@@ -29,39 +28,22 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 
-def _load_ini(path: Path) -> None:
-    try:
-        in_env = False
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if line.startswith("["):
-                in_env = line.lower() == "[env]"
-                continue
-            if not in_env or not line or line.startswith("#"):
-                continue
-            if "=" in line:
-                key, _, val = line.partition("=")
-                key = key.strip()
-                val = val.strip()
-                if key and key not in os.environ:
-                    os.environ[key] = val
-    except OSError:
-        pass
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from python_config import load_config
 
-
-_load_ini(Path(__file__).resolve().parent.parent / "config" / "yolo.ini")
+load_config("yolo")
 
 try:
     import zenoh
 except ImportError:
-    print("[yolo-view] zenoh not installed — run: npm run yolo:setup", file=sys.stderr)
+    print("[yolo-view] zenoh not installed — install examples/consumers/yolo/requirements.txt", file=sys.stderr)
     sys.exit(1)
 
 PORT       = int(os.environ.get("YOLO_VIEW_PORT", "8080"))
-SUB_KEY    = os.environ.get("YOLO_ANNOTATED_PUB_KEY", "bwear/yolo/annotated")
+SUB_KEY    = f"{(os.environ.get('TOPIC_PREFIX', 'bwear').strip().strip('/') or 'bwear')}/yolo/annotated"
 ROUTER     = os.environ.get("ZENOH_ROUTER", "")
 
-CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
+CONFIG_FILE = Path(__file__).resolve().parent.parent / "peer.json5"
 
 _BOUNDARY = b"frame"
 _latest_frame: bytes = b""
