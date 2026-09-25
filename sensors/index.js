@@ -9,6 +9,8 @@ const {
 } = require("./lib/motion-sensors");
 const { TapDetectorHandler } = require("./lib/activity-sensors");
 const { DeviceManager } = require("../utils/device-manager");
+const { ActionDispatcher } = require("../utils/action-dispatcher");
+const { selectedTransport } = require("../utils/transport");
 const MLGestureDetector = require("./lib/ml/ml-gesture-detector");
 
 async function getDevice() {
@@ -305,15 +307,25 @@ async function main() {
 
 
 
+    let actionDispatcher = null;
     try {
         await sensorManager.startSensors();
+
+        if (selectedTransport() !== "none") {
+            actionDispatcher = new ActionDispatcher(device);
+            actionDispatcher.on("error", (error) =>
+                console.warn("[Actions]", error?.message || error)
+            );
+            await actionDispatcher.start();
+        }
 
         console.log("Monitoring active! Press Ctrl+C to stop\n");
 
         // Handle Ctrl+C and termination
         const shutdown = async () => {
             console.log("\n[sensors] Stopping...");
-            await sensorManager.stop();
+            try { await actionDispatcher?.stop(); } catch (error) { console.warn("[Actions] stop failed:", error); }
+            try { await sensorManager.stop(); } catch (error) { console.warn("[Sensors] stop failed:", error); }
             try { await device.disconnect(); } catch {}
             process.exit(0);
         };
@@ -321,6 +333,9 @@ async function main() {
         process.on("SIGTERM", shutdown);
     } catch (err) {
         console.error("❌ Failed to start sensor monitoring:", err);
+        try { await actionDispatcher?.stop(); } catch {}
+        try { await sensorManager.stop(); } catch {}
+        try { await device.disconnect(); } catch {}
         process.exit(1);
     }
 }
@@ -330,4 +345,3 @@ if (require.main === module) {
 }
 
 module.exports = main;
-

@@ -1,13 +1,13 @@
-# BSole Connector
+# WearMux Headless
 
-Node.js + Python tooling to connect to BrilliantSole devices, stream sensor data, run AI inference (speech-to-text, object detection), and publish everything to Zenoh.
+Node.js + Python tooling to connect to BrilliantSole devices, stream sensor data, run AI inference (speech-to-text, object detection), and exchange data and device actions over MQTT or Zenoh.
 
 ## Project Structure
 
 The project has been organized with clear separation of concerns:
 
 ```
-bsole-connector/
+wearmux-headless/
 ├── config/
 │   ├── config.ini                  # App configuration (for Docker)
 │   ├── peer.json5                  # Zenoh peer configuration
@@ -18,6 +18,8 @@ bsole-connector/
 ├── display/
 │   ├── index.js                    # Show images on device display
 │   └── lib/display-manager.js      # Display rendering & tiling
+├── actions/
+│   └── index.js                    # Standalone device action receiver
 ├── microphone/
 │   ├── index.js                    # Microphone → RTSP publisher
 │   ├── record-audio.js             # Record audio to WAV file
@@ -63,10 +65,11 @@ bsole-connector/
 │   ├── launcher.js                 # Config parser and script launcher
 │   ├── run-with-config.js          # Env-injecting script runner
 │   ├── mqtt-broker.js              # Embedded MQTT broker helper
+│   ├── send-action.js              # Send an action and wait for its result
 │   ├── wifi-setup.js               # BLE WiFi provisioning tool
 │   ├── zenoh_py_publisher.py       # Python sidecar: UDS→Zenoh publisher
 │   ├── zenoh_py_subscriber.py      # Python subscriber helper
-│   └── zenoh_py_subscriber_bridge.py # Zenoh↔MQTT bridge
+│   └── zenoh_py_subscriber_bridge.py # Zenoh→Node subscriber bridge
 ├── utils/
 │   ├── config.js                   # Env-driven config loader
 │   ├── ini-config.js               # INI file parser
@@ -74,6 +77,7 @@ bsole-connector/
 │   ├── mqtt-manager.js             # MQTT publisher
 │   ├── mqtt-subscriber.js          # MQTT subscriber
 │   ├── transport.js                # Transport abstraction (Zenoh/MQTT)
+│   ├── action-dispatcher.js        # Route incoming actions to device outputs
 │   ├── zenoh-manager.js            # Node→Python sidecar bridge (UDS)
 │   └── zenoh-subscriber.js         # Zenoh subscriber helper
 ├── docker-compose.yml              # Docker for Linux
@@ -118,6 +122,9 @@ npm run clean:recordings
 
 # Sensor monitor (use ENABLED_SENSORS and per-sensor *_RATE envs)
 npm run sensors
+
+# Receive device actions without the sensor monitor
+npm run actions
 
 # Display an image on the device display
 npm run display -- path/to/image.png
@@ -193,14 +200,46 @@ npm run yolo:listen     # read detections in another terminal
 - See [yolo/README.md](yolo/README.md) for full configuration
 
 
-## Zenoh Integration
+## Messaging and reverse actions
 
-Enable Zenoh by setting `ZENOH_ENABLE=1` in your environment. The connector uses a Python sidecar process (`tools/zenoh_py_publisher.py`) to publish data via Unix Domain Sockets (UDS) with MessagePack encoding.
+WearMux uses one messaging transport at a time. Set `MESSAGE_TRANSPORT=mqtt` or `MESSAGE_TRANSPORT=zenoh`; the existing `MQTT_ENABLE=1` and `ZENOH_ENABLE=1` settings still work. `config/zenoh.ini` selects Zenoh by default. MQTT uses `mqtt://127.0.0.1:1883` unless `MQTT_BROKER_URL` is set. No action-specific configuration is required.
+
+The older `ZENOH_MIC_*` and `ZENOH_CAMERA_*` options in the configuration files still control raw audio and image publishing for either transport. Their names are retained so existing setups continue to work.
+
+The normal sensor command (`npm run sensors`) publishes sensor data and listens for actions on the same device connection. If sensors are not running, `npm run actions` starts a standalone action receiver. Run one action receiver per device connection.
+
+Applications publish a JSON object to `bsole/actions`. The action receiver publishes a result to `bsole/actions/result` with the same `id`, an `ok` flag, device identity, and timestamp. `ok` means the device SDK accepted the action call; it does not confirm that the wearer perceived the output. Failed actions also include an `error`. An optional `deviceId` targets one connected device. Supported actions are:
+
+| Action | Fields | Effect |
+| --- | --- | --- |
+| `display.text` | `text` | Show up to 500 characters on a device display |
+| `display.clear` | — | Clear the device display |
+| `display.image` | `data` | Show a base64 PNG or JPEG, up to 1 MiB |
+| `haptic.vibrate` | optional `effect`, `locations` | Trigger a supported SDK vibration effect; defaults to `strongClick100` |
+
+Use the included sender to publish an action and print its result:
+
+```bash
+# Default Zenoh configuration; run `npm run sensors` in another terminal first.
+npm run actions:send -- '{"action":"display.text","text":"Hello"}'
+
+# MQTT, with `npm run mqtt:broker` running in another terminal.
+MESSAGE_TRANSPORT=mqtt npm run sensors
+MESSAGE_TRANSPORT=mqtt npm run actions:send -- '{"action":"haptic.vibrate"}'
+```
+
+With Docker Compose, a broker listening on the host's port 1883 is reachable from the Whisper and YOLO containers as `host.docker.internal`. Pass `MESSAGE_TRANSPORT=mqtt` to select MQTT for all services.
+
+The transport sends modality data from the device to applications. The reverse path is `bsole/actions` → subscriber → action dispatcher → device display or haptics. The result topic lets an application distinguish an accepted command from one the device could not perform.
+
+## Published data topics
+
+MQTT and Zenoh publish the same logical topics and JSON payloads. For Zenoh, the Node.js connector uses a Python sidecar (`tools/zenoh_py_publisher.py`) over a Unix domain socket with MessagePack framing.
 
 ### Published Topics
 
 #### Sensors (`bsole/sensors/`)
-When `ZENOH_ENABLE=1`, all enabled sensors are automatically published:
+When messaging is enabled, all enabled sensors are automatically published:
 - **`bsole/sensors/acceleration`** - 3-axis acceleration data (x, y, z in m/s²)
 - **`bsole/sensors/gyroscope`** - 3-axis gyroscope data (x, y, z in rad/s)
 - **`bsole/sensors/magnetometer`** - 3-axis magnetometer data (x, y, z in μT)
@@ -221,14 +260,14 @@ Each message includes:
 ```
 
 #### Microphone (`bsole/microphone/`)
-When `ZENOH_ENABLE=1` and `ZENOH_MIC_ENABLE` is not `0`:
+When messaging is enabled and `ZENOH_MIC_ENABLE` is not `0`:
 - **`bsole/microphone/status`** - Microphone connection status
 - **`bsole/microphone/level`** - Real-time audio level (RMS, peak, timestamp)
 - **`bsole/microphone/raw/meta`** - Raw audio metadata (when `ZENOH_MIC_RAW_ENABLE=1`)
 - **`bsole/microphone/raw/chunk`** - Raw audio data chunks in base64 (when `ZENOH_MIC_RAW_ENABLE=1`)
 
 #### Camera (`bsole/camera/`)
-When `ZENOH_ENABLE=1` and `ZENOH_CAMERA_ENABLE` is not `0`:
+When messaging is enabled and `ZENOH_CAMERA_ENABLE` is not `0`:
 - **`bsole/camera/image`** - Image metadata (timestamp, filename, dimensions, etc.)
 - **`bsole/camera/raw/meta`** - Raw image metadata (when `ZENOH_CAMERA_RAW_ENABLE=1`)
 - **`bsole/camera/raw/chunk`** - Raw image data chunks in base64 (when `ZENOH_CAMERA_RAW_ENABLE=1`)
@@ -402,7 +441,8 @@ Below is a comprehensive list of environment variables, grouped by function.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ZENOH_ENABLE` | Enable Zenoh publishing | `1` |
+| `MESSAGE_TRANSPORT` | Select `mqtt`, `zenoh`, or `none`; overrides legacy enable flags | _(unset)_ |
+| `ZENOH_ENABLE` | Legacy Zenoh selection | `1` |
 | `ZENOH_KEY_PREFIX` | Sensor topic prefix | `bsole/sensors` |
 | `ZENOH_ATTACH_ALL` | Publish all enabled sensors | `1` |
 | `ZENOH_MIC_ENABLE` | Enable microphone publishing | `1` (if ZENOH_ENABLE=1) |

@@ -17,10 +17,12 @@
     },
     "scripts": {
         "start": "node tools/launcher.js --config ./config/config.ini",
-        "help": "echo 'Available scripts: start, microphone:rtsp, microphone:record, clean:recordings, sensors, display, camera, examples:car, examples:latency, examples:test'",
+        "help": "echo 'Available scripts: start, sensors, actions, actions:send, microphone:rtsp, microphone:record, display, camera, examples:car, examples:latency, examples:test'",
         "microphone:rtsp": "node tools/run-with-config.js microphone/index.js",
         "microphone:record": "node tools/run-with-config.js microphone/record-audio.js",
         "sensors": "node tools/run-with-config.js sensors/index.js",
+        "actions": "node tools/run-with-config.js actions/index.js",
+        "actions:send": "node tools/run-with-config.js tools/send-action.js",
         "sensors:pressure-map": "node tools/run-with-config.js sensors/pressure-map.js",
         "sensors:ml-gesture": "node tools/run-with-config.js sensors/inference/real-time-ml-gesture.js",
         "sensors:tflite": "node tools/run-with-config.js sensors/inference/tflite-runner.js",
