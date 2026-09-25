@@ -23,6 +23,7 @@ services:
 
   # WearMux Headless - Main application
   wearmux-headless:
+    image: ${WEARMUX_IMAGE:-wearmux-headless:local}
     build:
       context: .
     container_name: wearmux-headless

@@ -1,5 +1,8 @@
 {
     "name": "wearmux-headless",
+    "engines": {
+        "node": ">=22.16.0"
+    },
     "dependencies": {
         "@msgpack/msgpack": "^3.0.0",
         "aedes": "^0.51.3",

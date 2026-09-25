@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
+ARG NODE_BASE_IMAGE=code.nap.av.it.pt:5050/external-tools/misc-docker-images/node:22-bookworm-slim
 # Stage 1: Build dependencies
-FROM code.nap.av.it.pt:5050/external-tools/misc-docker-images/node:20-bookworm-slim AS builder
+FROM ${NODE_BASE_IMAGE} AS builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -16,10 +17,12 @@ COPY package.json package-lock.json* ./
 ENV PYTHON=/usr/bin/python3 \
     NPM_CONFIG_UNSAFE_PERM=true \
     npm_config_legacy_peer_deps=true \
+    npm_config_jobs=1 \
+    MAKEFLAGS=-j1 \
     npm_config_sharp_binary_host="https://npmmirror.com/mirrors/sharp"
 
 RUN --mount=type=cache,target=/root/.npm \
-    npm ci --only=production || npm install --only=production --no-audit --no-fund --legacy-peer-deps
+    npm ci --omit=dev --no-audit --no-fund --legacy-peer-deps
 
 # Install only the Python dependencies used by the Zenoh bridge
 COPY requirements.txt ./
@@ -30,7 +33,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && pip install -r requirements.txt
 
 # Stage 2: Runtime image
-FROM code.nap.av.it.pt:5050/external-tools/misc-docker-images/node:20-bookworm-slim AS runtime
+FROM ${NODE_BASE_IMAGE} AS runtime
 
 # Install runtime dependencies only (no build tools)
 RUN apt-get update && apt-get install -y --no-install-recommends \

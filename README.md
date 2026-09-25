@@ -83,12 +83,12 @@ wearmux-headless/
 ## Prerequisites
 
 ### Linux
-- Node.js 18+
+- Node.js 22.16+
 - Python 3.9+ (for Zenoh only)
 - Bluetooth adapter with BlueZ
 
 ### Windows
-- Node.js 18+
+- Node.js 22.16+
 - Windows 10 build 15063+ (required for WinRT BLE API)
 - **Visual Studio Build Tools** with "Desktop development with C++" workload and Windows 10 SDK — required to compile the native BLE addon. Install via winget:
   ```
@@ -321,13 +321,32 @@ This project provides a `docker-compose.yml` for running WearMux Headless and it
 
 2. **Build and start the container:**
   ```bash
-  docker-compose up --build
+  docker compose up --build
   ```
 
 3. **Stop the container:**
   ```bash
-  docker-compose down
+  docker compose down
   ```
+
+### Build on another machine
+
+On a Raspberry Pi, the native Node.js dependencies can make the image build demanding. If the Pi loses power during a build, build the ARM64 image on another machine and publish it to a registry you can access. An ARM64 builder is preferable; an x86 builder can use Docker Buildx with ARM64 emulation.
+
+```bash
+docker buildx build --platform linux/arm64 \
+  -t registry.example.com/wearmux-headless:arm64 --push .
+```
+
+On the Pi, set the image name to the same registry tag and start Compose without building:
+
+```bash
+export WEARMUX_IMAGE=registry.example.com/wearmux-headless:arm64
+docker compose pull wearmux-headless
+docker compose up --no-build
+```
+
+The Compose file also supports local builds. The Dockerfile uses the CodeNap `node:22-bookworm-slim` image for both build and runtime stages, matching the Node.js 22.16+ requirement declared by a locked dependency. To use another compatible base image, pass `docker build --build-arg NODE_BASE_IMAGE=...`.
 
 ### Configuration
 
