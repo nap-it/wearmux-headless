@@ -15,6 +15,7 @@ class DeviceSession {
         this.info = { id: device.bluetoothId || device.id || null, name: device.name || null };
         this.capabilities = { sensors: [], camera: false, microphone: false, display: false, haptics: false };
         this.actions = new ActionDispatcher(device, { publisher });
+        this.pendingAction = Promise.resolve();
         this.sensorHandlers = new Map();
         this.sensorPublishBusy = new Set();
         this.running = false;
@@ -83,6 +84,11 @@ class DeviceSession {
         const enabled = requested?.length
             ? this.capabilities.sensors.filter((sensor) => requested.includes(sensor))
             : this.capabilities.sensors;
+        if (process.env.VRU_INTERACTION_ENABLED === "1" &&
+            this.capabilities.sensors.includes("orientation") &&
+            !enabled.includes("orientation")) {
+            enabled.push("orientation");
+        }
         if (!enabled.length) return;
         this.sensors = new SensorManager(this.device, {
             enabledSensors: [...enabled], side: process.env.DEVICE_SIDE || null,
@@ -108,6 +114,13 @@ class DeviceSession {
             this.sensorHandlers.set(sensor, handler);
         }
         await this.sensors.startSensors();
+    }
+
+    dispatchAction(command) {
+        this.pendingAction = this.pendingAction
+            .catch(() => {})
+            .then(() => this.actions.dispatch(command));
+        return this.pendingAction;
     }
 
     async resume() {

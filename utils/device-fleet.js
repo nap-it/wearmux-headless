@@ -3,6 +3,7 @@ const { DeviceSession } = require("./device-session");
 const { ACTION_TOPIC, RESULT_TOPIC } = require("./action-dispatcher");
 const { createPublisher, createSubscriber } = require("./transport");
 const { topic } = require("./topics");
+const { VruStopRequestInteraction } = require("../interactions/vru-stop-request");
 
 // Own one session per discovered wearable while sharing a single transport connection.
 const normalizeId = (value) => String(value || "").toLowerCase().replaceAll(":", "");
@@ -14,6 +15,12 @@ class DeviceFleet {
         this.connectQueue = Promise.resolve();
         this.publisher = createPublisher({ keyPrefix: topic() });
         this.subscriber = createSubscriber({ topicFilter: ACTION_TOPIC });
+        this.vruInteraction = process.env.VRU_INTERACTION_ENABLED === "1"
+            ? new VruStopRequestInteraction({
+                publisher: this.publisher,
+                getSessions: () => this.sessions.values(),
+            })
+            : null;
         this.actions = new Set();
         this.stopping = false;
         this.cameraCount = 0;
@@ -48,6 +55,7 @@ class DeviceFleet {
             await this.subscriber.start();
             console.log(`[Actions] Listening on ${ACTION_TOPIC}`);
         }
+        await this.vruInteraction?.start();
         this.sdk = await import("brilliantsole/node");
         this.sdk.DeviceManager.AddEventListener("deviceConnected", this.onConnected);
         for (const device of this.sdk.DeviceManager.ConnectedDevices || []) {
@@ -173,9 +181,7 @@ class DeviceFleet {
                 session = eligible[0];
             }
             result.device = session.info;
-            session.pendingAction = (session.pendingAction || Promise.resolve())
-                .catch(() => {}).then(() => session.actions.dispatch(command));
-            await session.pendingAction;
+            await session.dispatchAction(command);
             result.ok = true;
         } catch (error) {
             result.ok = false;
@@ -202,6 +208,7 @@ class DeviceFleet {
             this.subscriber.off("message", this.onAction);
             await this.subscriber.stop();
         }
+        await this.vruInteraction?.stop();
         await Promise.all([...this.actions]);
         for (const session of this.sessions.values()) {
             try { await session.stop(); }

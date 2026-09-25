@@ -18,6 +18,11 @@ wearmux-headless/
 ├── display/
 │   ├── index.js                    # Show images on device display
 │   └── lib/display-manager.js      # Display rendering & tiling
+├── interactions/
+│   └── vru-stop-request/           # Prompt display and nod/shake response adapter
+│       ├── index.js                 # Prompt state machine and MQTT response
+│       ├── message-display.js       # Display actions on a device session
+│       └── nod-detector.js          # Orientation-window nod/shake detector
 ├── actions/
 │   └── index.js                    # Standalone device action receiver
 ├── microphone/
@@ -173,6 +178,62 @@ For off-device inference, see the [consumer guide](examples/consumers/README.md)
 - Automatic image preprocessing and dithering
 - Performance timing diagnostics
 - Supports PNG and JPEG formats
+
+## VRU stop-request interaction
+
+The VRU stop-request handler owns DENM matching and response-event generation.
+WearMux displays its question, listens to the selected device session's orientation
+sensor, and returns a prompt-bound yes/no answer. A nod maps to yes (continue
+stopping); a shake maps to no (the handler publishes its existing response event).
+
+```mermaid
+sequenceDiagram
+    participant H as Python VRU handler
+    participant B as MQTT broker
+    participant I as WearMux VRU interaction
+    participant D as Message Display
+    participant N as Nod Detector
+    participant S as WearMux DeviceSession
+    participant E as EventResponse
+    participant T as Notification service
+
+    H->>B: Publish bwear/vru/prompt with prompt_id
+    B-->>I: Deliver prompt
+    I->>D: Show question
+    D->>S: display.text / display.clear
+    I->>N: Start detection for prompt_id
+    S-->>N: orientation sensor events
+    N-->>I: nod or shake
+    I->>B: Publish bwear/vru/answer with same prompt_id
+    B-->>H: Deliver normalized answer
+    H->>E: Respond to the original event
+    E->>B: Publish existing DENM response event on denm/events/vru
+    B-->>T: Deliver response event
+```
+
+Enable the adapter in the sessions runtime with
+`VRU_INTERACTION_ENABLED=1`, and run WearMux with
+`MESSAGE_TRANSPORT=mqtt` and the same broker endpoint as the Python handler.
+For a handler and WearMux runtime on the same host:
+
+```bash
+VRU_INTERACTION_ENABLED=1 MESSAGE_TRANSPORT=mqtt MQTT_BROKER_URL=mqtt://127.0.0.1:1883 npm run sessions
+```
+
+The handler's `config.ini` uses `bwear/vru/prompt` and
+`bwear/vru/answer`, a 15 second answer timeout, and manual-answer mode. Set
+`VRU_DEVICE_ID` when more than one connected display/orientation device could
+answer. An explicit `ENABLED_SENSORS` list is augmented with orientation while
+the adapter is enabled. If `TOPIC_PREFIX` changes from `bwear`, update both
+handler topics to use that same root.
+
+The detector uses a configurable orientation-window heuristic because this
+checkout has no Edge Impulse nod/shake model. Defaults can be tuned with
+`VRU_GESTURE_WINDOW_MS`, `VRU_NOD_THRESHOLD_DEG`,
+`VRU_SHAKE_THRESHOLD_DEG`, and `VRU_GESTURE_DEADBAND_DEG`. Timeout sends no
+answer, so the Python handler applies its existing timeout policy. A wearable
+handles one prompt at a time; prompts received while it is busy are ignored and
+expire through the handler's normal timeout path.
 
 ### 🧠 Optional consumer examples
 
