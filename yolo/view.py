@@ -2,7 +2,7 @@
 """
 YOLO Viewer — live MJPEG browser viewer for annotated detection frames.
 
-Subscribes to bsole/yolo/annotated (published by runner.py when
+Subscribes to bwear/yolo/annotated (published by runner.py when
 YOLO_PUBLISH_ANNOTATED=1), decodes base64 JPEG frames, and serves
 them as an MJPEG stream at http://localhost:<PORT>.
 
@@ -14,7 +14,7 @@ Usage:
 
 Environment variables:
     YOLO_VIEW_PORT      HTTP port to serve on (default: 8080)
-    YOLO_ANNOTATED_PUB_KEY  Zenoh key to subscribe to (default: bsole/yolo/annotated)
+    YOLO_ANNOTATED_PUB_KEY  Zenoh key to subscribe to (default: bwear/yolo/annotated)
     ZENOH_ROUTER        Router endpoint override
 """
 
@@ -58,7 +58,7 @@ except ImportError:
     sys.exit(1)
 
 PORT       = int(os.environ.get("YOLO_VIEW_PORT", "8080"))
-SUB_KEY    = os.environ.get("YOLO_ANNOTATED_PUB_KEY", "bsole/yolo/annotated")
+SUB_KEY    = os.environ.get("YOLO_ANNOTATED_PUB_KEY", "bwear/yolo/annotated")
 ROUTER     = os.environ.get("ZENOH_ROUTER", "")
 
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "peer.json5"

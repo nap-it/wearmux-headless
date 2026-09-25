@@ -165,7 +165,7 @@ describe("RemoteInferencePipeline.handleInferenceResult", () => {
         await pipeline.handleInferenceResult(result);
 
         expect(pipeline.publisher.publish).toHaveBeenCalledWith(
-            "bsole/inference/gesture",
+            "bwear/inference/gesture",
             expect.objectContaining({ gesture: "nod", confidence: 0.85 })
         );
     });

@@ -1,15 +1,15 @@
 # yolo — object detection consumer
 
-Real-time object detection for the bsole-connector pipeline.
+Real-time object detection for the wearmux-headless pipeline.
 
 Subscribes to the raw camera stream published by `camera/index.js`, reassembles
 JPEG frames, runs [YOLOv8](https://docs.ultralytics.com/) inference via Ultralytics,
 and publishes detection results back onto the transport layer.
 
 ```
-camera/index.js  ──(bsole/camera/raw/**)──►  yolo/runner.py
+camera/index.js  ──(bwear/camera/raw/**)──►  yolo/runner.py
                                                     │
-                                           bsole/yolo/detections
+                                           bwear/yolo/detections
                                                     │
                                              Python subscribers
                                              glasses-controller
@@ -20,7 +20,7 @@ camera/index.js  ──(bsole/camera/raw/**)──►  yolo/runner.py
 
 ## Prerequisites
 
-1. **Install Python dependencies** (from `bsole-connector/`):
+1. **Install Python dependencies** (from `wearmux-headless/`):
    ```bash
    npm run yolo:setup
    ```
@@ -97,10 +97,10 @@ Common class IDs: `0`=person, `1`=bicycle, `2`=car, `15`=cat, `16`=dog.
 | `MQTT_BROKER` | `localhost` | MQTT broker host |
 | `MQTT_PORT` | `1883` | MQTT broker port |
 | `MQTT_PUB_TOPIC` | _(same as `YOLO_PUB_KEY`)_ | Topic to publish detections to |
-| `MQTT_SUB_CAMERA` | `bsole/camera/raw/#` | Topic filter for camera subscription |
-| `ZENOH_SUB_CAMERA` | `bsole/camera/raw/**` | Zenoh key expression to subscribe to |
+| `MQTT_SUB_CAMERA` | `bwear/camera/raw/#` | Topic filter for camera subscription |
+| `ZENOH_SUB_CAMERA` | `bwear/camera/raw/**` | Zenoh key expression to subscribe to |
 | `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Router endpoint |
-| `YOLO_PUB_KEY` | `bsole/yolo/detections` | Zenoh key for detection output |
+| `YOLO_PUB_KEY` | `bwear/yolo/detections` | Zenoh key for detection output |
 
 ### CPU performance guide
 
@@ -116,7 +116,7 @@ only with GPU (`YOLO_DEVICE=cuda`).
 
 ---
 
-## Detection payload (`bsole/yolo/detections`)
+## Detection payload (`bwear/yolo/detections`)
 
 ```json
 {

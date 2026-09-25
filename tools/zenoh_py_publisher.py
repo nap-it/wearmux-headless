@@ -3,7 +3,7 @@ import os, sys, json, signal, socket, atexit, tempfile
 import zenoh
 import msgpack
 
-KEY_PREFIX = os.environ.get("ZENOH_KEY_PREFIX", "bsole/sensors")
+KEY_PREFIX = os.environ.get("ZENOH_KEY_PREFIX", "bwear/sensors")
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "peer.json5")
 if not os.path.exists(CONFIG_FILE):
     print(f"[PythonSidecar] zenoh peer config not found: {CONFIG_FILE}", file=sys.stderr)
@@ -42,7 +42,7 @@ def shutdown(*_):
 signal.signal(signal.SIGTERM, shutdown)
 signal.signal(signal.SIGINT, shutdown)
 
-UDS_PATH = os.environ.get("ZENOH_UDS_PATH", os.path.join(tempfile.gettempdir(), "bsole-zenoh.sock"))
+UDS_PATH = os.environ.get("ZENOH_UDS_PATH", os.path.join(tempfile.gettempdir(), "bwear-zenoh.sock"))
 
 def handle_msg(obj):
     key = str(obj.get("key") or KEY_PREFIX)

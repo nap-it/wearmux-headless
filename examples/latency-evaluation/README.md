@@ -1,6 +1,6 @@
 # Latency Evaluation
 
-Camera capture latency benchmark for a BrilliantSole camera device. Measures the time from issuing a capture command to receiving the JPEG image over BLE.
+Camera capture latency benchmark for a Brilliant Wear camera device. Measures the time from issuing a capture command to receiving the JPEG image over BLE.
 
 ## What it does
 

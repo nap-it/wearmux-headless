@@ -24,8 +24,8 @@ const STATE = {
 };
 
 const CAR_CONFIG = {
-  UDS_PUB_PATH: `/tmp/bsole-zenoh-car-pub-${process.pid}.sock`,
-  UDS_SUB_PATH: `/tmp/bsole-zenoh-car-sub-${process.pid}.sock`,
+  UDS_PUB_PATH: `/tmp/bwear-zenoh-car-pub-${process.pid}.sock`,
+  UDS_SUB_PATH: `/tmp/bwear-zenoh-car-sub-${process.pid}.sock`,
   MIN_APPROACH_DELAY: 5000,
   MAX_APPROACH_DELAY: 15000,
   RESPONSE_TIMEOUT: 15000,
@@ -36,8 +36,8 @@ const CAR_CONFIG = {
 };
 
 const GLASSES_CONFIG = {
-  UDS_PUB_PATH: `/tmp/bsole-zenoh-glasses-pub-${process.pid}.sock`,
-  UDS_SUB_PATH: `/tmp/bsole-zenoh-glasses-sub-${process.pid}.sock`,
+  UDS_PUB_PATH: `/tmp/bwear-zenoh-glasses-pub-${process.pid}.sock`,
+  UDS_SUB_PATH: `/tmp/bwear-zenoh-glasses-sub-${process.pid}.sock`,
 
   // Display colors
   COLOR_ATTENTION: "#FFFF00",

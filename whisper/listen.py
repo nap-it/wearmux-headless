@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Whisper Listener — prints transcripts from bsole/whisper/transcript.
+Whisper Listener — prints transcripts from bwear/whisper/transcript.
 
 Usage:
     python3 whisper/listen.py
     npm run whisper:listen
 
 Environment variables:
-    WHISPER_PUB_KEY         Key to subscribe to (default: bsole/whisper/transcript)
+    WHISPER_PUB_KEY         Key to subscribe to (default: bwear/whisper/transcript)
     ZENOH_ROUTER            Router endpoint override (e.g. tcp/192.168.1.10:7447)
     WHISPER_LISTEN_VERBOSE  Set to 1 to print full JSON payload instead of text only
 """
@@ -48,7 +48,7 @@ except ImportError:
     print("[whisper-listen] zenoh not installed — run: npm run whisper:setup", file=sys.stderr)
     sys.exit(1)
 
-SUB_KEY = os.environ.get("WHISPER_PUB_KEY", "bsole/whisper/transcript")
+SUB_KEY = os.environ.get("WHISPER_PUB_KEY", "bwear/whisper/transcript")
 ROUTER  = os.environ.get("ZENOH_ROUTER", "")
 VERBOSE = os.environ.get("WHISPER_LISTEN_VERBOSE", "0") == "1"
 

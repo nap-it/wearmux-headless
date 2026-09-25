@@ -23,12 +23,12 @@ async function main() {
     }
     command.id ||= randomUUID();
     const publisher = createPublisher({
-        keyPrefix: "bsole/actions",
-        udsPath: path.join(os.tmpdir(), `bsole-action-send-${process.pid}.sock`),
+        keyPrefix: "bwear/actions",
+        udsPath: path.join(os.tmpdir(), `bwear-action-send-${process.pid}.sock`),
     });
     const subscriber = createSubscriber({
         topicFilter: RESULT_TOPIC,
-        udsPath: path.join(os.tmpdir(), `bsole-action-result-${process.pid}.sock`),
+        udsPath: path.join(os.tmpdir(), `bwear-action-result-${process.pid}.sock`),
     });
     publisher.on("error", (error) => console.warn("[Actions]", error?.message || error));
     subscriber.on("error", (error) => console.warn("[Actions]", error?.message || error));

@@ -69,8 +69,8 @@ async function main() {
     const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_CAMERA_ENABLE !== "0";
     const publisher = publisherEnabled
         ? createPublisher({
-            keyPrefix: process.env.ZENOH_CAMERA_KEY_PREFIX || "bsole/camera",
-            udsPath: process.env.ZENOH_CAMERA_UDS_PATH || `/tmp/bsole-zenoh-camera-${process.pid}.sock`,
+            keyPrefix: process.env.ZENOH_CAMERA_KEY_PREFIX || "bwear/camera",
+            udsPath: process.env.ZENOH_CAMERA_UDS_PATH || `/tmp/bwear-zenoh-camera-${process.pid}.sock`,
         })
         : null;
     const rawPublishEnabled = Boolean(publisher) && process.env.ZENOH_CAMERA_RAW_ENABLE === "1";
@@ -306,7 +306,7 @@ async function main() {
             const bestImage = pendingImages[0];
             
             const ts = new Date().toISOString().replace(/[:.]/g, "-");
-            const fname = `bsole-${ts}-${(counter++).toString().padStart(4, "0")}.${imgFmt}`;
+            const fname = `bwear-${ts}-${(counter++).toString().padStart(4, "0")}.${imgFmt}`;
             
             if (outDir) {
                 const file = path.join(outDir, fname);
@@ -448,7 +448,7 @@ async function main() {
                     }
 
                     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-                    const fname = `bsole-${ts}-${(counter++).toString().padStart(4, "0")}.${imgFmt}`;
+                    const fname = `bwear-${ts}-${(counter++).toString().padStart(4, "0")}.${imgFmt}`;
                     
                     if (outDir) {
                         const file = path.join(outDir, fname);

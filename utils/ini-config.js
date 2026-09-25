@@ -50,8 +50,8 @@ function resolveConfigPath(explicitPath) {
         return path.resolve(explicitPath);
     }
 
-    if (process.env.BSOLE_CONFIG_PATH) {
-        return path.resolve(process.env.BSOLE_CONFIG_PATH);
+    if (process.env.WEARMUX_CONFIG_PATH) {
+        return path.resolve(process.env.WEARMUX_CONFIG_PATH);
     }
 
     const dockerDir = "/config";
@@ -113,7 +113,7 @@ function loadConfigFile(explicitPath, options = {}) {
             }
             process.env[key] = value;
         }
-        process.env.BSOLE_CONFIG_PATH = configPath;
+        process.env.WEARMUX_CONFIG_PATH = configPath;
     }
 
     return {

@@ -1,6 +1,6 @@
-# Microphone Utilities for BrilliantSole Frame
+# Microphone Utilities for Brilliant Wear Frame
 
-This directory contains scripts and utilities for working with the BrilliantSole Frame microphone, including real-time streaming, recording, and voice activity detection (VAD).
+This directory contains scripts and utilities for working with the Brilliant Wear Frame microphone, including real-time streaming, recording, and voice activity detection (VAD).
 
 ## Contents
 

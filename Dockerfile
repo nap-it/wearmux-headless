@@ -58,11 +58,11 @@ ENV VIRTUAL_ENV=/opt/venv \
     DEBUG=0
 
 # Create non-root user for security
-RUN groupadd -r bsole && useradd -r -g bsole bsole \
-    && chown -R bsole:bsole /app
+RUN groupadd -r wearmux && useradd -r -g wearmux wearmux \
+    && chown -R wearmux:wearmux /app
 
 # Use non-root user (comment out if BLE access requires root)
-# USER bsole
+# USER wearmux
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

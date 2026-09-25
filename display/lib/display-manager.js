@@ -1,4 +1,4 @@
-// Display image processing utilities for BrilliantSole devices (Node.js)
+// Display image processing utilities for Brilliant Wear devices (Node.js)
 const sharp = require("sharp");
 const RgbQuant = require("rgbquant");
 const { Config } = require("../../utils/config");

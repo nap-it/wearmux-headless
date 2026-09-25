@@ -10,8 +10,8 @@ Usage:
 
 Environment variables:
     ZENOH_ROUTER    Router endpoint override (default: from yolo.ini)
-    YOLO_PUB_KEY    Key to subscribe for results (default: bsole/yolo/detections)
-    ZENOH_SUB_CAMERA Key to publish frames to (default: bsole/camera/raw)
+    YOLO_PUB_KEY    Key to subscribe for results (default: bwear/yolo/detections)
+    ZENOH_SUB_CAMERA Key to publish frames to (default: bwear/camera/raw)
 """
 
 import os
@@ -60,8 +60,8 @@ except ImportError:
     sys.exit(1)
 
 ROUTER       = os.environ.get("ZENOH_ROUTER", "")
-PUB_BASE     = os.environ.get("ZENOH_SUB_CAMERA", "bsole/camera/raw").rstrip("/*")
-RESULTS_KEY  = os.environ.get("YOLO_PUB_KEY", "bsole/yolo/detections")
+PUB_BASE     = os.environ.get("ZENOH_SUB_CAMERA", "bwear/camera/raw").rstrip("/*")
+RESULTS_KEY  = os.environ.get("YOLO_PUB_KEY", "bwear/yolo/detections")
 CONFIG_FILE  = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
 CHUNK_SIZE   = 32 * 1024  # 32 KB per chunk (base64 chars)
 

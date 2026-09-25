@@ -81,7 +81,7 @@ class ViewerServer {
     pushFrame(image) {
         if (!this.options.mjpeg || !image) return;
         
-        const boundary = "--bsoleboundary";
+        const boundary = "--bwearboundary";
         const header = `${boundary}\r\nContent-Type: ${image.mime}\r\nContent-Length: ${image.buffer.length}\r\n\r\n`;
         
         for (const client of this.clients) {
@@ -125,7 +125,7 @@ class ViewerServer {
 
         // MJPEG stream endpoint
         if (this.options.mjpeg && req.url === "/stream.mjpg") {
-            const boundary = "--bsoleboundary";
+            const boundary = "--bwearboundary";
             res.writeHead(200, {
                 "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
                 "Pragma": "no-cache",

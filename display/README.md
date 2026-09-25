@@ -1,9 +1,9 @@
 # Display Module
 
-Utilities for displaying images on BrilliantSole devices from a Node.js environment.
+Utilities for displaying images on Brilliant Wear devices from a Node.js environment.
 
 This module provides a simple API to:
-- Connect to a BrilliantSole device
+- Connect to a Brilliant Wear device
 - Convert images (PNG/JPEG) into the device's expected pixel format
 - Upload frames or slideshows to the device display
 
@@ -64,7 +64,7 @@ DISPLAY_INPUT_HEIGHT=120 DISPLAY_OUTPUT_HEIGHT=240 npm run display -- ./sample.p
     - `tileMaxPixels`: internal tile size in pixels (default 220; pass via code option)
 
 - `connect()`
-  - Connects to a BrilliantSole device and initializes display settings.
+  - Connects to a Brilliant Wear device and initializes display settings.
 
 - `showImageFile(filePath, opts)`
   - Loads, resizes, and displays an image on the device.

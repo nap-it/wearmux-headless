@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# ! THIS SUBSCRIBER IS FOR DEBUG PURPOSES, NOT FOR TRASNFERING OUTSIDE INFORMATION TO THE BSOLE CONNECTOR
+# Debug subscriber for inspecting WearMux Headless messages.
 import os, sys, json, time
 import zenoh
 
@@ -8,7 +8,7 @@ def dec(v):
         return v.decode("utf-8", "replace")
     return str(v)
 
-KEYEXPR = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ZENOH_SUB", "bsole/sensors/**")
+KEYEXPR = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("ZENOH_SUB", "bwear/sensors/**")
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "peer.json5")
 if not os.path.exists(CONFIG_FILE):
     print(f"[PythonSidecar] zenoh peer config not found: {CONFIG_FILE}", file=sys.stderr)

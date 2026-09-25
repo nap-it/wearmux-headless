@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-YOLO Runner — object detection consumer for the bsole-connector pipeline.
+YOLO Runner — object detection consumer for the wearmux-headless pipeline.
 
-Subscribes to bsole/camera/raw/** (chunked JPEG frames published by
+Subscribes to bwear/camera/raw/** (chunked JPEG frames published by
 camera/index.js when ZENOH_CAMERA_RAW_ENABLE=1), reassembles frames,
-runs YOLOv8 inference, and publishes detection results to bsole/yolo/detections.
+runs YOLOv8 inference, and publishes detection results to bwear/yolo/detections.
 
 Usage:
     python3 yolo/runner.py
@@ -16,8 +16,8 @@ Environment variables:
     YOLO_IOU            IOU threshold for NMS 0–1 (default: 0.45)
     YOLO_INPUT_SIZE     Inference image size in pixels (default: 320)
     YOLO_CLASSES        Comma-separated class IDs to filter, empty = all (default: empty)
-    YOLO_PUB_KEY        Zenoh key to publish detections to (default: bsole/yolo/detections)
-    ZENOH_SUB_CAMERA    Key expression to subscribe to (default: bsole/camera/raw/**)
+    YOLO_PUB_KEY        Zenoh key to publish detections to (default: bwear/yolo/detections)
+    ZENOH_SUB_CAMERA    Key expression to subscribe to (default: bwear/camera/raw/**)
     ZENOH_ROUTER        Zenoh router endpoint override (e.g. tcp/192.168.1.10:7447)
     MESSAGE_TRANSPORT   Select mqtt or zenoh (overrides MQTT_ENABLE)
     MQTT_ENABLE         Legacy MQTT selector (default: 0)
@@ -25,7 +25,7 @@ Environment variables:
     MQTT_BROKER         MQTT broker host (default: localhost)
     MQTT_PORT           MQTT broker port (default: 1883)
     MQTT_PUB_TOPIC      Topic to publish detections to (default: same as YOLO_PUB_KEY)
-    MQTT_SUB_CAMERA     Topic filter to subscribe for camera frames (default: bsole/camera/raw/#)
+    MQTT_SUB_CAMERA     Topic filter to subscribe for camera frames (default: bwear/camera/raw/#)
     DEBUG               Set to 1 for verbose frame-level logging
 """
 
@@ -78,10 +78,10 @@ IOU          = float(os.environ.get("YOLO_IOU", "0.45"))
 INPUT_SIZE   = int(os.environ.get("YOLO_INPUT_SIZE", "320"))
 _classes_raw = os.environ.get("YOLO_CLASSES", "").strip()
 CLASSES      = [int(c) for c in _classes_raw.split(",") if c.strip()] if _classes_raw else None
-PUB_KEY           = os.environ.get("YOLO_PUB_KEY", "bsole/yolo/detections")
-ANNOTATED_PUB_KEY = os.environ.get("YOLO_ANNOTATED_PUB_KEY", "bsole/yolo/annotated")
+PUB_KEY           = os.environ.get("YOLO_PUB_KEY", "bwear/yolo/detections")
+ANNOTATED_PUB_KEY = os.environ.get("YOLO_ANNOTATED_PUB_KEY", "bwear/yolo/annotated")
 PUBLISH_ANNOTATED = os.environ.get("YOLO_PUBLISH_ANNOTATED", "0") == "1"
-SUB_EXPR     = os.environ.get("ZENOH_SUB_CAMERA", "bsole/camera/raw/**")
+SUB_EXPR     = os.environ.get("ZENOH_SUB_CAMERA", "bwear/camera/raw/**")
 ROUTER       = os.environ.get("ZENOH_ROUTER", "")
 MESSAGE_TRANSPORT = os.environ.get("MESSAGE_TRANSPORT", "").strip().lower()
 if MESSAGE_TRANSPORT not in ("", "mqtt", "zenoh", "none"):
@@ -93,7 +93,7 @@ if _mqtt_url.scheme not in ("", "mqtt", "mqtts"):
 MQTT_BROKER  = _mqtt_url.hostname or os.environ.get("MQTT_BROKER", "localhost")
 MQTT_PORT    = _mqtt_url.port or int(os.environ.get("MQTT_PORT", "8883" if _mqtt_url.scheme == "mqtts" else "1883"))
 MQTT_PUB_TOPIC = os.environ.get("MQTT_PUB_TOPIC", PUB_KEY)
-MQTT_SUB_TOPIC = os.environ.get("MQTT_SUB_CAMERA", "bsole/camera/raw/#")
+MQTT_SUB_TOPIC = os.environ.get("MQTT_SUB_CAMERA", "bwear/camera/raw/#")
 DEBUG        = os.environ.get("DEBUG", "0") == "1"
 
 CONFIG_FILE = Path(__file__).resolve().parent.parent / "config" / "peer.json5"
@@ -129,8 +129,8 @@ class FrameAssembler:
     """Reassembles multi-chunk JPEG frames from meta + chunk messages.
 
     camera/index.js splits each JPEG into N base64 chunks and publishes them as:
-        bsole/camera/raw/meta  — {frameId, totalChunks, encoding, mime, bytes, ...}
-        bsole/camera/raw/chunk — {frameId, idx, data (base64 slice)}
+        bwear/camera/raw/meta  — {frameId, totalChunks, encoding, mime, bytes, ...}
+        bwear/camera/raw/chunk — {frameId, idx, data (base64 slice)}
 
     Meta and chunks may arrive in any order; both are buffered by frameId.
     Incomplete frames older than _FRAME_TIMEOUT_S are evicted.

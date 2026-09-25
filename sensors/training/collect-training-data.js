@@ -3,7 +3,7 @@
 /**
  * Edge Impulse Training Data Collector
  * 
- * This script collects sensor data from BrilliantSole Frame for ML training.
+ * This script collects sensor data from Brilliant Wear Frame for ML training.
  * 
  * Usage:
  *   node collect-training-data.js --label nod --duration 60
@@ -199,8 +199,8 @@ class TrainingDataCollector {
             },
             signature: "0",
             payload: {
-                device_name: "BrilliantSole Frame",
-                device_type: "BRILLIANTSOLE_FRAME",
+                device_name: "Brilliant Wear Frame",
+                device_type: "BRILLIANT_WEAR_FRAME",
                 interval_ms: 1000 / CONFIG.sampleRate,
                 sensors: this._getSensorSchema(),
                 values: timeSeriesData.map((d) => d.features),
@@ -244,11 +244,11 @@ async function main() {
     
     console.log("╔═══════════════════════════════════════════════════════╗");
     console.log("║   Edge Impulse Training Data Collector               ║");
-    console.log("║   BrilliantSole Frame Gesture Recognition            ║");
+    console.log("║   Brilliant Wear Frame Gesture Recognition            ║");
     console.log("╚═══════════════════════════════════════════════════════╝");
     
     // Connect to device
-    console.log("\n🔌 Connecting to BrilliantSole Frame...");
+    console.log("\n🔌 Connecting to Brilliant Wear Frame...");
     const deviceManager = new DeviceManager();
     const device = await deviceManager.connectToDevice();
     console.log("✅ Connected!\n");
@@ -291,4 +291,3 @@ main().catch((error) => {
     console.error("\n❌ Error:", error.message);
     process.exit(1);
 });
-

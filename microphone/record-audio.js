@@ -3,7 +3,7 @@
 /**
  * Audio Recording Script
  * 
- * Records audio from BrilliantSole Frame microphone and saves to WAV file.
+ * Records audio from Brilliant Wear Frame microphone and saves to WAV file.
  * 
  * Usage:
  *   node record-audio.js --duration 10 --sampleRate 16000 --bitDepth 16
@@ -52,7 +52,7 @@ function parseArgs() {
 async function main() {
   const args = parseArgs();
 
-  console.log('[INFO] BrilliantSole Frame - Audio Recorder\n');
+  console.log('[INFO] Brilliant Wear Frame - Audio Recorder\n');
   console.log(`[INFO] Duration: ${args.duration}s`);
   console.log(`[INFO] Sample Rate: ${args.sampleRate}Hz`);
   console.log(`[INFO] Bit Depth: ${args.bitDepth}-bit\n`);

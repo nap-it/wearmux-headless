@@ -11,7 +11,7 @@ const path = require("path");
 class ZenohManager extends EventEmitter {
     constructor(options = {}) {
         super();
-        this.keyPrefix = options.keyPrefix || "bsole/sensors";
+        this.keyPrefix = options.keyPrefix || "bwear/sensors";
         this.prettyJson = true;
         this.locator = "tcp/127.0.0.1:7447";
         this.session = null;
@@ -25,7 +25,7 @@ class ZenohManager extends EventEmitter {
         this._childReady = false;
         this._stopping = false;
         // UDS transport (MessagePack) only
-        this._udsPath = options.udsPath || process.env.ZENOH_UDS_PATH || require("path").join(require("os").tmpdir(), "bsole-zenoh.sock");
+        this._udsPath = options.udsPath || process.env.ZENOH_UDS_PATH || require("path").join(require("os").tmpdir(), "bwear-zenoh.sock");
         this._udsSocket = null;
     }
 

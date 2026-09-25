@@ -1,15 +1,15 @@
 # whisper — speech-to-text consumer
 
-Real-time transcription for the bsole-connector pipeline.
+Real-time transcription for the wearmux-headless pipeline.
 
 Subscribes to the raw audio stream published by `microphone/index.js`, accumulates
 fixed-size windows, runs [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 inference, and publishes transcripts back onto the transport layer.
 
 ```
-microphone/index.js  ──(bsole/microphone/raw/**)──►  whisper/runner.py
+microphone/index.js  ──(bwear/microphone/raw/**)──►  whisper/runner.py
                                                             │
-                                                   bsole/whisper/transcript
+                                                   bwear/whisper/transcript
                                                             │
                                                      Python subscribers
                                                      glasses-controller
@@ -20,7 +20,7 @@ microphone/index.js  ──(bsole/microphone/raw/**)──►  whisper/runner.py
 
 ## Prerequisites
 
-1. **Install Python dependencies** (from `bsole-connector/`):
+1. **Install Python dependencies** (from `wearmux-headless/`):
    ```bash
    npm run whisper:setup
    ```
@@ -109,10 +109,10 @@ When `WHISPER_LANGUAGE` is empty, the runner samples the first 3 windows (15 s a
 | `MQTT_BROKER` | `localhost` | MQTT broker host |
 | `MQTT_PORT` | `1883` | MQTT broker port |
 | `MQTT_PUB_TOPIC` | _(same as `WHISPER_PUB_KEY`)_ | Topic to publish transcripts to |
-| `MQTT_SUB_MIC` | `bsole/microphone/raw/#` | Topic filter for audio subscription |
-| `ZENOH_SUB_MIC` | `bsole/microphone/raw/**` | Zenoh key expression to subscribe to |
+| `MQTT_SUB_MIC` | `bwear/microphone/raw/#` | Topic filter for audio subscription |
+| `ZENOH_SUB_MIC` | `bwear/microphone/raw/**` | Zenoh key expression to subscribe to |
 | `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Router endpoint |
-| `WHISPER_PUB_KEY` | `bsole/whisper/transcript` | Zenoh key for transcript output |
+| `WHISPER_PUB_KEY` | `bwear/whisper/transcript` | Zenoh key for transcript output |
 
 ### CPU performance guide
 
@@ -128,7 +128,7 @@ only with GPU (`WHISPER_DEVICE=cuda WHISPER_COMPUTE_TYPE=float16`).
 
 ---
 
-## Transcript payload (`bsole/whisper/transcript`)
+## Transcript payload (`bwear/whisper/transcript`)
 
 Default (no word timestamps):
 ```json

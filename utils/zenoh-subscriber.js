@@ -14,11 +14,11 @@ const path = require("path");
 class ZenohSubscriber extends EventEmitter {
     constructor(options = {}) {
         super();
-        this.keyExpression = options.keyExpression || "bsole/**";
+        this.keyExpression = options.keyExpression || "bwear/**";
         this._child = null;
         this._childReady = false;
         this._stopping = false;
-        this._udsPath = options.udsPath || `/tmp/bsole-zenoh-sub-${process.pid}.sock`;
+        this._udsPath = options.udsPath || `/tmp/bwear-zenoh-sub-${process.pid}.sock`;
         this._udsServer = null;
         this._udsSocket = null;
     }

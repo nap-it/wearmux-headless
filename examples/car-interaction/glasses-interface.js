@@ -33,7 +33,7 @@ class GlassesInterface {
       return;
     }
 
-    console.log("Connecting to BrilliantSole Frame...");
+    console.log("Connecting to Brilliant Wear Frame...");
     const deviceManager = new DeviceManager();
     this.device = await deviceManager.connectToDevice();
     console.log("Connected to:", this.device.name || this.device.id);

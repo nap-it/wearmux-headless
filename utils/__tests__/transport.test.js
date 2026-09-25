@@ -59,8 +59,8 @@ describe('selectedTransport', () => {
 
 describe('createPublisher', () => {
     test('returns MqttManager instance when transport=mqtt', () => {
-        const pub = createPublisher({ transport: 'mqtt', keyPrefix: 'bsole/test' });
-        expect(MqttManager).toHaveBeenCalledWith({ transport: 'mqtt', keyPrefix: 'bsole/test' });
+        const pub = createPublisher({ transport: 'mqtt', keyPrefix: 'bwear/test' });
+        expect(MqttManager).toHaveBeenCalledWith({ transport: 'mqtt', keyPrefix: 'bwear/test' });
         expect(pub).not.toBeNull();
     });
 
@@ -88,14 +88,14 @@ describe('createPublisher', () => {
 
 describe('createSubscriber', () => {
     test('returns MqttSubscriber with keyExpression mapped to topicFilter', () => {
-        const sub = createSubscriber({ transport: 'mqtt', keyExpression: 'bsole/#' });
-        expect(MqttSubscriber).toHaveBeenCalledWith({ topicFilter: 'bsole/#', brokerUrl: undefined });
+        const sub = createSubscriber({ transport: 'mqtt', keyExpression: 'bwear/#' });
+        expect(MqttSubscriber).toHaveBeenCalledWith({ topicFilter: 'bwear/#', brokerUrl: undefined });
         expect(sub).not.toBeNull();
     });
 
     test('returns MqttSubscriber using topicFilter when keyExpression absent', () => {
-        createSubscriber({ transport: 'mqtt', topicFilter: 'bsole/sensors/#' });
-        expect(MqttSubscriber).toHaveBeenCalledWith({ topicFilter: 'bsole/sensors/#', brokerUrl: undefined });
+        createSubscriber({ transport: 'mqtt', topicFilter: 'bwear/sensors/#' });
+        expect(MqttSubscriber).toHaveBeenCalledWith({ topicFilter: 'bwear/sensors/#', brokerUrl: undefined });
     });
 
     test('passes brokerUrl to MqttSubscriber', () => {
@@ -104,14 +104,14 @@ describe('createSubscriber', () => {
     });
 
     test('returns ZenohSubscriber with keyExpression', () => {
-        const sub = createSubscriber({ transport: 'zenoh', keyExpression: 'bsole/**' });
-        expect(ZenohSubscriber).toHaveBeenCalledWith({ keyExpression: 'bsole/**', udsPath: undefined });
+        const sub = createSubscriber({ transport: 'zenoh', keyExpression: 'bwear/**' });
+        expect(ZenohSubscriber).toHaveBeenCalledWith({ keyExpression: 'bwear/**', udsPath: undefined });
         expect(sub).not.toBeNull();
     });
 
     test('ZenohSubscriber uses topicFilter as keyExpression fallback', () => {
-        createSubscriber({ transport: 'zenoh', topicFilter: 'bsole/sensors' });
-        expect(ZenohSubscriber).toHaveBeenCalledWith({ keyExpression: 'bsole/sensors', udsPath: undefined });
+        createSubscriber({ transport: 'zenoh', topicFilter: 'bwear/sensors' });
+        expect(ZenohSubscriber).toHaveBeenCalledWith({ keyExpression: 'bwear/sensors', udsPath: undefined });
     });
 
     test('passes udsPath to ZenohSubscriber', () => {
@@ -125,7 +125,7 @@ describe('createSubscriber', () => {
 
     test('reads transport from env when not specified in options', () => {
         process.env.ZENOH_ENABLE = '1';
-        const sub = createSubscriber({ keyExpression: 'bsole/**' });
+        const sub = createSubscriber({ keyExpression: 'bwear/**' });
         expect(ZenohSubscriber).toHaveBeenCalled();
         expect(sub).not.toBeNull();
     });

@@ -1,4 +1,5 @@
 {
+    "name": "wearmux-headless",
     "dependencies": {
         "@msgpack/msgpack": "^3.0.0",
         "aedes": "^0.51.3",

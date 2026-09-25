@@ -41,8 +41,8 @@ async function main() {
     const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_DISPLAY_ENABLE !== "0";
     const publisher = publisherEnabled
         ? createPublisher({
-            keyPrefix: process.env.ZENOH_DISPLAY_KEY_PREFIX || "bsole/display",
-            udsPath: process.env.ZENOH_DISPLAY_UDS_PATH || `/tmp/bsole-zenoh-display-${process.pid}.sock`,
+            keyPrefix: process.env.ZENOH_DISPLAY_KEY_PREFIX || "bwear/display",
+            udsPath: process.env.ZENOH_DISPLAY_UDS_PATH || `/tmp/bwear-zenoh-display-${process.pid}.sock`,
         })
         : null;
     if (publisher) {

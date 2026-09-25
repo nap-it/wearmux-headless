@@ -12,7 +12,7 @@ services:
     environment:
       - RUST_LOG=${ZENOH_LOG_LEVEL:-info}
     networks:
-      - bsole-network
+      - wearmux-network
     restart: unless-stopped
     healthcheck:
       test: [ "CMD-SHELL", "pgrep zenohd || exit 1" ]
@@ -21,11 +21,11 @@ services:
       retries: 3
       start_period: 5s
 
-  # BrilliantSole Connector - Main application
-  bsole:
+  # WearMux Headless - Main application
+  wearmux-headless:
     build:
       context: .
-    container_name: bsole-app
+    container_name: wearmux-headless
     depends_on:
       zenoh-router:
         condition: service_healthy
@@ -99,7 +99,7 @@ services:
       - DEBUG
       - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/zenoh-router:7447}
     networks:
-      - bsole-network
+      - wearmux-network
     restart: unless-stopped
 
   yolo:
@@ -141,7 +141,7 @@ services:
     ports:
       - "8080:8080"
     networks:
-      - bsole-network
+      - wearmux-network
     restart: unless-stopped
 
   mediamtx:
@@ -157,7 +157,7 @@ services:
       start_period: 10s
 
 networks:
-  bsole-network:
+  wearmux-network:
     driver: bridge
     ipam:
       config:

@@ -4,7 +4,7 @@ const { DisplayManager } = require("./display-manager");
 const { Config } = require("../../utils/config");
 
 /**
- * TextDisplay - Renders text messages on BrilliantSole Frame display using SVG + sharp
+ * TextDisplay - Renders text messages on Brilliant Wear Frame display using SVG + sharp
  *
  * Uses image-based rendering (no browser APIs) - compatible with Node.js.
  */

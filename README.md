@@ -1,6 +1,6 @@
 # WearMux Headless
 
-Node.js + Python tooling to connect to BrilliantSole devices, stream sensor data, run AI inference (speech-to-text, object detection), and exchange data and device actions over MQTT or Zenoh.
+Node.js + Python tooling to connect to Brilliant Wear devices, stream sensor data, run AI inference (speech-to-text, object detection), and exchange data and device actions over MQTT or Zenoh.
 
 ## Project Structure
 
@@ -183,8 +183,8 @@ npm run yolo:listen     # read detections in another terminal
 #### Speech-to-Text (Whisper)
 
 - **Real-time transcription** via [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-- Subscribes to `bsole/microphone/raw/**` — works with the existing mic pipeline
-- Publishes transcripts to `bsole/whisper/transcript` (Zenoh or MQTT)
+- Subscribes to `bwear/microphone/raw/**` — works with the existing mic pipeline
+- Publishes transcripts to `bwear/whisper/transcript` (Zenoh or MQTT)
 - **Automatic language detection** with majority-vote locking across windows
 - **No-speech filtering** suppresses silent-window hallucinations
 - Configurable window size, overlap, model size, and compute type
@@ -193,8 +193,8 @@ npm run yolo:listen     # read detections in another terminal
 #### Object Detection (YOLO)
 
 - **Real-time detection** via [Ultralytics YOLOv8](https://docs.ultralytics.com/)
-- Subscribes to `bsole/camera/raw/**` — works with the existing camera pipeline
-- Publishes detections to `bsole/yolo/detections` (Zenoh or MQTT)
+- Subscribes to `bwear/camera/raw/**` — works with the existing camera pipeline
+- Publishes detections to `bwear/yolo/detections` (Zenoh or MQTT)
 - Configurable model size (n/s/m/l/x), confidence threshold, IOU, and class filter
 - Detection payload includes bounding boxes, class names, and confidence scores
 - See [yolo/README.md](yolo/README.md) for full configuration
@@ -202,13 +202,15 @@ npm run yolo:listen     # read detections in another terminal
 
 ## Messaging and reverse actions
 
-WearMux uses one messaging transport at a time. Set `MESSAGE_TRANSPORT=mqtt` or `MESSAGE_TRANSPORT=zenoh`; the existing `MQTT_ENABLE=1` and `ZENOH_ENABLE=1` settings still work. `config/zenoh.ini` selects Zenoh by default. MQTT uses `mqtt://127.0.0.1:1883` unless `MQTT_BROKER_URL` is set. No action-specific configuration is required.
+WearMux Headless uses one messaging transport at a time. Set `MESSAGE_TRANSPORT=mqtt` or `MESSAGE_TRANSPORT=zenoh`; the existing `MQTT_ENABLE=1` and `ZENOH_ENABLE=1` settings still work. `config/zenoh.ini` selects Zenoh by default. MQTT uses `mqtt://127.0.0.1:1883` unless `MQTT_BROKER_URL` is set. No action-specific configuration is required.
+
+The default topic root for both transports is `bwear/`. Update external publishers and subscribers to use the new topic names, including `bwear/actions` and `bwear/actions/result`.
 
 The older `ZENOH_MIC_*` and `ZENOH_CAMERA_*` options in the configuration files still control raw audio and image publishing for either transport. Their names are retained so existing setups continue to work.
 
 The normal sensor command (`npm run sensors`) publishes sensor data and listens for actions on the same device connection. If sensors are not running, `npm run actions` starts a standalone action receiver. Run one action receiver per device connection.
 
-Applications publish a JSON object to `bsole/actions`. The action receiver publishes a result to `bsole/actions/result` with the same `id`, an `ok` flag, device identity, and timestamp. `ok` means the device SDK accepted the action call; it does not confirm that the wearer perceived the output. Failed actions also include an `error`. An optional `deviceId` targets one connected device. Supported actions are:
+Applications publish a JSON object to `bwear/actions`. The action receiver publishes a result to `bwear/actions/result` with the same `id`, an `ok` flag, device identity, and timestamp. `ok` means the device SDK accepted the action call; it does not confirm that the wearer perceived the output. Failed actions also include an `error`. An optional `deviceId` targets one connected device. Supported actions are:
 
 | Action | Fields | Effect |
 | --- | --- | --- |
@@ -230,7 +232,7 @@ MESSAGE_TRANSPORT=mqtt npm run actions:send -- '{"action":"haptic.vibrate"}'
 
 With Docker Compose, a broker listening on the host's port 1883 is reachable from the Whisper and YOLO containers as `host.docker.internal`. Pass `MESSAGE_TRANSPORT=mqtt` to select MQTT for all services.
 
-The transport sends modality data from the device to applications. The reverse path is `bsole/actions` → subscriber → action dispatcher → device display or haptics. The result topic lets an application distinguish an accepted command from one the device could not perform.
+The transport sends modality data from the device to applications. The reverse path is `bwear/actions` → subscriber → action dispatcher → device display or haptics. The result topic lets an application distinguish an accepted command from one the device could not perform.
 
 ## Published data topics
 
@@ -238,16 +240,16 @@ MQTT and Zenoh publish the same logical topics and JSON payloads. For Zenoh, the
 
 ### Published Topics
 
-#### Sensors (`bsole/sensors/`)
+#### Sensors (`bwear/sensors/`)
 When messaging is enabled, all enabled sensors are automatically published:
-- **`bsole/sensors/acceleration`** - 3-axis acceleration data (x, y, z in m/s²)
-- **`bsole/sensors/gyroscope`** - 3-axis gyroscope data (x, y, z in rad/s)
-- **`bsole/sensors/magnetometer`** - 3-axis magnetometer data (x, y, z in μT)
-- **`bsole/sensors/orientation`** - Euler angles (heading, pitch, roll in degrees)
-- **`bsole/sensors/linearAcceleration`** - Linear acceleration without gravity
-- **`bsole/sensors/gameRotation`** - Game rotation quaternion
-- **`bsole/sensors/rotation`** - Rotation quaternion
-- **`bsole/sensors/tapDetector`** - Tap detection events
+- **`bwear/sensors/acceleration`** - 3-axis acceleration data (x, y, z in m/s²)
+- **`bwear/sensors/gyroscope`** - 3-axis gyroscope data (x, y, z in rad/s)
+- **`bwear/sensors/magnetometer`** - 3-axis magnetometer data (x, y, z in μT)
+- **`bwear/sensors/orientation`** - Euler angles (heading, pitch, roll in degrees)
+- **`bwear/sensors/linearAcceleration`** - Linear acceleration without gravity
+- **`bwear/sensors/gameRotation`** - Game rotation quaternion
+- **`bwear/sensors/rotation`** - Rotation quaternion
+- **`bwear/sensors/tapDetector`** - Tap detection events
 
 Each message includes:
 ```json
@@ -259,24 +261,24 @@ Each message includes:
 }
 ```
 
-#### Microphone (`bsole/microphone/`)
+#### Microphone (`bwear/microphone/`)
 When messaging is enabled and `ZENOH_MIC_ENABLE` is not `0`:
-- **`bsole/microphone/status`** - Microphone connection status
-- **`bsole/microphone/level`** - Real-time audio level (RMS, peak, timestamp)
-- **`bsole/microphone/raw/meta`** - Raw audio metadata (when `ZENOH_MIC_RAW_ENABLE=1`)
-- **`bsole/microphone/raw/chunk`** - Raw audio data chunks in base64 (when `ZENOH_MIC_RAW_ENABLE=1`)
+- **`bwear/microphone/status`** - Microphone connection status
+- **`bwear/microphone/level`** - Real-time audio level (RMS, peak, timestamp)
+- **`bwear/microphone/raw/meta`** - Raw audio metadata (when `ZENOH_MIC_RAW_ENABLE=1`)
+- **`bwear/microphone/raw/chunk`** - Raw audio data chunks in base64 (when `ZENOH_MIC_RAW_ENABLE=1`)
 
-#### Camera (`bsole/camera/`)
+#### Camera (`bwear/camera/`)
 When messaging is enabled and `ZENOH_CAMERA_ENABLE` is not `0`:
-- **`bsole/camera/image`** - Image metadata (timestamp, filename, dimensions, etc.)
-- **`bsole/camera/raw/meta`** - Raw image metadata (when `ZENOH_CAMERA_RAW_ENABLE=1`)
-- **`bsole/camera/raw/chunk`** - Raw image data chunks in base64 (when `ZENOH_CAMERA_RAW_ENABLE=1`)
+- **`bwear/camera/image`** - Image metadata (timestamp, filename, dimensions, etc.)
+- **`bwear/camera/raw/meta`** - Raw image metadata (when `ZENOH_CAMERA_RAW_ENABLE=1`)
+- **`bwear/camera/raw/chunk`** - Raw image data chunks in base64 (when `ZENOH_CAMERA_RAW_ENABLE=1`)
 
-#### Whisper (`bsole/whisper/`)
+#### Whisper (`bwear/whisper/`)
 
 Published by `whisper/runner.py` when running (`npm run whisper:runner`):
 
-- **`bsole/whisper/transcript`** - Transcription result per audio window
+- **`bwear/whisper/transcript`** - Transcription result per audio window
 
 ```json
 {
@@ -290,11 +292,11 @@ Published by `whisper/runner.py` when running (`npm run whisper:runner`):
 }
 ```
 
-#### YOLO (`bsole/yolo/`)
+#### YOLO (`bwear/yolo/`)
 
 Published by `yolo/runner.py` when running (`npm run yolo:runner`):
 
-- **`bsole/yolo/detections`** - Object detection results per camera frame
+- **`bwear/yolo/detections`** - Object detection results per camera frame
 
 ```json
 {
@@ -322,13 +324,13 @@ See the [Zenoh](#zenoh) subsection in [Environment Variables](#environment-varia
 
 Example subscriber usage:
 ```bash
-python3 tools/zenoh_py_subscriber.py --key "bsole/sensors/**"
+python3 tools/zenoh_py_subscriber.py --key "bwear/sensors/**"
 ```
 
 
 ## Docker
 
-This project provides a `docker-compose.yml` for running the connector in a containerized environment. All configuration is managed through `config/config.ini`.
+This project provides a `docker-compose.yml` for running WearMux Headless in a containerized environment. All configuration is managed through `config/config.ini`.
 
 ### Quick Start
 
@@ -396,6 +398,7 @@ Below is a comprehensive list of environment variables, grouped by function.
 
 **For Docker usage:** All variables should be set in `config/config.ini` under the `[env]` section.  
 **For local development:** Set variables in your shell or use npm scripts with inline variables (e.g., `ZENOH_ENABLE=1 npm run sensors`).
+Set `WEARMUX_CONFIG_PATH` to load a different configuration directory or INI file.
 
 ### Audio / RTSP
 
@@ -417,9 +420,9 @@ Below is a comprehensive list of environment variables, grouped by function.
 |--------------------|---------------------------------------------|-----------|------------------------------|
 | `USE_CUSTOM_NOBLE` | Use custom Noble for Linux kernel 6.x       | `false`   | `true`, `1`                  |
 | `DEVICE_ID`        | Filter by Bluetooth MAC address             | -         | `CE:59:C3:0F:4D:C9`          |
-| `DEVICE_NAME`      | Filter by device name                       | -         | `BrilliantSole`              |
+| `DEVICE_NAME`      | Filter by device name                       | -         | `Brilliant Frame 12`         |
 | `MIC_DEVICE_ID`    | Filter by Bluetooth ID for microphone       | -         | `CE:59:C3:0F:4D:C9`          |
-| `MIC_DEVICE_NAME`  | Filter by device name for microphone        | -         | `BrilliantSole`              |
+| `MIC_DEVICE_NAME`  | Filter by device name for microphone        | -         | `Brilliant Frame 12`         |
 | `MIC_CONNECT_ONLY` | If `1`, connect but don't start microphone  | `0`       | `1`                          |
 
 ### Sensors
@@ -443,17 +446,17 @@ Below is a comprehensive list of environment variables, grouped by function.
 |----------|-------------|---------|
 | `MESSAGE_TRANSPORT` | Select `mqtt`, `zenoh`, or `none`; overrides legacy enable flags | _(unset)_ |
 | `ZENOH_ENABLE` | Legacy Zenoh selection | `1` |
-| `ZENOH_KEY_PREFIX` | Sensor topic prefix | `bsole/sensors` |
+| `ZENOH_KEY_PREFIX` | Sensor topic prefix | `bwear/sensors` |
 | `ZENOH_ATTACH_ALL` | Publish all enabled sensors | `1` |
 | `ZENOH_MIC_ENABLE` | Enable microphone publishing | `1` (if ZENOH_ENABLE=1) |
-| `ZENOH_MIC_KEY_PREFIX` | Microphone topic prefix | `bsole/microphone` |
+| `ZENOH_MIC_KEY_PREFIX` | Microphone topic prefix | `bwear/microphone` |
 | `ZENOH_MIC_RAW_ENABLE` | Publish raw audio data | `0` |
 | `ZENOH_MIC_RAW_THROTTLE_MS` | Throttle raw audio (ms) | `200` |
 | `ZENOH_CAMERA_ENABLE` | Enable camera publishing | `1` (if ZENOH_ENABLE=1) |
-| `ZENOH_CAMERA_KEY_PREFIX` | Camera topic prefix | `bsole/camera` |
+| `ZENOH_CAMERA_KEY_PREFIX` | Camera topic prefix | `bwear/camera` |
 | `ZENOH_CAMERA_RAW_ENABLE` | Publish raw image data | `1` |
 | `ZENOH_RAW_CHUNK_SIZE` | Chunk size for raw data | `30000` |
-| `ZENOH_UDS_PATH` | Unix socket path for sidecar | `/tmp/bsole-zenoh.sock` |
+| `ZENOH_UDS_PATH` | Unix socket path for sidecar | `/tmp/bwear-zenoh.sock` |
 
 ### Camera
 
@@ -500,8 +503,8 @@ Defaults are set in `config/whisper.ini`. See [whisper/README.md](whisper/README
 | `WHISPER_OVERLAP` | `0` | Overlap fraction between windows (0–0.9) |
 | `WHISPER_NO_SPEECH_THRESHOLD` | `0.6` | Drop windows where all segments exceed this no-speech probability |
 | `WHISPER_WORD_TIMESTAMPS` | `0` | Set to `1` for per-word timing in payload |
-| `WHISPER_PUB_KEY` | `bsole/whisper/transcript` | Zenoh key for transcript output |
-| `ZENOH_SUB_MIC` | `bsole/microphone/raw/**` | Zenoh key expression to subscribe to |
+| `WHISPER_PUB_KEY` | `bwear/whisper/transcript` | Zenoh key for transcript output |
+| `ZENOH_SUB_MIC` | `bwear/microphone/raw/**` | Zenoh key expression to subscribe to |
 | `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Zenoh router endpoint |
 | `MQTT_ENABLE` | `0` | Set to `1` to use MQTT instead of Zenoh |
 | `MQTT_BROKER` | `localhost` | MQTT broker host |
@@ -519,8 +522,8 @@ Defaults are set in `config/yolo.ini`. See [yolo/README.md](yolo/README.md) for 
 | `YOLO_IOU` | `0.45` | NMS IOU threshold (0–1) |
 | `YOLO_INPUT_SIZE` | `320` | Inference image size in pixels (multiple of 32) |
 | `YOLO_CLASSES` | _(empty)_ | Comma-separated COCO class IDs; empty = all 80 |
-| `YOLO_PUB_KEY` | `bsole/yolo/detections` | Zenoh key for detection output |
-| `ZENOH_SUB_CAMERA` | `bsole/camera/raw/**` | Zenoh key expression to subscribe to |
+| `YOLO_PUB_KEY` | `bwear/yolo/detections` | Zenoh key for detection output |
+| `ZENOH_SUB_CAMERA` | `bwear/camera/raw/**` | Zenoh key expression to subscribe to |
 | `ZENOH_ROUTER` | `tcp/127.0.0.1:7447` | Zenoh router endpoint |
 | `MQTT_ENABLE` | `0` | Set to `1` to use MQTT instead of Zenoh |
 | `MQTT_BROKER` | `localhost` | MQTT broker host |

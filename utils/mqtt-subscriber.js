@@ -9,7 +9,7 @@ const mqtt = require("mqtt");
 class MqttSubscriber extends EventEmitter {
     constructor(options = {}) {
         super();
-        this.topicFilter = options.topicFilter || options.keyExpression || "bsole/#";
+        this.topicFilter = options.topicFilter || options.keyExpression || "bwear/#";
         this.brokerUrl = options.brokerUrl || process.env.MQTT_BROKER_URL || "mqtt://127.0.0.1:1883";
         this.client = null;
     }

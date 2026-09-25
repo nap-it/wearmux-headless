@@ -24,7 +24,7 @@ sequenceDiagram
 
 1. Install:
    ```bash
-   cd bsole-connector-main
+   cd wearmux-headless
    npm install
    pip3 install zenoh msgpack
    ```

@@ -10,8 +10,8 @@ BrilliantSole-JavaScript-SDK/examples/
 BrilliantSole-JavaScript-SDK/firmware/
 BrilliantSole-JavaScript-SDK/tflite-converter/
 
-# Exclude connector node_modules (installed fresh inside Docker)
-bsole-connector/node_modules/
+# Exclude WearMux Headless node_modules (installed fresh inside Docker)
+wearmux-headless/node_modules/
 
 # ============================================================
 

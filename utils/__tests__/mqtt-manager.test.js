@@ -19,7 +19,7 @@ afterEach(() => {
 describe('MqttManager constructor', () => {
     test('uses default keyPrefix and brokerUrl', () => {
         const mm = new MqttManager();
-        expect(mm.keyPrefix).toBe('bsole/sensors');
+        expect(mm.keyPrefix).toBe('bwear/sensors');
         expect(mm.brokerUrl).toBe('mqtt://127.0.0.1:1883');
     });
 
@@ -51,8 +51,8 @@ describe('MqttManager constructor', () => {
 
 describe('MqttManager._topicFor', () => {
     test('concatenates keyPrefix and sensorType with slash', () => {
-        const mm = new MqttManager({ keyPrefix: 'bsole/sensors' });
-        expect(mm._topicFor('acceleration')).toBe('bsole/sensors/acceleration');
+        const mm = new MqttManager({ keyPrefix: 'bwear/sensors' });
+        expect(mm._topicFor('acceleration')).toBe('bwear/sensors/acceleration');
     });
 
     test('works with custom prefix', () => {

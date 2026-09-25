@@ -3,7 +3,7 @@
 /**
  * Real-time Microphone Streaming
  * 
- * Streams audio from BrilliantSole Frame microphone and displays audio levels.
+ * Streams audio from Brilliant Wear Frame microphone and displays audio levels.
  * 
  * Usage:
  *   node index.js
@@ -42,13 +42,13 @@ function normalizeRtspPublishUrl(url) {
 }
 
 async function main() {
-  console.log('BrilliantSole Frame - Microphone Streaming\n');
+  console.log('Brilliant Wear Frame - Microphone Streaming\n');
 
   const publisherEnabled = selectedTransport() !== "none" && process.env.ZENOH_MIC_ENABLE !== "0";
   const publisher = publisherEnabled
     ? createPublisher({
-        keyPrefix: process.env.ZENOH_MIC_KEY_PREFIX || "bsole/microphone",
-        udsPath: process.env.ZENOH_MIC_UDS_PATH || `/tmp/bsole-zenoh-mic-${process.pid}.sock`,
+        keyPrefix: process.env.ZENOH_MIC_KEY_PREFIX || "bwear/microphone",
+        udsPath: process.env.ZENOH_MIC_UDS_PATH || `/tmp/bwear-zenoh-mic-${process.pid}.sock`,
       })
     : null;
 
@@ -284,7 +284,7 @@ async function main() {
   });
 }
 
-// The BrilliantSole library can throw RangeError on malformed microphone packets.
+// The brilliantsole library can throw RangeError on malformed microphone packets.
 // Catch it here so a bad packet doesn't kill the process.
 process.on('uncaughtException', (err) => {
   if (err instanceof RangeError && err.message.includes('bounds of the DataView')) {

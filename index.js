@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * BrilliantSole Connector Main CLI
+ * WearMux Headless main CLI
  *
  * Usage:
  *   node index.js <feature>
@@ -28,7 +28,7 @@ const features = {
 };
 
 function printHelp() {
-  console.log('BrilliantSole Connector CLI');
+  console.log('WearMux Headless CLI');
   console.log('Usage: node index.js <feature>');
   console.log('Features:');
   Object.keys(features).forEach(f => {

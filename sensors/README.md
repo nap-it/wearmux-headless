@@ -1,6 +1,6 @@
 # Sensor Monitoring
 
-Real-time sensor data collection and ML-based gesture detection for BrilliantSole Frame glasses.
+Real-time sensor data collection and ML-based gesture detection for Brilliant Wear Frame glasses.
 
 ## Quick Start
 

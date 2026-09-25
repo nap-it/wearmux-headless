@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Whisper Runner — speech-to-text consumer for the bsole-connector pipeline.
+Whisper Runner — speech-to-text consumer for the wearmux-headless pipeline.
 
-Subscribes to bsole/microphone/raw/** (chunked Float32 PCM frames published
+Subscribes to bwear/microphone/raw/** (chunked Float32 PCM frames published
 by microphone/index.js when ZENOH_MIC_RAW_ENABLE=1), reassembles audio
 windows, runs faster-whisper inference, and publishes transcripts to
-bsole/whisper/transcript.
+bwear/whisper/transcript.
 
 Usage:
     python3 whisper/runner.py
@@ -21,8 +21,8 @@ Environment variables:
     WHISPER_OVERLAP             Fraction of window kept as overlap between windows, 0–0.9 (default: 0)
     WHISPER_WORD_TIMESTAMPS     Set to 1 for per-word timing in transcript payload (default: 0)
     WHISPER_NO_SPEECH_THRESHOLD Drop windows where all segments exceed this prob (default: 0.6)
-    WHISPER_PUB_KEY             Zenoh key to publish transcripts to (default: bsole/whisper/transcript)
-    ZENOH_SUB_MIC               Key expression to subscribe to (default: bsole/microphone/raw/**)
+    WHISPER_PUB_KEY             Zenoh key to publish transcripts to (default: bwear/whisper/transcript)
+    ZENOH_SUB_MIC               Key expression to subscribe to (default: bwear/microphone/raw/**)
     ZENOH_ROUTER                Zenoh router endpoint override (e.g. tcp/192.168.1.10:7447)
     MESSAGE_TRANSPORT           Select mqtt or zenoh (overrides MQTT_ENABLE)
     MQTT_ENABLE                 Legacy MQTT selector (default: 0)
@@ -30,7 +30,7 @@ Environment variables:
     MQTT_BROKER                 MQTT broker host (default: localhost)
     MQTT_PORT                   MQTT broker port (default: 1883)
     MQTT_PUB_TOPIC              Topic to publish transcripts to (default: same as WHISPER_PUB_KEY)
-    MQTT_SUB_MIC                Topic filter to subscribe for audio (default: bsole/microphone/raw/#)
+    MQTT_SUB_MIC                Topic filter to subscribe for audio (default: bwear/microphone/raw/#)
     DEBUG                       Set to 1 for verbose frame-level logging
 """
 
@@ -99,8 +99,8 @@ WINDOW_S          = float(os.environ.get("WHISPER_WINDOW_S", "5"))
 OVERLAP           = float(os.environ.get("WHISPER_OVERLAP", "0"))
 WORD_TIMESTAMPS   = os.environ.get("WHISPER_WORD_TIMESTAMPS", "0") == "1"
 NO_SPEECH_THRESH  = float(os.environ.get("WHISPER_NO_SPEECH_THRESHOLD", "0.6"))
-PUB_KEY           = os.environ.get("WHISPER_PUB_KEY", "bsole/whisper/transcript")
-SUB_EXPR          = os.environ.get("ZENOH_SUB_MIC", "bsole/microphone/raw/**")
+PUB_KEY           = os.environ.get("WHISPER_PUB_KEY", "bwear/whisper/transcript")
+SUB_EXPR          = os.environ.get("ZENOH_SUB_MIC", "bwear/microphone/raw/**")
 ROUTER            = os.environ.get("ZENOH_ROUTER", "")
 MESSAGE_TRANSPORT = os.environ.get("MESSAGE_TRANSPORT", "").strip().lower()
 if MESSAGE_TRANSPORT not in ("", "mqtt", "zenoh", "none"):
@@ -112,7 +112,7 @@ if _mqtt_url.scheme not in ("", "mqtt", "mqtts"):
 MQTT_BROKER       = _mqtt_url.hostname or os.environ.get("MQTT_BROKER", "localhost")
 MQTT_PORT         = _mqtt_url.port or int(os.environ.get("MQTT_PORT", "8883" if _mqtt_url.scheme == "mqtts" else "1883"))
 MQTT_PUB_TOPIC    = os.environ.get("MQTT_PUB_TOPIC", PUB_KEY)
-MQTT_SUB_TOPIC    = os.environ.get("MQTT_SUB_MIC", "bsole/microphone/raw/#")
+MQTT_SUB_TOPIC    = os.environ.get("MQTT_SUB_MIC", "bwear/microphone/raw/#")
 DEBUG             = os.environ.get("DEBUG", "0") == "1"
 
 # Zenoh peer config — only needed when MQTT_ENABLE=0
@@ -156,8 +156,8 @@ class FrameAssembler:
 
     microphone/index.js splits each Float32 frame into N base64 chunks and
     publishes them as:
-        bsole/microphone/raw/meta  — {frameId, totalChunks, sampleRate, ...}
-        bsole/microphone/raw/chunk — {frameId, idx, data (base64 slice)}
+        bwear/microphone/raw/meta  — {frameId, totalChunks, sampleRate, ...}
+        bwear/microphone/raw/chunk — {frameId, idx, data (base64 slice)}
 
     Meta and chunks may arrive in any order; both are buffered by frameId.
     Incomplete frames older than _FRAME_TIMEOUT_S are evicted.

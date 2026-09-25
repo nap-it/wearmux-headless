@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-YOLO Listener — prints detection payloads from bsole/yolo/detections.
+YOLO Listener — prints detection payloads from bwear/yolo/detections.
 
 Usage:
     python3 yolo/listen.py
     npm run yolo:listen
 
 Environment variables:
-    YOLO_PUB_KEY    Key to subscribe to (default: bsole/yolo/detections)
+    YOLO_PUB_KEY    Key to subscribe to (default: bwear/yolo/detections)
     ZENOH_ROUTER    Router endpoint override (e.g. tcp/192.168.1.10:7447)
 """
 
@@ -47,7 +47,7 @@ except ImportError:
     print("[yolo-listen] zenoh not installed — run: npm run yolo:setup", file=sys.stderr)
     sys.exit(1)
 
-SUB_KEY = os.environ.get("YOLO_PUB_KEY", "bsole/yolo/detections")
+SUB_KEY = os.environ.get("YOLO_PUB_KEY", "bwear/yolo/detections")
 ROUTER  = os.environ.get("ZENOH_ROUTER", "")
 VERBOSE = os.environ.get("YOLO_LISTEN_VERBOSE", "0") == "1"
 

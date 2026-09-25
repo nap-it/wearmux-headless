@@ -1,4 +1,4 @@
-// Sensor management for BrilliantSole device sensors
+// Sensor management for Brilliant Wear device sensors
 const EventEmitter = require("events");
 const { createPublisher, selectedTransport } = require("../../utils/transport");
 
@@ -28,7 +28,7 @@ class SensorManager extends EventEmitter {
         this.publisherOptions = {
             keyPrefix: options.publisherKeyPrefix || (this.transport === "mqtt"
                 ? process.env.MQTT_KEY_PREFIX
-                : process.env.ZENOH_KEY_PREFIX) || "bsole/sensors",
+                : process.env.ZENOH_KEY_PREFIX) || "bwear/sensors",
             prettyJson: true,
         };
         this.publisherAttachAll =

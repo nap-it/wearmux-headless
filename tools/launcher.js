@@ -3,7 +3,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const { loadConfigFile } = require('../utils/ini-config');
-const LOCK_PATH = '/tmp/bsole-launcher.lock';
+const LOCK_PATH = '/tmp/wearmux-headless-launcher.lock';
 
 function isProcessAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
