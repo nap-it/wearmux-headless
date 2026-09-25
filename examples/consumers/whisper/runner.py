@@ -3,7 +3,7 @@
 Whisper Runner — speech-to-text consumer for the wearmux-headless pipeline.
 
 Subscribes to bwear/microphone/raw/** (chunked Float32 PCM frames published
-by microphone/index.js when MIC_RAW_ENABLE=1), reassembles audio
+by a device session or microphone/index.js when MIC_RAW_ENABLE=1), reassembles audio
 windows, runs faster-whisper inference, and publishes transcripts to
 bwear/whisper/transcript.
 
@@ -131,12 +131,13 @@ def resample_to_16k(audio: np.ndarray, src_rate: int) -> np.ndarray:
 class FrameAssembler:
     """Reassembles multi-chunk audio frames from meta + chunk messages.
 
-    microphone/index.js splits each Float32 frame into N base64 chunks and
+    WearMux splits each Float32 frame into N base64 chunks and
     publishes them as:
         bwear/microphone/raw/meta  — {frameId, totalChunks, sampleRate, ...}
         bwear/microphone/raw/chunk — {frameId, idx, data (base64 slice)}
 
     Meta and chunks may arrive in any order; both are buffered by frameId.
+    WearMux includes the source device ID in frameId so microphone streams stay distinct.
     Incomplete frames older than _FRAME_TIMEOUT_S are evicted.
     """
 
@@ -212,21 +213,28 @@ class AudioAccumulator:
         self._window_s    = window_s
         self._overlap     = max(0.0, min(overlap, 0.9))
         self._on_window   = on_window
-        self._samples     = np.empty(0, dtype=np.float32)
-        self._sample_rate = 16000
+        # Keep separate buffers so samples from two wearable microphones never mix.
+        self._streams     = {}
         self._lock        = threading.Lock()
 
     def add(self, samples: np.ndarray, meta: dict) -> None:
         sr = int(meta.get("sampleRate") or 16000)
+        source = meta.get("device") or {}
+        source_id = source.get("id") or "unknown"
         with self._lock:
-            self._sample_rate = sr
-            self._samples = np.concatenate([self._samples, samples])
+            # Reset only this microphone's partial window if its sample rate changes.
+            # Devices without an ID share the fallback stream; normal WearMux messages include one.
+            stream = self._streams.setdefault(source_id, {"samples": np.empty(0, dtype=np.float32), "rate": sr})
+            if stream["rate"] != sr:
+                stream["samples"] = np.empty(0, dtype=np.float32)
+                stream["rate"] = sr
+            stream["samples"] = np.concatenate([stream["samples"], samples])
             needed = int(self._window_s * sr)
             keep   = int(needed * self._overlap)
-            while len(self._samples) >= needed:
-                window = self._samples[:needed].copy()
-                self._samples = self._samples[needed - keep:]
-                self._on_window(window, sr)
+            while len(stream["samples"]) >= needed:
+                window = stream["samples"][:needed].copy()
+                stream["samples"] = stream["samples"][needed - keep:]
+                self._on_window(window, sr, source)
 
 
 # ── Inference worker ───────────────────────────────────────────────────────────
@@ -243,16 +251,14 @@ class InferenceWorker(threading.Thread):
         self._model        = model
         self._publish_fn   = publish_fn
         self._language     = language       # configured value; None = always auto-detect
-        self._locked_lang  = language       # majority-voted language once enough samples collected
-        self._lang_votes: list = []         # language detections before lock
-        self._window_count = 0
+        # Language votes and prompt context belong to a microphone, not the whole consumer.
+        self._source_state: dict = {}       # language and prompt state per microphone
         self._queue: queue.Queue = queue.Queue(maxsize=_QUEUE_MAXSIZE)
         self._running      = True
-        self._last_text    = ""
 
-    def enqueue(self, samples: np.ndarray, sample_rate: int) -> None:
+    def enqueue(self, samples: np.ndarray, sample_rate: int, source: dict) -> None:
         try:
-            self._queue.put_nowait((samples, sample_rate))
+            self._queue.put_nowait((samples, sample_rate, source))
         except queue.Full:
             log("inference queue full — dropping window (inference is slower than audio input)", err=True)
 
@@ -268,22 +274,26 @@ class InferenceWorker(threading.Thread):
             item = self._queue.get()
             if item is None:
                 break
-            samples, sample_rate = item
-            self._infer(samples, sample_rate)
+            samples, sample_rate, source = item
+            self._infer(samples, sample_rate, source)
 
-    def _infer(self, samples: np.ndarray, sample_rate: int) -> None:
+    def _infer(self, samples: np.ndarray, sample_rate: int, source: dict) -> None:
         audio = resample_to_16k(samples, sample_rate)
+        source_id = source.get("id") or "unknown"
+        state = self._source_state.setdefault(source_id, {
+            "locked_lang": self._language, "votes": [], "window_count": 0, "last_text": "",
+        })
 
         # Determine language for this window
         if self._language is None:
             # Still collecting votes to establish majority language
-            if len(self._lang_votes) < AUTODETECT_WINDOWS:
+            if len(state["votes"]) < AUTODETECT_WINDOWS:
                 lang_arg = None
-            elif AUTODETECT_EVERY > 0 and self._window_count % AUTODETECT_EVERY == 0:
-                self._lang_votes = []  # reset for periodic re-detection
+            elif AUTODETECT_EVERY > 0 and state["window_count"] % AUTODETECT_EVERY == 0:
+                state["votes"] = []  # reset for periodic re-detection
                 lang_arg = None
             else:
-                lang_arg = self._locked_lang
+                lang_arg = state["locked_lang"]
         else:
             lang_arg = self._language
 
@@ -295,7 +305,7 @@ class InferenceWorker(threading.Thread):
                 beam_size=1,
                 vad_filter=True,
                 word_timestamps=WORD_TIMESTAMPS,
-                initial_prompt=self._last_text or None,
+                initial_prompt=state["last_text"] or None,
             )
             segments = list(segments_gen)
         except Exception as exc:
@@ -306,18 +316,18 @@ class InferenceWorker(threading.Thread):
 
         # Accumulate language votes; lock to majority once enough samples collected
         if lang_arg is None and info and info.language:
-            self._lang_votes.append(info.language)
-            if len(self._lang_votes) == AUTODETECT_WINDOWS:
+            state["votes"].append(info.language)
+            if len(state["votes"]) == AUTODETECT_WINDOWS:
                 from collections import Counter
-                majority = Counter(self._lang_votes).most_common(1)[0][0]
-                if self._locked_lang != majority:
-                    log(f"language locked: {majority} (votes: {self._lang_votes})")
-                self._locked_lang = majority
+                majority = Counter(state["votes"]).most_common(1)[0][0]
+                if state["locked_lang"] != majority:
+                    log(f"language locked for {source_id}: {majority} (votes: {state['votes']})")
+                state["locked_lang"] = majority
             else:
-                log(f"language vote {len(self._lang_votes)}/{AUTODETECT_WINDOWS}: "
+                log(f"language vote {len(state['votes'])}/{AUTODETECT_WINDOWS}: "
                     f"{info.language} (prob={info.language_probability:.2f})")
 
-        self._window_count += 1
+        state["window_count"] += 1
 
         # Drop silent / hallucination windows
         if segments and all(s.no_speech_prob > NO_SPEECH_THRESH for s in segments):
@@ -328,7 +338,7 @@ class InferenceWorker(threading.Thread):
         text = " ".join(s.text.strip() for s in segments).strip()
 
         if text:
-            self._last_text = text
+            state["last_text"] = text
 
         if text or DEBUG:
             lang = info.language if info else "?"
@@ -354,6 +364,8 @@ class InferenceWorker(threading.Thread):
             "language_probability": round(info.language_probability, 3) if info else None,
             "inference_s":          round(elapsed, 3),
             "window_s":             round(len(samples) / sample_rate, 3),
+            # Preserve which microphone produced this window in the consumer result.
+            "sourceDevice":         source,
             "segments":             seg_list,
         }
 

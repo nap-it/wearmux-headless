@@ -15,10 +15,11 @@ Set the same `TOPIC_PREFIX` (default `bwear`) on the producer and consumer. All 
 | Audio levels | `<root>/microphone/level` |
 | Audio samples | `<root>/microphone/raw/meta`, `<root>/microphone/raw/chunk` |
 | Sensor events | `<root>/sensors/<sensor>` |
+| Device status and capabilities | `<root>/devices/status` |
 | Device commands | `<root>/actions` |
 | Command results | `<root>/actions/result` |
 
-Set `CAMERA_RAW_ENABLE=1` or `MIC_RAW_ENABLE=1` in the WearMux configuration to publish raw media. Each media frame starts with a JSON message on `raw/meta` containing `frameId`, `totalChunks`, `encoding: "base64"`, `bytes`, and a timestamp `ts`. Camera metadata also contains `mime`; microphone metadata contains `format: "f32le"` and `sampleRate`. Messages on `raw/chunk` contain the same `frameId`, a zero-based `idx`, and a base64 string `data`. Concatenate `data` in `idx` order, then base64-decode the complete string. Keep incomplete frames separate by `frameId` and discard them after a timeout. The sample runners implement this assembly for both transports.
+Set `CAMERA_RAW_ENABLE=1` or `MIC_RAW_ENABLE=1` in the WearMux configuration to publish raw media. Each media frame starts with a JSON message on `raw/meta` containing `frameId`, `totalChunks`, `encoding: "base64"`, `bytes`, a timestamp `ts`, and the source `device`. Camera metadata also contains `mime`; microphone metadata contains `format: "f32le"` and `sampleRate`. Messages on `raw/chunk` contain the same `frameId`, a zero-based `idx`, and a base64 string `data`. Concatenate `data` in `idx` order, then base64-decode the complete string. Keep incomplete frames separate by `frameId` and discard them after a timeout. The sample runners implement this assembly for both transports. Their inference results include `sourceDevice`, and Whisper keeps audio windows separate for each microphone.
 
 The microphone samples decode to little-endian 32-bit floats. Camera bytes decode to the image format declared by `mime` (JPEG with the default camera settings). MQTT publishes at QoS 0, so consumers should tolerate missing frames. Result topics such as `<root>/whisper/transcript` and `<root>/yolo/detections` belong to the examples; applications can choose their own result topics and JSON schemas.
 
@@ -48,7 +49,7 @@ A general inference server will not understand WearMux's `raw/meta` and `raw/chu
 
 1. Subscribe to the desired modality topic and assemble frames by `frameId`.
 2. Send the decoded bytes to the server using its HTTP, gRPC, or other API.
-3. Publish the server's response on an application result topic. Include `frameId` or a source timestamp so responses can be matched to input frames.
+3. Publish the server's response on an application result topic. Include `frameId`, `device`, or a source timestamp so responses can be matched to input frames and devices.
 4. If the result should affect the wearable, publish an action JSON object on `<root>/actions` and read the matching `id` on `<root>/actions/result`.
 
 The [YOLO runner](yolo/runner.py) shows camera reassembly and result publication; the [Whisper runner](whisper/runner.py) shows audio reassembly and windowing. Replace the model call in either runner with a client for the inference server you choose. WearMux Headless only needs the transport and topic settings; it does not need to know which model or server the application uses.

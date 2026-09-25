@@ -3,7 +3,7 @@
 YOLO Runner — object detection consumer for the wearmux-headless pipeline.
 
 Subscribes to bwear/camera/raw/** (chunked JPEG frames published by
-camera/index.js when CAMERA_RAW_ENABLE=1), reassembles frames,
+a camera session when CAMERA_RAW_ENABLE=1), reassembles frames,
 runs YOLOv8 inference, and publishes detection results to bwear/yolo/detections.
 
 Usage:
@@ -98,11 +98,12 @@ def decode_frame(chunks_by_idx: dict) -> bytes:
 class FrameAssembler:
     """Reassembles multi-chunk JPEG frames from meta + chunk messages.
 
-    camera/index.js splits each JPEG into N base64 chunks and publishes them as:
+    WearMux splits each JPEG into N base64 chunks and publishes them as:
         bwear/camera/raw/meta  — {frameId, totalChunks, encoding, mime, bytes, ...}
         bwear/camera/raw/chunk — {frameId, idx, data (base64 slice)}
 
     Meta and chunks may arrive in any order; both are buffered by frameId.
+    WearMux includes the source device ID in frameId so camera streams stay distinct.
     Incomplete frames older than _FRAME_TIMEOUT_S are evicted.
     """
 
@@ -260,6 +261,8 @@ class InferenceWorker(threading.Thread):
             "image_h":      img.height,
             "model":        Path(MODEL_PATH).stem,
             "device":       DEVICE,
+            # Keep the capture device alongside the inference result for multi-camera consumers.
+            "sourceDevice": meta.get("device"),
             "detections":   detections,
         }
 
@@ -279,6 +282,7 @@ class InferenceWorker(threading.Thread):
                 annotated = json.dumps({
                     "ts":      payload["ts"],
                     "frameId": payload["frameId"],
+                    "sourceDevice": payload["sourceDevice"],
                     "data":    base64.b64encode(buf.getvalue()).decode(),
                 })
                 self._publish_annotated_fn(annotated)

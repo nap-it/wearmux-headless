@@ -2,12 +2,12 @@
 
 Optional real-time transcription consumer for WearMux Headless. It runs outside the core service and can run on another machine.
 
-Subscribes to the raw audio stream published by `microphone/index.js`, accumulates
+Subscribes to the raw audio stream published by a microphone session, accumulates
 fixed-size windows, runs [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 inference, and publishes transcripts back onto the transport layer.
 
 ```
-microphone/index.js  ──(bwear/microphone/raw/**)──►  examples/consumers/whisper/runner.py
+WearMux microphone  ──(bwear/microphone/raw/**)──►  examples/consumers/whisper/runner.py
                                                             │
                                                    bwear/whisper/transcript
                                                             │

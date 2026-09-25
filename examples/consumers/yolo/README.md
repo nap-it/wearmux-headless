@@ -2,12 +2,12 @@
 
 Optional object detection consumer for WearMux Headless. It runs outside the core service and can run on another machine.
 
-Subscribes to the raw camera stream published by `camera/index.js`, reassembles
+Subscribes to the raw camera stream published by a camera session, reassembles
 JPEG frames, runs [YOLOv8](https://docs.ultralytics.com/) inference via Ultralytics,
 and publishes detection results back onto the transport layer.
 
 ```
-camera/index.js  ──(bwear/camera/raw/**)──►  examples/consumers/yolo/runner.py
+WearMux camera  ──(bwear/camera/raw/**)──►  examples/consumers/yolo/runner.py
                                                     │
                                            bwear/yolo/detections
                                                     │
