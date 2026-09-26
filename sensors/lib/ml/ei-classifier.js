@@ -1,150 +1,226 @@
-// Edge Impulse Classifier module for programmatic use
-let Module = null;
-let classifierInitialized = false;
+// Edge Impulse's generated loader expects Module options before it executes.
+// Inject them without modifying the pinned upstream runtime or global fetch.
+const fs = require("node:fs");
+const path = require("node:path");
+const vm = require("node:vm");
+const { createRequire } = require("node:module");
 
-class EdgeImpulseClassifier {
-    _initialized = false;
+const MODEL_FILE = path.resolve(__dirname, "../../model/brilliantwear-glasses/edge-impulse-standalone.js");
+let runtime = null;
+let initializationPromise = null;
 
-    init() {
-        if (classifierInitialized === true) return Promise.resolve();
+function initialize() {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        let diagnostic = "";
+        const modelIntervals = new Set();
+        const clearModelIntervals = () => {
+            for (const interval of modelIntervals) clearInterval(interval);
+            modelIntervals.clear();
+        };
+        const fail = (reason) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            clearModelIntervals();
+            const detail = String(reason?.message || reason || diagnostic).slice(0, 500);
+            reject(new Error(`Edge Impulse model initialization failed: ${detail}`));
+        };
+        const timer = setTimeout(() => fail("timed out after 10 seconds"), 10000);
 
-        return new Promise((resolve, reject) => {
-            try {
-                if (!Module) {
-                    Module = require('../../model/edge-impulse-standalone');
-                }
-            } catch (err) {
-                return reject(new Error('Edge Impulse model not found: ' + err.message));
-            }
-
-            Module.onRuntimeInitialized = () => {
-                classifierInitialized = true;
-                let ret = Module.init();
-                if (typeof ret === 'number' && ret != 0) {
-                    return reject('init() failed with code ' + ret);
-                }
-                resolve();
+        try {
+            const binary = fs.readFileSync(MODEL_FILE.replace(/\.js$/, ".wasm"));
+            const options = {
+                wasmBinary: binary,
+                print: () => {},
+                printErr: (message) => { diagnostic = String(message).slice(0, 500); },
+                onAbort: fail,
+                // Own the async promise so a corrupt binary rejects init() instead
+                // of causing an unhandled rejection in this older generated loader.
+                instantiateWasm: (imports, receiveInstance) => {
+                    WebAssembly.instantiate(binary, imports)
+                        .then(({ instance }) => { if (!settled) receiveInstance(instance); })
+                        .catch(fail);
+                    return {};
+                },
+                onRuntimeInitialized: () => {
+                    if (settled) return;
+                    try {
+                        const code = options.init();
+                        if (typeof code === "number" && code !== 0) {
+                            throw new Error(`init() returned ${code}`);
+                        }
+                        runtime = options;
+                        settled = true;
+                        clearTimeout(timer);
+                        clearModelIntervals();
+                        resolve();
+                    } catch (error) {
+                        fail(error);
+                    }
+                },
             };
 
-            // If it's already initialized by someone else or quickly
-            if (Module.calledRun) {
-                 Module.onRuntimeInitialized();
-            }
-        });
+            // The upstream loader installs legacy Node exception handlers. Scope
+            // those hooks to the model; it must not alter the host's error handling.
+            const modelProcess = Object.create(process);
+            modelProcess.on = (event, listener) => {
+                if (event !== "uncaughtException" && event !== "unhandledRejection") {
+                    process.on(event, listener);
+                }
+                return modelProcess;
+            };
+            const execute = vm.compileFunction(fs.readFileSync(MODEL_FILE, "utf8"),
+                ["Module", "require", "module", "__filename", "__dirname", "process", "setInterval", "clearInterval"],
+                { filename: MODEL_FILE });
+            execute(options, createRequire(MODEL_FILE), { exports: {} }, MODEL_FILE,
+                path.dirname(MODEL_FILE), modelProcess,
+                (callback, delay) => {
+                    const interval = setInterval(callback, delay);
+                    modelIntervals.add(interval);
+                    return interval;
+                },
+                (interval) => { clearInterval(interval); modelIntervals.delete(interval); });
+        } catch (error) {
+            fail(error);
+        }
+    });
+}
+
+class EdgeImpulseClassifier {
+    init() {
+        // All classifiers share one WASM instance and one startup promise.
+        if (!initializationPromise) initializationPromise = initialize();
+        return initializationPromise;
+    }
+
+    _requireRuntime() {
+        if (!runtime) throw new Error("Module is not initialized");
+        return runtime;
     }
 
     getProjectInfo() {
-        if (!classifierInitialized) throw new Error('Module is not initialized');
-        return this._convertToOrdinaryJsObject(Module.get_project(), Module.emcc_classification_project_t.prototype);
-    }
-
-    classify(rawData, debug = false) {
-        if (!classifierInitialized) throw new Error('Module is not initialized');
-
-        const obj = this._arrayToHeap(rawData);
-        let ret = Module.run_classifier(obj.buffer.byteOffset, rawData.length, debug);
-        Module._free(obj.ptr);
-
-        if (ret.result !== 0) {
-            throw new Error('Classification failed (err code: ' + ret.result + ')');
-        }
-
-        return this._fillResultStruct(ret);
-    }
-
-    classifyContinuous(rawData, enablePerfCal = true) {
-        if (!classifierInitialized) throw new Error('Module is not initialized');
-
-        const obj = this._arrayToHeap(rawData);
-        let ret = Module.run_classifier_continuous(obj.buffer.byteOffset, rawData.length, false, enablePerfCal);
-        Module._free(obj.ptr);
-
-        if (ret.result !== 0) {
-            throw new Error('Classification failed (err code: ' + ret.result + ')');
-        }
-
-        return this._fillResultStruct(ret);
+        const module = this._requireRuntime();
+        return this._convertToOrdinaryJsObject(module.get_project(), module.emcc_classification_project_t.prototype);
     }
 
     getProperties() {
-        if (!classifierInitialized) throw new Error('Module is not initialized');
-        return this._convertToOrdinaryJsObject(Module.get_properties(), Module.emcc_classification_properties_t.prototype);
+        const module = this._requireRuntime();
+        return this._convertToOrdinaryJsObject(module.get_properties(), module.emcc_classification_properties_t.prototype);
     }
 
-    setThreshold(obj) {
-        const ret = Module.set_threshold(obj);
-        if (!ret.success) {
-            throw new Error(ret.error);
+    classify(rawData, debug = false) {
+        const module = this._requireRuntime();
+        const properties = this.getProperties();
+        if (!rawData || rawData.length !== properties.input_features_count) {
+            throw new Error(`Expected ${properties.input_features_count} input features, received ${rawData?.length ?? 0}`);
+        }
+        return this._run(rawData, (ptr) => module.run_classifier(ptr, rawData.length, debug), properties);
+    }
+
+    classifyContinuous(rawData, enablePerfCal = true) {
+        const module = this._requireRuntime();
+        return this._run(rawData,
+            (ptr) => module.run_classifier_continuous(ptr, rawData.length, false, enablePerfCal),
+            this.getProperties());
+    }
+
+    setThreshold(value) {
+        const result = this._requireRuntime().set_threshold(value);
+        try {
+            if (!result.success) throw new Error(result.error);
+        } finally {
+            result.delete?.();
         }
     }
 
-    _arrayToHeap(data) {
-        let typedArray = new Float32Array(data);
-        let numBytes = typedArray.length * typedArray.BYTES_PER_ELEMENT;
-        let ptr = Module._malloc(numBytes);
-        let heapBytes = new Uint8Array(Module.HEAPU8.buffer, ptr, numBytes);
-        heapBytes.set(new Uint8Array(typedArray.buffer));
-        return { ptr: ptr, buffer: heapBytes };
+    _run(rawData, classify, properties) {
+        const module = this._requireRuntime();
+        if ((!Array.isArray(rawData) && !ArrayBuffer.isView(rawData)) || !rawData.length) {
+            throw new TypeError("Input must be a nonempty numeric array");
+        }
+        const values = Float32Array.from(rawData);
+        if (!values.every(Number.isFinite)) throw new TypeError("Input features must be finite numbers");
+        const ptr = module._malloc(values.byteLength);
+        if (!ptr) throw new Error("Could not allocate model input buffer");
+        let result;
+        try {
+            module.HEAPF32.set(values, ptr / Float32Array.BYTES_PER_ELEMENT);
+            result = classify(ptr);
+            if (result.result !== 0) throw new Error(`Classification failed (err code: ${result.result})`);
+            return this._fillResultStruct(result, properties);
+        } finally {
+            try {
+                result?.delete();
+            } finally {
+                module._free(ptr);
+            }
+        }
     }
 
-    _convertToOrdinaryJsObject(emboundObj, prototype) {
-        let newObj = { };
-        for (const key of Object.getOwnPropertyNames(prototype)) {
-            const descriptor = Object.getOwnPropertyDescriptor(prototype, key);
-            if (descriptor && typeof descriptor.get === 'function') {
-                newObj[key] = emboundObj[key];
-            }
-        }
-        return newObj;
-    }
-
-    _fillResultStruct(ret) {
-        let props = Module.get_properties();
-        let jsResult = {
-            anomaly: ret.anomaly,
-            results: []
-        };
-        for (let cx = 0; cx < ret.size(); cx++) {
-            let c = ret.get(cx);
-            if (props.model_type === 'object_detection' || props.model_type === 'constrained_object_detection') {
-                jsResult.results.push({ label: c.label, value: c.value, x: c.x, y: c.y, width: c.width, height: c.height });
-            }
-            else {
-                jsResult.results.push({ label: c.label, value: c.value });
-            }
-            c.delete();
-        }
-        if (props.has_object_tracking) {
-            jsResult.object_tracking_results = [];
-            for (let cx = 0; cx < ret.object_tracking_size(); cx++) {
-                let c = ret.object_tracking_get(cx);
-                jsResult.object_tracking_results.push({ object_id: c.object_id, label: c.label, value: c.value, x: c.x, y: c.y, width: c.width, height: c.height });
-                c.delete();
-            }
-        }
-        if (props.has_visual_anomaly_detection) {
-            jsResult.visual_ad_max = ret.visual_ad_max;
-            jsResult.visual_ad_mean = ret.visual_ad_mean;
-            jsResult.visual_ad_grid_cells = [];
-            for (let cx = 0; cx < ret.visual_ad_grid_cells_size(); cx++) {
-                let c = ret.visual_ad_grid_cells_get(cx);
-                jsResult.visual_ad_grid_cells.push({ label: c.label, value: c.value, x: c.x, y: c.y, width: c.width, height: c.height });
-                c.delete();
-            }
-        }
-        if (ret.freeform) {
-            jsResult.freeform = [];
-            for (let ix = 0; ix < ret.freeform.size(); ix++) {
-                let arr = [];
-                const tensor = ret.freeform.get(ix);
-                for (let jx = 0; jx < tensor.size(); jx++) {
-                    arr.push(tensor.get(jx));
+    _convertToOrdinaryJsObject(bound, prototype) {
+        try {
+            const result = {};
+            for (const key of Object.getOwnPropertyNames(prototype)) {
+                if (typeof Object.getOwnPropertyDescriptor(prototype, key)?.get === "function") {
+                    const value = bound[key];
+                    result[key] = Array.isArray(value) ? value.slice() : value;
                 }
-                jsResult.freeform.push(arr);
+            }
+            return result;
+        } finally {
+            bound.delete();
+        }
+    }
+
+    _readResults(size, get, keys) {
+        const values = [];
+        for (let index = 0; index < size; index++) {
+            const bound = get(index);
+            try {
+                values.push(Object.fromEntries(keys.map((key) => [key, bound[key]])));
+            } finally {
+                bound.delete();
             }
         }
-        ret.delete();
-        return jsResult;
+        return values;
+    }
+
+    _fillResultStruct(result, properties) {
+        const boundingBoxKeys = ["label", "value", "x", "y", "width", "height"];
+        const detection = ["object_detection", "constrained_object_detection"].includes(properties.model_type);
+        const converted = {
+            anomaly: result.anomaly,
+            results: this._readResults(result.size(), (i) => result.get(i),
+                detection ? boundingBoxKeys : ["label", "value"]),
+        };
+        if (properties.has_object_tracking) {
+            converted.object_tracking_results = this._readResults(result.object_tracking_size(),
+                (i) => result.object_tracking_get(i), ["object_id", ...boundingBoxKeys]);
+        }
+        if (properties.has_visual_anomaly_detection) {
+            converted.visual_ad_max = result.visual_ad_max;
+            converted.visual_ad_mean = result.visual_ad_mean;
+            converted.visual_ad_grid_cells = this._readResults(result.visual_ad_grid_cells_size(),
+                (i) => result.visual_ad_grid_cells_get(i), boundingBoxKeys);
+        }
+        const freeform = result.freeform;
+        if (freeform) {
+            try {
+                converted.freeform = [];
+                for (let index = 0; index < freeform.size(); index++) {
+                    const tensor = freeform.get(index);
+                    try {
+                        converted.freeform.push(Array.from({ length: tensor.size() }, (_, i) => tensor.get(i)));
+                    } finally {
+                        tensor.delete?.();
+                    }
+                }
+            } finally {
+                freeform.delete?.();
+            }
+        }
+        return converted;
     }
 }
 

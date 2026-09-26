@@ -58,17 +58,17 @@ class GlassesInterface {
 
     // Sensors & ML
     console.log("Initializing ML gesture detector...");
-    this.mlDetector = new MLGestureDetector(this.config.ML_WINDOW_SIZE);
+    this.mlDetector = new MLGestureDetector();
     await this.mlDetector.ready();
     console.log("ML gesture detector ready");
 
     console.log("Initializing sensors...");
     this.sensorManager = new SensorManager(this.device, {
-      enabledSensors: ["acceleration", "orientation"],
+      enabledSensors: ["acceleration"],
       publisherEnabled: false,
     });
-    this.sensorManager.setSensorRate("acceleration", this.config.DEFAULT_SENSOR_RATE);
-    this.sensorManager.setSensorRate("orientation", this.config.DEFAULT_SENSOR_RATE);
+    this.sensorManager.setSensorRate("acceleration", this.mlDetector.sampleIntervalMs);
+    delete this.sensorManager.outputThrottleMs.acceleration;
 
     this._setupSensorFeed();
     await this.sensorManager.startSensors();
@@ -78,26 +78,10 @@ class GlassesInterface {
   }
 
   _setupSensorFeed() {
-    let latestAcc = null;
     this.sensorManager.on("acceleration", (event) => {
-      if (event?.message?.acceleration) {
-        latestAcc = event.message.acceleration;
-      }
-    });
-
-    this.sensorManager.on("orientation", (event) => {
-      if (event?.message?.orientation && latestAcc) {
-        if (this.isWaitingForGesture) {
-          const orient = event.message.orientation;
-          this.mlDetector.addSample({
-            accX: latestAcc.x,
-            accY: latestAcc.y,
-            accZ: latestAcc.z,
-            heading: orient.heading,
-            pitch: orient.pitch,
-            roll: orient.roll,
-          });
-        }
+      if (this.isWaitingForGesture && event?.message?.acceleration) {
+        const { x, y, z } = event.message.acceleration;
+        this.mlDetector.addSample({ accX: x, accY: y, accZ: z });
       }
     });
   }
@@ -111,7 +95,8 @@ class GlassesInterface {
     }
 
     const sorted = (result?.results || [])
-      .filter(r => r.label && r.label.toLowerCase() !== "idle")
+      .map(r => ({ ...r, label: r.label?.replace(/^\d+_/, "").toLowerCase() }))
+      .filter(r => ["nod", "yes", "shake", "no"].includes(r.label))
       .sort((a, b) => b.value - a.value);
 
     if (sorted.length === 0) return;

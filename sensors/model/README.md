@@ -1,87 +1,16 @@
-# Edge Impulse Model Directory
+# Gesture models
 
-This directory contains trained **Edge Impulse WebAssembly models** for gesture recognition.
+WearMux includes the pretrained BrilliantWear glasses gesture model in
+[`brilliantwear-glasses/`](brilliantwear-glasses/README.md). The VRU interaction
+and the `sensors:ml-gesture` command load this local Edge Impulse WebAssembly
+export through `sensors/lib/ml/ei-classifier.js`.
 
-## Required Files
+The model expects 50 acceleration samples (`x, y, z`, scaled by 1/4) at a 20 ms
+interval: 150 values per one-second window. Its labels are `0_idle`, `1_nod`,
+and `2_shake`. Inference runs on the WearMux host and requires no online service.
+See the bundled model README for provenance, license, checksums, and metadata.
 
-After training and exporting your model from Edge Impulse Studio, place these files here:
-
-- **`edge-impulse-standalone.js`** - WebAssembly runtime and model loader
-- **`edge-impulse-standalone.wasm`** - Compiled neural network model
-
-## How to Get Your Model
-
-### 1. Train Your Model
-
-Follow the workflow in [`ML_README.md`](../ML_README.md):
-
-1. Collect training data using `collect-training-data.js`
-2. Upload to [Edge Impulse Studio](https://studio.edgeimpulse.com/)
-3. Design impulse and train neural network
-4. Achieve >90% validation accuracy
-
-### 2. Export for Node.js
-
-In Edge Impulse Studio:
-
-1. Go to **Deployment** tab
-2. Select **WebAssembly**
-3. Click **Build**
-4. Download the generated `.zip` file
-5. Extract and place both `.js` and `.wasm` files in this directory
-
-### 3. Verify Installation
-
-Your directory should look like this:
-
-```
-model/
-├── README.md (this file)
-├── edge-impulse-standalone.js
-└── edge-impulse-standalone.wasm
-```
-
-## Usage
-
-The model is automatically loaded by:
-
-- **`real-time-ml-gesture.js`** - Real-time gesture detection
-- **`lib/ei-classifier.js`** - Edge Impulse classifier wrapper
-
-No manual configuration needed - just place the files here and run!
-
-## Model Information
-
-**Typical Model Specs:**
-- Input: 6 features (accX, accY, accZ, heading, pitch, roll)
-- Window: 30 samples (600ms at 20Hz)
-- Output: Gesture probabilities
-- Size: 30-100KB
-- Inference time: 5-15ms
-
-## Updating Your Model
-
-To update with a new trained model:
-
-1. Train new version in Edge Impulse Studio
-2. Export as WebAssembly
-3. Replace existing files in this directory
-4. Restart `real-time-ml-gesture.js`
-
-## Troubleshooting
-
-### "Model not found" error
-- Ensure both `.js` and `.wasm` files are present
-- Check file names match exactly: `edge-impulse-standalone.*`
-- Verify files are not corrupted (re-download if needed)
-
-### Low accuracy
-- Retrain with more diverse data
-- Check confusion matrix in Edge Impulse Studio
-- Ensure training accuracy >90%
-
-## Resources
-
-- [Edge Impulse Documentation](https://docs.edgeimpulse.com/)
-- [ML Implementation Guide](../ML_IMPLEMENTATION_GUIDE.md)
-- [ML Gesture Guide](../ML_GESTURE_GUIDE.md)
+The existing `model.tflite` file and training workflows are separate from the
+bundled model. Copying a custom export into this parent directory does not
+replace the model selected by the classifier. When updating the bundled export,
+update both JS and WASM files together and check the input contract.

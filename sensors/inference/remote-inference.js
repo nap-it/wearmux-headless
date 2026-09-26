@@ -7,7 +7,7 @@
 // Env vars:
 //   MESSAGE_TRANSPORT            Select mqtt or zenoh
 //   TOPIC_PREFIX                 Root for sensor and inference topics
-//   ML_WINDOW_SIZE               Sliding window sample count (default: 30 = 1.5s at 20 Hz)
+//   Window size and sample interval come from the bundled model (50 samples at 20 ms).
 //   ML_CONFIDENCE                Minimum confidence to publish a result (default: 0.7)
 //   DEBUG                        Set to 1 for verbose logging
 
@@ -46,7 +46,7 @@ class RemoteInferencePipeline {
     constructor(options = {}) {
         this.pubPrefix = options.pubPrefix || topic("inference");
         this.subExpression = options.subExpression || topic("sensors", "acceleration");
-        this.windowSize = options.windowSize || 30;
+        this.windowSize = null;
         this.confidenceThreshold = options.confidenceThreshold || 0.7;
         this.debug = options.debug || false;
 
@@ -57,7 +57,7 @@ class RemoteInferencePipeline {
         this.transport = options.transport || selectedTransport();
         if (this.transport === "none") throw new Error("Set MESSAGE_TRANSPORT=mqtt or zenoh");
 
-        this.detector = options.detector || new MLGestureDetector(this.windowSize);
+        this.detector = options.detector || new MLGestureDetector();
         this.publisher = options.publisher || createPublisher({
             transport: this.transport,
             keyPrefix: this.pubPrefix,
@@ -115,6 +115,7 @@ class RemoteInferencePipeline {
         console.log("Loading ML gesture detector...");
         try {
             await this.detector.ready();
+            this.windowSize = this.detector.windowSize;
         } catch (e) {
             throw new Error(`Failed to load ML model: ${e.message}`);
         }
@@ -142,7 +143,6 @@ class RemoteInferencePipeline {
 
 async function main() {
     const pipeline = new RemoteInferencePipeline({
-        windowSize: Number(process.env.ML_WINDOW_SIZE) || 30,
         confidenceThreshold: Number(process.env.ML_CONFIDENCE) || 0.7,
         debug: process.env.DEBUG === "1",
     });

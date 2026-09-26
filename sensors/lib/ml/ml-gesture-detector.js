@@ -3,9 +3,10 @@ const EventEmitter = require("events");
 const EdgeImpulseClassifier = require("./ei-classifier.js");
 
 class MLGestureDetector extends EventEmitter {
-    constructor(windowSize = 30) { // 30 samples for 1.5s at 20Hz
+    constructor() {
         super();
-        this.windowSize = windowSize;
+        // Model metadata is authoritative, including for legacy callers passing a size.
+        this.windowSize = null;
         this.buffer = [];
         this.classifier = new EdgeImpulseClassifier();
         this.initialized = false;
@@ -19,6 +20,13 @@ class MLGestureDetector extends EventEmitter {
     async _init() {
         try {
             await this.classifier.init();
+            this.modelProperties = this.classifier.getProperties();
+            const samples = this.modelProperties.input_features_count / 3;
+            if (!Number.isInteger(samples) || samples <= 0) {
+                throw new Error("Gesture model must accept acceleration xyz samples");
+            }
+            this.windowSize = samples;
+            this.sampleIntervalMs = this.modelProperties.interval_ms;
             this.initialized = true;
         } catch (err) {
             this.initError = err;
@@ -34,6 +42,7 @@ class MLGestureDetector extends EventEmitter {
 
     // Call this with each new sensor reading
     addSample(sensorData) {
+        if (!this.initialized) return;
         // sensorData: { accX, accY, accZ } — scaled by 1/4 to match SDK training format
         this.buffer.push([
             sensorData.accX / 4,
@@ -43,7 +52,7 @@ class MLGestureDetector extends EventEmitter {
         if (this.buffer.length > this.windowSize) {
             this.buffer.shift();
         }
-        if (this.buffer.length === this.windowSize && this.initialized) {
+        if (this.buffer.length === this.windowSize) {
             this._classify();
         }
     }

@@ -81,7 +81,7 @@ async function main() {
     let mlDetector = null;
 
     if (enableMLGestures || process.env.ML_GESTURES === '1') {
-        mlDetector = new MLGestureDetector(30);
+        mlDetector = new MLGestureDetector();
         console.log('\nInitializing ML gesture detector...');
         try {
             await mlDetector.ready();
@@ -109,6 +109,12 @@ async function main() {
         }
     }
 
+    if (mlDetector) {
+        sensorManager.enableSensor("acceleration", mlDetector.sampleIntervalMs);
+        delete sensorManager.outputThrottleMs.acceleration;
+        if (!enabledSensors.includes("acceleration")) enabledSensors.push("acceleration");
+    }
+
     // Setup clean event handlers
     sensorManager.on("error", (err) => {
         console.error("[ERROR] Sensor error:", err);
@@ -125,7 +131,6 @@ async function main() {
     const tapHandler = enabledSensors.includes("tapDetector") ? new TapDetectorHandler() : null;
 
     // ML gesture detection event handler
-    let latestAcc = null;
     if (mlDetector) {
         mlDetector.on('ml-gesture', (result) => {
             if (result && result.results && result.results.length > 0) {
@@ -174,7 +179,7 @@ async function main() {
 
             // Feed to ML detector
             if (mlDetector) {
-                latestAcc = a;
+                mlDetector.addSample({ accX: a.x, accY: a.y, accZ: a.z });
             }
         });
     }
@@ -215,17 +220,6 @@ async function main() {
             sensorLines[sensorLineMap.orientation] = line;
             updateDisplay(sensorLines.filter(Boolean));
 
-            // Feed to ML detector
-            if (mlDetector && latestAcc) {
-                mlDetector.addSample({
-                    accX: latestAcc.x,
-                    accY: latestAcc.y,
-                    accZ: latestAcc.z,
-                    heading: heading,
-                    pitch: pitch,
-                    roll: roll
-                });
-            }
         });
     }
 

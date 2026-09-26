@@ -4,7 +4,7 @@ const { SensorManager } = require('../lib/sensor-manager');
 const { DeviceManager } = require('../../utils/device-manager');
 
 async function main() {
-    const detector = new MLGestureDetector(30);
+    const detector = new MLGestureDetector();
 
     const isDebugMode = process.env.DEBUG === '1';
     let lastGestureLines = 0;
@@ -41,6 +41,8 @@ async function main() {
 
     // Start sensor manager
     const sensorManager = new SensorManager(device, { enabledSensors: ['acceleration'] });
+    sensorManager.setSensorRate('acceleration', detector.sampleIntervalMs);
+    delete sensorManager.outputThrottleMs.acceleration;
 
     sensorManager.on('acceleration', (event) => {
         if (isDebugMode) {

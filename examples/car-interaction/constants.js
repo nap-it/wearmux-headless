@@ -50,9 +50,6 @@ const GLASSES_CONFIG = {
   TIMEOUT_DISPLAY_MS: 2000,
   CONFIRMATION_DISPLAY_MS: 5000,
 
-  // ML detector
-  ML_WINDOW_SIZE: 30, // 30 samples = 1.5s at 20Hz
-
   // Sensor config defaults
   DEFAULT_SENSOR_RATE: 20,
   DEFAULT_FONT_SIZE: 40,
