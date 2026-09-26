@@ -1,128 +1,105 @@
-const DEFAULTS = Object.freeze({
-    windowMs: 1500,
-    nodThresholdDeg: 16,
-    shakeThresholdDeg: 24,
-    deadbandDeg: 2,
-});
+const EdgeImpulseClassifier = require("../../sensors/lib/ml/ei-classifier");
 
-function positiveNumber(value, fallback) {
-    const number = Number(value);
-    return Number.isFinite(number) && number > 0 ? number : fallback;
-}
+// The SDK takes a sampling interval in milliseconds, not a frequency in Hz.
+// Match the bundled BrilliantWear model: acceleration x/y/z every 20 ms.
+const GESTURE_SENSOR = Object.freeze({ type: "acceleration", intervalMs: 20 });
+const GESTURES = Object.freeze({ "1_nod": "nod", "2_shake": "shake" });
 
-function wrapDegrees(value) {
-    return ((value + 540) % 360) - 180;
-}
-
-function unwrap(values, wrap) {
-    if (!values.length) return [];
-    const result = [0];
-    for (let index = 1; index < values.length; index += 1) {
-        const delta = values[index] - values[index - 1];
-        result.push(result[index - 1] + (wrap ? wrapDegrees(delta) : delta));
+function modelWindowSize(classifier) {
+    const properties = classifier.getProperties();
+    if (properties.interval_ms !== GESTURE_SENSOR.intervalMs ||
+        !Number.isInteger(properties.input_features_count) ||
+        properties.input_features_count <= 0 || properties.input_features_count % 3 !== 0) {
+        throw new Error("The gesture model must accept acceleration x/y/z at 20 ms intervals");
     }
-    return result;
-}
-
-function axisMovement(values, deadbandDeg) {
-    if (values.length < 2) return null;
-    const start = values[0];
-    const end = values[values.length - 1];
-    let min = Infinity;
-    let max = -Infinity;
-    let direction = 0;
-    let reversals = 0;
-
-    for (let index = 0; index < values.length; index += 1) {
-        min = Math.min(min, values[index]);
-        max = Math.max(max, values[index]);
-        if (index === 0) continue;
-        const delta = values[index] - values[index - 1];
-        if (Math.abs(delta) < deadbandDeg) continue;
-        const nextDirection = Math.sign(delta);
-        if (direction && nextDirection !== direction) reversals += 1;
-        direction = nextDirection;
-    }
-
-    const range = max - min;
-    const excursion = Math.max(Math.abs(min - start), Math.abs(max - start));
-    return {
-        range,
-        excursion,
-        reversals,
-        returned: Math.abs(end - start) <= Math.max(8, excursion * 0.65),
-    };
+    return properties.input_features_count / 3;
 }
 
 class NodDetector {
-    constructor(sensorManager, options = {}) {
-        this.sensorManager = sensorManager;
-        this.windowMs = positiveNumber(options.windowMs ?? process.env.VRU_GESTURE_WINDOW_MS, DEFAULTS.windowMs);
-        this.nodThresholdDeg = positiveNumber(options.nodThresholdDeg ?? process.env.VRU_NOD_THRESHOLD_DEG, DEFAULTS.nodThresholdDeg);
-        this.shakeThresholdDeg = positiveNumber(options.shakeThresholdDeg ?? process.env.VRU_SHAKE_THRESHOLD_DEG, DEFAULTS.shakeThresholdDeg);
-        this.deadbandDeg = positiveNumber(options.deadbandDeg ?? process.env.VRU_GESTURE_DEADBAND_DEG, DEFAULTS.deadbandDeg);
-        this.samples = [];
-        this.callback = null;
-        this.active = false;
-        this.onOrientation = (event) => this._handleOrientation(event);
+    static async loadClassifier() {
+        const classifier = new EdgeImpulseClassifier();
+        await classifier.init();
+        modelWindowSize(classifier);
+        return classifier;
     }
 
-    start(callback) {
-        if (!this.sensorManager) throw new Error("The selected device has no active sensor manager");
-        if (!this.sensorManager.getEnabledSensors().includes("orientation")) {
-            throw new Error("Orientation sensing is required for nod/shake detection");
+    constructor(sensorManager, { classifier, confidence = process.env.VRU_GESTURE_CONFIDENCE } = {}) {
+        this.sensorManager = sensorManager;
+        this.classifier = classifier;
+        this.windowSize = modelWindowSize(classifier);
+        const threshold = Number(confidence);
+        this.confidence = Number.isFinite(threshold) && threshold > 0 && threshold <= 1 ? threshold : 0.6;
+        this.samples = [];
+        this.lastTimestamp = null;
+        this.active = false;
+        this.onAcceleration = (event) => this._handleAcceleration(event);
+    }
+
+    start(callback, onError) {
+        if (!this.sensorManager?.getEnabledSensors().includes(GESTURE_SENSOR.type)) {
+            throw new Error("Acceleration sensing is required for the BrilliantWear gesture model");
         }
         this.stop();
-        this.samples = [];
         this.callback = callback;
+        this.onError = onError;
         this.active = true;
-        this.sensorManager.on("orientation", this.onOrientation);
+        this.sensorManager.on(GESTURE_SENSOR.type, this.onAcceleration);
     }
 
     stop() {
-        if (this.active) this.sensorManager?.off("orientation", this.onOrientation);
+        if (this.active) this.sensorManager.off(GESTURE_SENSOR.type, this.onAcceleration);
         this.active = false;
         this.callback = null;
+        this.onError = null;
+        this.samples = [];
+        this.lastTimestamp = null;
     }
 
-    _handleOrientation(event) {
+    _handleAcceleration(event) {
         if (!this.active) return;
-        const orientation = event?.message?.orientation;
-        if (![orientation?.heading, orientation?.pitch].every(Number.isFinite)) return;
-
-        const now = Date.now();
-        this.samples.push({
-            ts: now,
-            heading: orientation.heading,
-            pitch: orientation.pitch,
-        });
-        this.samples = this.samples.filter((sample) => now - sample.ts <= this.windowMs);
-        if (this.samples.length < 8) return;
-
-        const heading = axisMovement(unwrap(this.samples.map((sample) => sample.heading), true), this.deadbandDeg);
-        const pitch = axisMovement(this.samples.map((sample) => sample.pitch), this.deadbandDeg);
-        if (!heading || !pitch) return;
-
-        const nod = pitch.excursion >= this.nodThresholdDeg && pitch.reversals >= 1 && pitch.returned;
-        const shake = heading.excursion >= this.shakeThresholdDeg && heading.reversals >= 1 && heading.returned;
-        if (!nod && !shake) return;
-
-        let gesture;
-        if (nod && shake) {
-            gesture = pitch.excursion / this.nodThresholdDeg >= heading.excursion / this.shakeThresholdDeg
-                ? "nod"
-                : "shake";
-        } else {
-            gesture = nod ? "nod" : "shake";
+        const { acceleration, timestamp } = event?.message || {};
+        const values = [acceleration?.x, acceleration?.y, acceleration?.z];
+        if (!values.every(Number.isFinite)) {
+            this.samples = [];
+            this.lastTimestamp = null;
+            return;
         }
+        const sampleTime = Number.isFinite(timestamp) ? timestamp : Date.now();
+        if (this.lastTimestamp !== null) {
+            const gap = sampleTime - this.lastTimestamp;
+            if (gap === 0) return; // Duplicate packet, not another sample.
+            // Never join movement from before a disconnect or a stalled stream.
+            if (gap < 0 || gap > GESTURE_SENSOR.intervalMs * 3) this.samples = [];
+        }
+        this.lastTimestamp = sampleTime;
+        // Preserve the SDK example's exact feature order and normalization.
+        this.samples.push(values.map((value) => value / 4));
+        if (this.samples.length > this.windowSize) this.samples.shift();
+        if (this.samples.length < this.windowSize) return;
+
+        let top;
+        try {
+            const result = this.classifier.classify(this.samples.flat());
+            top = result.results?.reduce((best, entry) =>
+                Number.isFinite(entry.value) && (!best || entry.value > best.value) ? entry : best, null);
+        } catch (error) {
+            const onError = this.onError;
+            this.stop();
+            if (onError) onError(error);
+            else console.warn("[VRU interaction] gesture inference failed:", error?.message || error);
+            return;
+        }
+        const gesture = GESTURES[top?.label];
+        if (!gesture || top.value <= this.confidence) return;
 
         const callback = this.callback;
         this.stop();
         callback?.(gesture, {
-            pitchExcursionDeg: pitch.excursion,
-            headingExcursionDeg: heading.excursion,
+            model: "brilliantwear-edge-impulse",
+            label: top.label,
+            confidence: top.value,
         });
     }
 }
 
-module.exports = { NodDetector };
+module.exports = { NodDetector, GESTURE_SENSOR };

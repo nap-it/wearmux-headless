@@ -182,9 +182,10 @@ For off-device inference, see the [consumer guide](examples/consumers/README.md)
 ## VRU stop-request interaction
 
 The VRU stop-request handler owns DENM matching and response-event generation.
-WearMux displays its question, listens to the selected device session's orientation
-sensor, and returns a prompt-bound yes/no answer. A nod maps to yes (continue
-stopping); a shake maps to no (the handler publishes its existing response event).
+WearMux displays its question, listens to the selected device session's acceleration
+sensor, and returns a prompt-bound yes/no answer. The approaching vehicle asks
+whether the pedestrian wants it to stop. A nod maps to yes (stop); a shake maps
+to no (the handler publishes its existing response event).
 
 ```mermaid
 sequenceDiagram
@@ -200,11 +201,15 @@ sequenceDiagram
     H->>B: Publish bwear/vru/prompt with prompt_id
     B-->>I: Deliver prompt
     I->>D: Show question
-    D->>S: display.text / display.clear
+    D->>S: Compact display.prompt
+    S-->>D: displayReady acknowledgement
+    D-->>I: Question displayed
     I->>N: Start detection for prompt_id
-    S-->>N: orientation sensor events
-    N-->>I: nod or shake
+    S-->>N: Acceleration every 20 ms
+    N->>N: Local Edge Impulse inference
+    N-->>I: Confident nod or shake
     I->>B: Publish bwear/vru/answer with same prompt_id
+    I->>D: Clear prompt via display.clear
     B-->>H: Deliver normalized answer
     H->>E: Respond to the original event
     E->>B: Publish existing DENM response event on denm/events/vru
@@ -222,18 +227,45 @@ VRU_INTERACTION_ENABLED=1 MESSAGE_TRANSPORT=mqtt MQTT_BROKER_URL=mqtt://127.0.0.
 
 The handler's `config.ini` uses `bwear/vru/prompt` and
 `bwear/vru/answer`, a 15 second answer timeout, and manual-answer mode. Set
-`VRU_DEVICE_ID` when more than one connected display/orientation device could
+`VRU_DEVICE_ID` when more than one connected display/acceleration device could
 answer. With `VRU_INTERACTION_ENABLED=1`, the sessions runtime starts only the
-orientation sensor needed by the nod detector and skips the camera and
-microphone sessions, regardless of `ENABLED_SENSORS`. If `TOPIC_PREFIX`
-changes from `bwear`, update both handler topics to use that same root.
+acceleration sensor needed by the nod detector and skips the camera and
+microphone sessions, regardless of `ENABLED_SENSORS`. Acceleration is fixed to
+20 ms intervals (50 Hz), overriding `ACCELERATION_RATE` so model samples are
+not dropped or slowed. If `TOPIC_PREFIX` changes from `bwear`, update both
+handler topics to use that same root.
 
-The detector uses a configurable orientation-window heuristic because this
-checkout has no Edge Impulse nod/shake model. Defaults can be tuned with
-`VRU_GESTURE_WINDOW_MS`, `VRU_NOD_THRESHOLD_DEG`,
-`VRU_SHAKE_THRESHOLD_DEG`, and `VRU_GESTURE_DEADBAND_DEG`. Timeout sends no
-answer, so the Python handler applies its existing timeout policy. A wearable
-handles one prompt at a time; prompts received while it is busy are ignored and
+The display shows only the large centered question **Should I stop?**, spoken
+from the approaching vehicle's perspective. The wearer answers with a natural
+nod or shake, without on-screen instructions. Previous default handler questions
+are automatically updated to this wording; custom questions keep their meaning.
+Text is rendered into cropped monochrome bitmaps, cached for reuse, and shown
+in one display update. This avoids resizing a text image to the full display
+and reduces Bluetooth payload. Set `DISPLAY_TIMING=1` to log preparation,
+command transfer, and display acknowledgement timing on your connection.
+
+![Compact VRU question layout](display/assets/vru-prompt-preview.png)
+
+Detection uses the bundled model from the
+[BrilliantWear glasses-gestures example](https://brilliantsole.github.io/BrilliantWear-JavaScript-SDK/examples/glasses-gestures/),
+running locally in Node.js/WebAssembly on the WearMux host (your Mac).
+It uses 50 acceleration samples, ordered x/y/z and divided by 4, covering a
+1 second window. The window comes from the exported model's metadata; the
+web example's hard-coded 30-sample window does not match that export.
+Only the highest-scoring class is considered; `0_idle` produces no answer,
+`1_nod` means yes, and `2_shake` means no. A gesture must score above
+`VRU_GESTURE_CONFIDENCE` (default `0.6`).
+
+The model loads before MQTT prompt subscription and requires no separate install,
+Internet connection, `ML_GESTURES` setting, or model transfer to the glasses.
+Startup prints `BrilliantWear Edge Impulse model ready`. Detection begins only
+after the device's `displayReady` acknowledgement, and each prompt uses a fresh
+sample window. A missing acknowledgement aborts the prompt without answering.
+The old orientation thresholds (`VRU_NOD_THRESHOLD_DEG`, etc.) no longer apply.
+See [model provenance and licensing](sensors/model/README.md) for the pinned export.
+Timeout or inference failure sends no answer, so the Python handler applies its
+existing timeout policy. A wearable handles one prompt at a time; prompts
+received while it is busy are ignored and
 expire through the handler's normal timeout path.
 
 ### 🧠 Optional consumer examples
@@ -275,6 +307,7 @@ In the session runtime, an action without `deviceId` goes to the sole connected 
 | Action | Fields | Effect |
 | --- | --- | --- |
 | `display.text` | `text` | Show up to 500 characters on a device display |
+| `display.prompt` | `text` | Show a compact centered question |
 | `display.clear` | — | Clear the device display |
 | `display.image` | `data` | Show a base64 PNG or JPEG, up to 1 MiB |
 | `haptic.vibrate` | optional `effect`, `locations` | Trigger a supported SDK vibration effect; defaults to `strongClick100` |

@@ -4,6 +4,7 @@ const { ActionDispatcher } = require("./action-dispatcher");
 const { SensorManager, DEFAULT_SENSOR_RATES } = require("../sensors/lib/sensor-manager");
 const { CameraSession } = require("../camera/lib/camera-session");
 const { MicrophoneSession } = require("../microphone/lib/microphone-session");
+const { GESTURE_SENSOR } = require("../interactions/vru-stop-request/nod-detector");
 
 // Coordinates the capabilities exposed by one already-connected physical device.
 class DeviceSession {
@@ -83,18 +84,24 @@ class DeviceSession {
     async startSensors() {
         const requested = process.env.ENABLED_SENSORS?.split(",").map((sensor) => sensor.trim()).filter(Boolean);
         const enabled = this.vruInteractionEnabled
-            ? this.capabilities.sensors.filter((sensor) => sensor === "orientation")
+            ? this.capabilities.sensors.filter((sensor) => sensor === GESTURE_SENSOR.type)
             : requested?.length
                 ? this.capabilities.sensors.filter((sensor) => requested.includes(sensor))
                 : this.capabilities.sensors;
         if (!enabled.length) return;
         this.sensors = new SensorManager(this.device, {
             enabledSensors: [...enabled], side: process.env.DEVICE_SIDE || null,
-            // Preserve media sensor settings configured by the camera or microphone session.
-            publisherEnabled: false, clearRest: false,
+            // Interaction mode also disables any sensor configuration left on the device.
+            publisherEnabled: false, clearRest: this.vruInteractionEnabled,
         });
-        for (const [sensor, rate] of Object.entries(Config.getSensorRates())) {
-            if (rate !== null && enabled.includes(sensor)) this.sensors.setSensorRate(sensor, rate);
+        if (this.vruInteractionEnabled) {
+            this.sensors.setSensorRate(GESTURE_SENSOR.type, GESTURE_SENSOR.intervalMs);
+            // Inference needs every device sample, even if ACCELERATION_RATE limits publishing elsewhere.
+            delete this.sensors.outputThrottleMs[GESTURE_SENSOR.type];
+        } else {
+            for (const [sensor, rate] of Object.entries(Config.getSensorRates())) {
+                if (rate !== null && enabled.includes(sensor)) this.sensors.setSensorRate(sensor, rate);
+            }
         }
         this.sensors.on("error", (error) => console.warn(`[Device][${this.info.id}] sensor:`, error?.message || error));
         for (const sensor of enabled) {

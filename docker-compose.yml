@@ -37,10 +37,7 @@ services:
       - VRU_INTERACTION_ENABLED
       - VRU_DEVICE_ID
       - VRU_INTERACTION_TIMEOUT_MS
-      - VRU_GESTURE_WINDOW_MS
-      - VRU_NOD_THRESHOLD_DEG
-      - VRU_SHAKE_THRESHOLD_DEG
-      - VRU_GESTURE_DEADBAND_DEG
+      - VRU_GESTURE_CONFIDENCE
       - ZENOH_ROUTER=${ZENOH_ROUTER:-tcp/127.0.0.1:7447}
     volumes:
       - ./config:/config:ro
