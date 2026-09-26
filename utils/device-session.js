@@ -10,6 +10,7 @@ class DeviceSession {
     constructor(device, publisher, options = {}) {
         this.device = device;
         this.publisher = publisher;
+        this.vruInteractionEnabled = process.env.VRU_INTERACTION_ENABLED === "1";
         this.cameraIndex = options.cameraIndex || 0;
         this.microphoneIndex = options.microphoneIndex || 0;
         this.info = { id: device.bluetoothId || device.id || null, name: device.name || null };
@@ -54,16 +55,16 @@ class DeviceSession {
         this.device.addEventListener?.("isConnected", this.onConnection);
         console.log(`[Device][${this.info.id}] ${this.info.name || "unnamed"}: ${JSON.stringify(this.capabilities)}`);
         try {
-            // Start sensor configuration first; media sessions then add their own sensor rates.
+            // Configure sensors before starting any requested media sessions.
             await this.startSensors();
-            if (this.capabilities.camera) {
+            if (this.capabilities.camera && !this.vruInteractionEnabled) {
                 this.camera = new CameraSession(this.device, this.publisher, {
                     cameraIndex: this.cameraIndex, deviceInfo: this.info,
                 });
                 try { await this.camera.start(); }
                 catch (error) { console.warn(`[Device][${this.info.id}] camera:`, error?.message || error); this.camera = null; }
             }
-            if (this.capabilities.microphone) {
+            if (this.capabilities.microphone && !this.vruInteractionEnabled) {
                 this.microphone = new MicrophoneSession(this.device, this.publisher, {
                     microphoneIndex: this.microphoneIndex, deviceInfo: this.info,
                 });
@@ -81,14 +82,11 @@ class DeviceSession {
 
     async startSensors() {
         const requested = process.env.ENABLED_SENSORS?.split(",").map((sensor) => sensor.trim()).filter(Boolean);
-        const enabled = requested?.length
-            ? this.capabilities.sensors.filter((sensor) => requested.includes(sensor))
-            : this.capabilities.sensors;
-        if (process.env.VRU_INTERACTION_ENABLED === "1" &&
-            this.capabilities.sensors.includes("orientation") &&
-            !enabled.includes("orientation")) {
-            enabled.push("orientation");
-        }
+        const enabled = this.vruInteractionEnabled
+            ? this.capabilities.sensors.filter((sensor) => sensor === "orientation")
+            : requested?.length
+                ? this.capabilities.sensors.filter((sensor) => requested.includes(sensor))
+                : this.capabilities.sensors;
         if (!enabled.length) return;
         this.sensors = new SensorManager(this.device, {
             enabledSensors: [...enabled], side: process.env.DEVICE_SIDE || null,

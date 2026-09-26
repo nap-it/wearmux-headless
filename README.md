@@ -223,9 +223,10 @@ VRU_INTERACTION_ENABLED=1 MESSAGE_TRANSPORT=mqtt MQTT_BROKER_URL=mqtt://127.0.0.
 The handler's `config.ini` uses `bwear/vru/prompt` and
 `bwear/vru/answer`, a 15 second answer timeout, and manual-answer mode. Set
 `VRU_DEVICE_ID` when more than one connected display/orientation device could
-answer. An explicit `ENABLED_SENSORS` list is augmented with orientation while
-the adapter is enabled. If `TOPIC_PREFIX` changes from `bwear`, update both
-handler topics to use that same root.
+answer. With `VRU_INTERACTION_ENABLED=1`, the sessions runtime starts only the
+orientation sensor needed by the nod detector and skips the camera and
+microphone sessions, regardless of `ENABLED_SENSORS`. If `TOPIC_PREFIX`
+changes from `bwear`, update both handler topics to use that same root.
 
 The detector uses a configurable orientation-window heuristic because this
 checkout has no Edge Impulse nod/shake model. Defaults can be tuned with
