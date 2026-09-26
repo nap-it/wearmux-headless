@@ -13,6 +13,33 @@ This module provides a simple API to:
 - Auto-resize and letterbox to device resolution
 - Dithering and palette reduction for low-color displays (1/2/4 bpp)
 - Push a single image or run a slideshow with a configurable interval
+- Compact yes/no prompts through the `display.prompt` action
+
+## Interaction prompts
+
+The VRU interaction uses `display.prompt` with **Should I stop?**, a question
+from the approaching vehicle. The display centers the bold question with no
+gesture instructions; the wearer answers naturally with a nod or shake.
+Custom questions wrap to fit without silently dropping text;
+questions that cannot fit at a readable size are rejected.
+
+![Example VRU question on a 640 by 400 display](assets/vru-prompt-preview.png)
+
+`PromptDisplay` renders the question as a cropped black/white, one-bit
+bitmap, caches up to eight prepared layouts, and splits transfers to fit the
+device MTU. It queues the clear and drawing commands before one final display
+update, then waits for the SDK's `displayReady` acknowledgement before returning
+and allowing gesture monitoring to start. It first drains any acknowledgement
+pending from an earlier display action; each acknowledgement wait is bounded
+to three seconds and a missing acknowledgement fails the prompt.
+Packed pixel data depends on the question, font availability, and display size.
+
+Set `DISPLAY_TIMING=1` to log cache hits, preparation time, drawing/SDK flush
+time, previous/current acknowledgement wait times, tile count, packed pixel
+bytes, and bitmap command bytes. Command bytes
+include bitmap headers but exclude palette/setup commands and transport
+overhead. The timing measures host processing, SDK calls, and receipt of the
+device acknowledgement; it does not measure the physical display optically.
 
 ## Install Dependencies
 

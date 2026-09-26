@@ -17,6 +17,7 @@ class ActionDispatcher extends EventEmitter {
         this.publisher = options.publisher || null;
         this.subscriber = options.subscriber || null;
         this.textDisplay = null;
+        this.promptDisplay = null;
         this.displayManager = null;
         this._pending = Promise.resolve();
         this._started = false;
@@ -127,6 +128,22 @@ class ActionDispatcher extends EventEmitter {
     async dispatch(command) {
         if (this.device.isConnected === false) throw new Error("Device is disconnected");
         switch (command.action) {
+        case "display.prompt": {
+            if (typeof command.text !== "string" || !command.text.trim() || command.text.length > 500) {
+                throw new Error("display.prompt requires 1–500 characters of text");
+            }
+            await this._readyDisplay();
+            if (!this.promptDisplay) {
+                const { PromptDisplay } = require("../display/lib/prompt-display");
+                this.promptDisplay = new PromptDisplay(this.device);
+            }
+            // Prompt drawing owns black/white palette slots. Existing image
+            // renderers must refresh their palette before their next draw.
+            this.displayManager?.invalidatePaletteCache();
+            this.textDisplay?.displayManager?.invalidatePaletteCache();
+            await this.promptDisplay.show(command.text);
+            return;
+        }
         case "display.text": {
             if (typeof command.text !== "string" || !command.text.trim() || command.text.length > 500) {
                 throw new Error("display.text requires 1–500 characters of text");

@@ -44,6 +44,10 @@ class DisplayManager {
         }
     }
 
+    invalidatePaletteCache() {
+        this._devicePaletteCache = null;
+    }
+
     async showImageFile(filePath, opts = {}) {
         const { data, info } = await sharp(filePath)
             .toColourspace("srgb")

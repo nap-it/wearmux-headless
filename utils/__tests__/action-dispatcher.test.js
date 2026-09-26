@@ -8,6 +8,10 @@ jest.mock("../../display/lib/text-display", () => ({
     })),
 }));
 const { TextDisplay } = require("../../display/lib/text-display");
+jest.mock("../../display/lib/prompt-display", () => ({
+    PromptDisplay: jest.fn().mockImplementation(() => ({ show: jest.fn().mockResolvedValue(undefined) })),
+}));
+const { PromptDisplay } = require("../../display/lib/prompt-display");
 
 class FakeTransport extends EventEmitter {
     constructor() {
@@ -121,4 +125,18 @@ test("actions addressed to another device are ignored", async () => {
     expect(publisher.publish).not.toHaveBeenCalled();
     expect(device.clearDisplay).not.toHaveBeenCalled();
     await dispatcher.stop();
+});
+
+test("display.prompt uses a persistent renderer and invalidates image palette caches", async () => {
+    const dispatcher = new ActionDispatcher(fakeDevice(), { transport: "mqtt" });
+    const invalidatePaletteCache = jest.fn();
+    dispatcher.displayManager = { invalidatePaletteCache };
+    await dispatcher.dispatch({ action: "display.prompt", text: "Should I stop?" });
+    const renderer = PromptDisplay.mock.results.at(-1).value;
+    await dispatcher.dispatch({ action: "display.prompt", text: "Should I stop?" });
+    expect(renderer.show).toHaveBeenCalledTimes(2);
+    expect(renderer.show).toHaveBeenCalledWith("Should I stop?");
+    expect(invalidatePaletteCache).toHaveBeenCalledTimes(2);
+    await expect(dispatcher.dispatch({ action: "display.prompt", text: "x".repeat(501) })).rejects.toThrow("1–500");
+    expect(renderer.show).toHaveBeenCalledTimes(2);
 });
