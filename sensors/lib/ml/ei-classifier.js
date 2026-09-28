@@ -109,10 +109,13 @@ class EdgeImpulseClassifier {
         return this._convertToOrdinaryJsObject(module.get_properties(), module.emcc_classification_properties_t.prototype);
     }
 
-    classify(rawData, debug = false) {
+    classify(rawData, debug = false, { shortWindowFeatures = null } = {}) {
         const module = this._requireRuntime();
         const properties = this.getProperties();
-        if (!rawData || rawData.length !== properties.input_features_count) {
+        const isShortWindow = Number.isInteger(shortWindowFeatures) &&
+            rawData?.length === shortWindowFeatures && shortWindowFeatures > 0 &&
+            shortWindowFeatures < properties.input_features_count && shortWindowFeatures % 3 === 0;
+        if (!rawData || (rawData.length !== properties.input_features_count && !isShortWindow)) {
             throw new Error(`Expected ${properties.input_features_count} input features, received ${rawData?.length ?? 0}`);
         }
         return this._run(rawData, (ptr) => module.run_classifier(ptr, rawData.length, debug), properties);

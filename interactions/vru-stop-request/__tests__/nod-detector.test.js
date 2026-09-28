@@ -17,13 +17,17 @@ function setup(results = [{ label: "0_idle", value: 1 }]) {
     return { sensors, classifier, detector, answer, fail, emit };
 }
 
-test("uses the model's full sample window, exact xyz ordering and scaling", () => {
+test("uses the SDK example's 600 ms window, exact xyz ordering and scaling", () => {
     const { detector, emit, classifier, answer } = setup([{ label: "1_nod", value: 0.9 }]);
     detector.start(answer);
-    for (let i = 0; i < 49; i++) emit(i);
+    for (let i = 0; i < 29; i++) emit(i);
     expect(classifier.classify).not.toHaveBeenCalled();
-    emit(49);
-    expect(classifier.classify).toHaveBeenCalledWith(Array.from({ length: 50 }, (_, i) => [i / 4, 1, -1]).flat());
+    emit(29);
+    expect(classifier.classify).toHaveBeenCalledWith(
+        Array.from({ length: 30 }, (_, i) => [i / 4, 1, -1]).flat(),
+        false,
+        { shortWindowFeatures: 90 },
+    );
     expect(answer).toHaveBeenCalledWith("nod", expect.objectContaining({ confidence: 0.9 }));
 });
 
@@ -51,12 +55,12 @@ test.each([
 test("resets after a stream gap and ignores duplicate packets", () => {
     const { detector, emit, classifier, answer } = setup();
     detector.start(answer);
-    for (let i = 0; i < 49; i++) emit(i);
-    emit(48);
+    for (let i = 0; i < 29; i++) emit(i);
+    emit(28);
     expect(classifier.classify).not.toHaveBeenCalled();
-    for (let i = 100; i < 149; i++) emit(i);
+    for (let i = 100; i < 129; i++) emit(i);
     expect(classifier.classify).not.toHaveBeenCalled();
-    emit(149);
+    emit(129);
     expect(classifier.classify).toHaveBeenCalledTimes(1);
     detector.stop();
 });
@@ -64,12 +68,12 @@ test("resets after a stream gap and ignores duplicate packets", () => {
 test("invalid samples and new prompts cannot reuse an old window", () => {
     const { detector, emit, classifier, answer } = setup();
     detector.start(answer);
-    for (let i = 0; i < 49; i++) emit(i);
-    emit(49, { x: NaN, y: 1, z: 1 });
-    for (let i = 50; i < 99; i++) emit(i);
+    for (let i = 0; i < 29; i++) emit(i);
+    emit(29, { x: NaN, y: 1, z: 1 });
+    for (let i = 30; i < 59; i++) emit(i);
     expect(classifier.classify).not.toHaveBeenCalled();
     detector.stop();
-    emit(99);
+    emit(59);
     detector.start(answer);
     emit(100);
     expect(classifier.classify).not.toHaveBeenCalled();

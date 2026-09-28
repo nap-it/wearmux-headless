@@ -1,7 +1,7 @@
 const { createSubscriber, selectedTransport } = require("../../utils/transport");
 const { topic } = require("../../utils/topics");
 const { MessageDisplay } = require("./message-display");
-const { NodDetector, GESTURE_SENSOR } = require("./nod-detector");
+const { NodDetector, GESTURE_SENSOR, GESTURE_WINDOW_MS } = require("./nod-detector");
 
 const PROMPT_TOPIC = topic("vru", "prompt");
 const ANSWER_TOPIC = topic("vru", "answer");
@@ -56,7 +56,7 @@ class VruStopRequestInteraction {
         // Load the local WASM once before accepting prompts, outside the response deadline.
         this.classifier = await NodDetector.loadClassifier();
         const properties = this.classifier.getProperties();
-        console.log(`[VRU interaction] BrilliantWear Edge Impulse model ready (${properties.input_features_count / 3} acceleration samples, ${properties.interval_ms} ms interval)`);
+        console.log(`[VRU interaction] BrilliantWear Edge Impulse model ready (${GESTURE_WINDOW_MS / properties.interval_ms} acceleration samples over ${GESTURE_WINDOW_MS} ms; model metadata lists ${properties.input_features_count} features)`);
         this.subscriber.on("error", (error) =>
             console.warn("[VRU interaction] MQTT:", error?.message || error));
         this.subscriber.on("message", this.onMessage);

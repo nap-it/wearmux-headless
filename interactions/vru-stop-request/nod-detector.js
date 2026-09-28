@@ -1,18 +1,21 @@
 const EdgeImpulseClassifier = require("../../sensors/lib/ml/ei-classifier");
 
 // The SDK takes a sampling interval in milliseconds, not a frequency in Hz.
-// Match the bundled BrilliantWear model: acceleration x/y/z every 20 ms.
+// Match the glasses-gestures example's 600 ms acceleration window.
 const GESTURE_SENSOR = Object.freeze({ type: "acceleration", intervalMs: 20 });
+const GESTURE_WINDOW_MS = 600;
 const GESTURES = Object.freeze({ "1_nod": "nod", "2_shake": "shake" });
 
 function modelWindowSize(classifier) {
     const properties = classifier.getProperties();
+    const windowSize = GESTURE_WINDOW_MS / GESTURE_SENSOR.intervalMs;
+    const windowFeatures = windowSize * 3;
     if (properties.interval_ms !== GESTURE_SENSOR.intervalMs ||
         !Number.isInteger(properties.input_features_count) ||
-        properties.input_features_count <= 0 || properties.input_features_count % 3 !== 0) {
+        properties.input_features_count < windowFeatures || properties.input_features_count % 3 !== 0) {
         throw new Error("The gesture model must accept acceleration x/y/z at 20 ms intervals");
     }
-    return properties.input_features_count / 3;
+    return windowSize;
 }
 
 class NodDetector {
@@ -79,7 +82,11 @@ class NodDetector {
 
         let top;
         try {
-            const result = this.classifier.classify(this.samples.flat());
+            // The upstream glasses-gestures example sends this 90-feature window
+            // even though the bundled model metadata reports 150 input features.
+            const result = this.classifier.classify(this.samples.flat(), false, {
+                shortWindowFeatures: this.windowSize * 3,
+            });
             top = result.results?.reduce((best, entry) =>
                 Number.isFinite(entry.value) && (!best || entry.value > best.value) ? entry : best, null);
         } catch (error) {
@@ -102,4 +109,4 @@ class NodDetector {
     }
 }
 
-module.exports = { NodDetector, GESTURE_SENSOR };
+module.exports = { NodDetector, GESTURE_SENSOR, GESTURE_WINDOW_MS };
