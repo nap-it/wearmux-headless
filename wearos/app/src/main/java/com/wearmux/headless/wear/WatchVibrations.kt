@@ -1,7 +1,9 @@
 package com.wearmux.headless.wear
 
 import android.content.Context
+import android.media.AudioAttributes
 import android.os.Build
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -14,7 +16,16 @@ object WatchVibrations {
     fun play(context: Context, effect: String) {
         val vibrator = vibrator(context) ?: return
         try {
-            vibrator.vibrate(effectFor(effect.lowercase()))
+            // Plain vibrate() is tagged as touch feedback, which Samsung scales by the (often muted) touch intensity.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                vibrator.vibrate(effectFor(effect.lowercase()), VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(
+                    effectFor(effect.lowercase()),
+                    AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build(),
+                )
+            }
         } catch (e: Exception) {
             Log.w(TAG, "vibrate failed: ${e.message}")
         }
