@@ -1,5 +1,6 @@
 const { DeviceManager } = require("./device-manager");
 const { DeviceSession } = require("./device-session");
+const { WearOsServer } = require("./wearos-device");
 const { ACTION_TOPIC, RESULT_TOPIC } = require("./action-dispatcher");
 const { createPublisher, createSubscriber } = require("./transport");
 const { topic } = require("./topics");
@@ -29,6 +30,10 @@ class DeviceFleet {
         this.onConnected = (event) => {
             this.attach(event.message?.device).catch((error) =>
                 console.warn("[Fleet] device session:", error?.message || error));
+        };
+        this.onWearOsDevice = (device) => {
+            this.attach(device).catch((error) =>
+                console.warn("[Fleet] Wear OS session:", error?.message || error));
         };
         this.onScanningAvailable = () => this.scan();
         this.onNotScanning = () => {
@@ -69,9 +74,19 @@ class DeviceFleet {
                 console.warn("[Fleet] Wi-Fi connection:", error?.message || error));
         }
 
+        if (process.env.WEAROS_PORT) {
+            const port = Number(process.env.WEAROS_PORT);
+            if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("WEAROS_PORT must be a TCP port");
+            this.wearOs = new WearOsServer({ port, host: process.env.WEAROS_HOST });
+            this.wearOs.on("error", (error) => console.warn("[Fleet] Wear OS:", error?.message || error));
+            this.wearOs.on("device", this.onWearOsDevice);
+            await this.wearOs.start();
+            console.log(`[Fleet] Waiting for Wear OS watches on port ${this.wearOs.port}`);
+        }
+
         this.scanner = this.sdk.Scanner;
         if (!this.scanner?.isSupported) {
-            if (!process.env.DEVICE_IP) throw new Error("No BLE scanner available; set DEVICE_IP for Wi-Fi");
+            if (!process.env.DEVICE_IP && !this.wearOs) throw new Error("No BLE scanner available; set DEVICE_IP for Wi-Fi");
             return;
         }
         // Scanner events can stop while a connection is in progress; resume scanning afterward.
@@ -216,6 +231,8 @@ class DeviceFleet {
             try { await session.device.disconnect(); } catch {}
         }
         this.sessions.clear();
+        this.wearOs?.off("device", this.onWearOsDevice);
+        await this.wearOs?.stop();
         await this.publisher?.stop();
     }
 }

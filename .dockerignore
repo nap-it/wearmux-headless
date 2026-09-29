@@ -13,6 +13,9 @@ BrilliantSole-JavaScript-SDK/tflite-converter/
 # Exclude WearMux Headless node_modules (installed fresh inside Docker)
 wearmux-headless/node_modules/
 
+# Exclude the Wear OS companion app (built with Gradle, not used by the container)
+wearmux-headless/wearos/
+
 # ============================================================
 
 .vscode/

@@ -17,6 +17,8 @@ const DEFAULT_SENSOR_RATES = Object.freeze({
     stepCounter: 5,
     tapDetector: 5,
     pressure: 50,
+    // Only Wear OS watches report heart rate; the sensor itself sets the pace (about 1 Hz).
+    heartRate: 1000,
 });
 
 class SensorManager extends EventEmitter {
@@ -96,9 +98,9 @@ class SensorManager extends EventEmitter {
         this.sensorConfiguration = {};
 
         if (this.enabledSensors.length === 0) {
-            // Enable all sensors by default
+            // Enable all SDK sensors by default; heart rate is only requested explicitly.
             this.enabledSensors = Object.keys(this.availableSensors).filter(
-                (sensor) => sensor !== "camera" && sensor !== "microphone"
+                (sensor) => sensor !== "camera" && sensor !== "microphone" && sensor !== "heartRate"
             );
         }
 
@@ -184,7 +186,7 @@ class SensorManager extends EventEmitter {
             "orientation",
         ];
 
-        const allSensors = [...motionSensors, "activity", "stepCounter", "pressure", "tapDetector"];
+        const allSensors = [...motionSensors, "activity", "stepCounter", "pressure", "tapDetector", "heartRate"];
         allSensors.forEach((sensorType) => {
             if (this.enabledSensors.includes(sensorType)) {
                 const handler = (event) => {
