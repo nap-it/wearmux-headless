@@ -78,6 +78,7 @@ wearmux-headless/
 │   ├── device-manager.js           # BLE/WiFi connection manager
 │   ├── device-fleet.js             # Discovery and concurrent sessions
 │   ├── device-session.js           # Per-device capability ownership
+│   ├── wearos-device.js            # Wear OS watch listener and device adapter
 │   ├── raw-media.js                # Shared camera/audio chunk publishing
 │   ├── mqtt-manager.js             # MQTT publisher
 │   ├── mqtt-subscriber.js          # MQTT subscriber
@@ -86,6 +87,7 @@ wearmux-headless/
 │   ├── action-dispatcher.js        # Route incoming actions to device outputs
 │   ├── zenoh-manager.js            # Node→Python sidecar bridge (UDS)
 │   └── zenoh-subscriber.js         # Zenoh subscriber helper
+├── wearos/                         # Wear OS companion app (Gradle project)
 ├── docker-compose.yml              # Docker for Linux
 ├── requirements.txt                 # Core Zenoh bridge dependencies only
 ├── package.json
@@ -178,6 +180,35 @@ For off-device inference, see the [consumer guide](examples/consumers/README.md)
 - Automatic image preprocessing and dithering
 - Performance timing diagnostics
 - Supports PNG and JPEG formats
+
+## Wear OS watches
+
+Wear OS watches (for example a Galaxy Watch) join the session runtime through the companion app in `wearos/`. The watch connects to this host over Wi-Fi, so both must be on the same network; no phone is involved. Each watch appears as a device with `acceleration`, `gyroscope`, `magnetometer` and `heartRate` sensors and supports `haptic.vibrate`. It has no display, camera or microphone, so the VRU interaction never selects it.
+
+1. Set `WEAROS_PORT` in `config/wearos.ini` (for example `8765`) and start `npm run sessions`.
+2. Build and install the app on the watch (API 30 or newer) with the watch connected over wireless debugging:
+   ```bash
+   cd wearos
+   echo "sdk.dir=$HOME/Android/Sdk" > local.properties
+   echo "wearmux.host=<host-ip>" >> local.properties   # optional default address
+   ./gradlew installDebug
+   ```
+3. Set the address at runtime if needed, then tap Connect on the watch and grant the sensor permission:
+   ```bash
+   adb shell am start -n com.wearmux.headless.wear/.MainActivity --es host <host-ip> --ei port 8765
+   ```
+
+The app uses its own package name, so it can be installed next to other Wear OS apps on the same watch. It keeps the watch on Wi-Fi while connected and reconnects automatically; the host restores the sensor configuration after each reconnect.
+
+The link is one JSON message per WebSocket frame:
+
+| Direction | Message |
+|-----------|---------|
+| watch to host | `{"type":"hello","id":"wearos-<id>","name":"...","sensors":[...],"vibration":true}` (first message) |
+| watch to host | `{"type":"sensor","sensor":"acceleration","timestamp":<ms>,"x":0,"y":0,"z":9.8}` (m/s², rad/s or μT) |
+| watch to host | `{"type":"sensor","sensor":"heartRate","timestamp":<ms>,"bpm":72}` |
+| host to watch | `{"type":"config","sensors":{"acceleration":50}}` (interval in ms per sensor; 0 or missing turns it off) |
+| host to watch | `{"type":"vibrate","effect":"doubleClick100"}` |
 
 ## VRU stop-request interaction
 
@@ -344,6 +375,7 @@ When messaging is enabled, all enabled sensors are automatically published:
 - **`bwear/sensors/gameRotation`** - Game rotation quaternion
 - **`bwear/sensors/rotation`** - Rotation quaternion
 - **`bwear/sensors/tapDetector`** - Tap detection events
+- **`bwear/sensors/heartRate`** - Heart rate in BPM (`message.heartRate`, Wear OS watches)
 
 Each message includes:
 ```json
@@ -540,6 +572,8 @@ Set `WEARMUX_CONFIG_PATH` to load a different configuration directory or INI fil
 | `DEVICE_NAME`      | Restrict discovery to one advertised device name | unset | `Brilliant Frame 12` |
 | `MIC_DEVICE_ID`    | Legacy alias for `DEVICE_ID`                | unset     | Bluetooth ID                 |
 | `MIC_DEVICE_NAME`  | Legacy alias for `DEVICE_NAME`              | unset     | `Brilliant Frame 12`         |
+| `WEAROS_PORT`      | In `sessions`, accept Wear OS watches on this TCP port; unset disables it | unset | `8765` |
+| `WEAROS_HOST`      | Bind address for the Wear OS listener       | all interfaces | `0.0.0.0`             |
 
 ### Sensors
 

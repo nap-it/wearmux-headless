@@ -375,3 +375,8 @@ sensors/model/*.zip
 images/*.jpg
 images/*.png
 images/*.jpeg
+
+# Wear OS companion app
+wearos/.gradle/
+wearos/.kotlin/
+wearos/local.properties
