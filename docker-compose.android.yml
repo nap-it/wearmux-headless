@@ -1,0 +1,24 @@
+services:
+  wearmux-headless:
+    image: wearmux-headless:android-ble
+    build:
+      context: .
+      dockerfile: Dockerfile.android
+    restart: unless-stopped
+    # Host networking here means the Droidspaces Debian namespace, not Android's.
+    network_mode: host
+    environment:
+      DEVICE_TRANSPORT: android-ble
+      ANDROID_BLE_BRIDGE_HOST: 0.0.0.0
+      ANDROID_BLE_BRIDGE_PORT: 8765
+      ANDROID_BLE_BRIDGE_TOKEN: ${ANDROID_BLE_BRIDGE_TOKEN:?Set a shared token in .env.android}
+      DEVICE_ID: ${DEVICE_ID:-}
+      DEVICE_NAME: ${DEVICE_NAME:-}
+      MESSAGE_TRANSPORT: mqtt
+      MQTT_BROKER_URL: ${MQTT_BROKER_URL:-mqtt://10.255.160.127:1883}
+      TOPIC_PREFIX: ${TOPIC_PREFIX:-bwear}
+      VRU_INTERACTION_ENABLED: "1"
+      VRU_DEVICE_ID: ${VRU_DEVICE_ID:-}
+      VRU_GESTURE_CONFIDENCE: ${VRU_GESTURE_CONFIDENCE:-0.6}
+      DEBUG: "0"
+    stop_grace_period: 15s

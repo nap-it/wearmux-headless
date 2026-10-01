@@ -1,6 +1,7 @@
 const EventEmitter = require("events");
+const { loadSdk, usesAndroidBleBridge } = require("./sdk");
 /**
- * Lazily loaded BrilliantSole Node SDK module.
+ * Lazily loaded BrilliantSole SDK module.
  * @type {Object|null}
  * @private
  */
@@ -13,7 +14,7 @@ const debugLog = (...args) => {
 };
 
 /**
- * Connects one BrilliantWear device over BLE or Wi‑Fi.
+ * Connects one BrilliantWear device over BLE, Wi‑Fi, or the Android BLE bridge.
  *
  * @class
  * @extends EventEmitter
@@ -39,16 +40,28 @@ class DeviceManager extends EventEmitter {
 
     /**
      * Connect to the configured device and wait until it reports connected.
-     * `DEVICE_IP` selects Wi‑Fi; otherwise the BrilliantSole scanner is used.
+     * `DEVICE_TRANSPORT=android-ble` selects the Android bridge; otherwise
+     * `DEVICE_IP` selects Wi‑Fi or the BrilliantSole scanner is used.
      * @returns {Promise<Object>} The SDK device instance.
      * @throws {Error} If scanning, transport setup, or the connection timeout fails.
      */
     async connectToDevice() {
+        if (usesAndroidBleBridge()) {
+            try {
+                await this._connectViaAndroidBridge();
+                this._setupEventListeners();
+                return this.device;
+            } catch (error) {
+                await this.androidBridge?.stop();
+                this.emit("error", error);
+                throw error;
+            }
+        }
         const wifiIp = process.env.DEVICE_IP;
         if (wifiIp) {
             debugLog("[DeviceManager] DEVICE_IP set, connecting via WiFi transport");
             try {
-                if (!BS) BS = await import("brilliantsole/node");
+                if (!BS) BS = await loadSdk();
                 await this._connectViaWifi(wifiIp);
                 this._setupEventListeners();
                 await this._waitForConnection();
@@ -77,7 +90,7 @@ class DeviceManager extends EventEmitter {
      * @returns {Promise<void>}
      */
     async _connectViaBle() {
-        if (!BS) BS = await import("brilliantsole/node");
+        if (!BS) BS = await loadSdk();
 
         const { id: filterId, name: filterName } = this._getFilters();
         this._lastFilters = { id: filterId, name: filterName };
@@ -91,6 +104,39 @@ class DeviceManager extends EventEmitter {
         } else {
             debugLog("[DeviceManager] Starting scanner-based connection...");
             await this._connectViaScanner(filterId, filterName);
+        }
+    }
+
+    /**
+     * Connect through the Android BLE bridge and wait for a matching device.
+     * @private
+     * @returns {Promise<void>}
+     */
+    async _connectViaAndroidBridge() {
+        if (process.env.DEVICE_IP) throw new Error("DEVICE_IP cannot be combined with DEVICE_TRANSPORT=android-ble");
+        const { AndroidBleBridge } = require("./android-ble/bridge");
+        const sdk = await loadSdk();
+        this.androidBridge = new AndroidBleBridge({ sdk });
+        this.androidBridge.on("error", (error) => this.emit("error", error));
+        const { id, name } = this._getFilters();
+        const normalize = (value) => String(value || "").toLowerCase().replaceAll(":", "");
+        let connected, timer;
+        const ready = new Promise((resolve, reject) => {
+            connected = (device) => {
+                if (id && normalize(device.bluetoothId) !== normalize(id)) return;
+                if (name && !id && device.name?.toLowerCase() !== name.toLowerCase()) return;
+                this.device = device;
+                resolve();
+            };
+            this.androidBridge.on("deviceConnected", connected);
+            timer = setTimeout(() => reject(new Error("Timed out waiting for an Android BLE device")), 60000);
+        });
+        // Handle startup rejection before the independent readiness timeout fires.
+        ready.catch(() => {});
+        try { await this.androidBridge.start(); await ready; }
+        finally {
+            clearTimeout(timer);
+            this.androidBridge.off("deviceConnected", connected);
         }
     }
 
@@ -368,6 +414,7 @@ class DeviceManager extends EventEmitter {
         } catch (error) {
             console.warn("[DeviceManager] Error during disconnect:", error);
         }
+        await this.androidBridge?.stop();
     }
 }
 

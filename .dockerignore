@@ -385,3 +385,9 @@ vite.config.ts.timestamp-*
 
 # Optional off-device inference consumers are not part of the core image.
 examples/consumers/
+
+# Git state and local bridge development artifacts are not runtime inputs.
+.git
+android-bridge/
+tests/
+*.apk

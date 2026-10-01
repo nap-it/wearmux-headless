@@ -4,6 +4,8 @@ const { ACTION_TOPIC, RESULT_TOPIC } = require("./action-dispatcher");
 const { createPublisher, createSubscriber } = require("./transport");
 const { topic } = require("./topics");
 const { VruStopRequestInteraction } = require("../interactions/vru-stop-request");
+const { loadSdk, usesAndroidBleBridge } = require("./sdk");
+const { AndroidBleBridge } = require("./android-ble/bridge");
 
 // Own one session per discovered wearable while sharing a single transport connection.
 const normalizeId = (value) => String(value || "").toLowerCase().replaceAll(":", "");
@@ -80,7 +82,20 @@ class DeviceFleet {
             console.log(`[Actions] Listening on ${ACTION_TOPIC}`);
         }
         await this.vruInteraction?.start();
-        this.sdk = await import("brilliantsole/node");
+        this.sdk = await loadSdk();
+        if (usesAndroidBleBridge()) {
+            if (process.env.DEVICE_IP) throw new Error("DEVICE_IP cannot be combined with DEVICE_TRANSPORT=android-ble");
+            this.androidBridge = new AndroidBleBridge({ sdk: this.sdk });
+            this.androidBridge.on("error", (error) => console.warn("[Android BLE]", error?.message || error));
+            this.androidBridge.on("status", (status) => console.log("[Android BLE]", status));
+            // Explicit listener also supports SDK builds whose global manager does
+            // not publish transport-specific connection events. attach deduplicates.
+            this.androidBridge.on("deviceConnected", (device) => this.onConnected({ message: { device } }));
+            await this.androidBridge.start();
+            console.log("[Fleet] Waiting for the Android BLE companion");
+            return;
+        }
+
         this.sdk.DeviceManager.AddEventListener("deviceConnected", this.onConnected);
         for (const device of this.sdk.DeviceManager.ConnectedDevices || []) {
             await this.attach(device);
@@ -273,6 +288,7 @@ class DeviceFleet {
             try { await session.device.disconnect(); } catch {}
         }
         this.sessions.clear();
+        await this.androidBridge?.stop();
         await this.publisher?.stop();
     }
 }

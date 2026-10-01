@@ -23,6 +23,7 @@
     },
     "scripts": {
         "test": "jest",
+        "test:android-ble": "node --test tests/android-ble.test.cjs",
         "start": "node tools/launcher.js",
         "help": "echo 'Available scripts: start, sessions, sensors, actions, actions:send, microphone:rtsp, microphone:record, display, camera, examples:car, examples:latency, examples:test'",
         "sessions": "node tools/run-with-config.js tools/sessions.js",

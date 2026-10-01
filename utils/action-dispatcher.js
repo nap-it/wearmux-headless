@@ -267,7 +267,7 @@ class ActionDispatcher extends EventEmitter {
                 throw new Error("haptic.vibrate requires a valid effect name");
             }
             if (effect !== "strongClick100") {
-                const { VibrationWaveformEffects } = await import("brilliantsole/node");
+                const { VibrationWaveformEffects } = await require("./sdk").loadSdk();
                 if (!VibrationWaveformEffects.includes(effect)) {
                     throw new Error(`Unsupported vibration effect '${effect}'`);
                 }
