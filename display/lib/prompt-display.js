@@ -59,7 +59,7 @@ class PromptDisplay {
 
     async _layout(text, width, height) {
         const scale = Math.min(width / 640, height / 400);
-        const margin = Math.max(4, Math.round(32 * scale));
+        const margin = Math.max(4, Math.round(48 * scale));
         const padding = Math.max(4, Math.round(20 * scale));
         const gap = Math.max(4, Math.round(24 * scale));
         const lineWidth = Math.max(2, Math.round(6 * scale));
@@ -70,13 +70,13 @@ class PromptDisplay {
         const noFit = () => new Error("Question with gesture hint does not fit the display; provide a shorter prompt");
         if (maxWidth <= 0 || availableHeight <= 0) throw noFit();
 
-        const hint = await this._fitText(GESTURE_HINT, 12, Math.max(12, Math.round(32 * scale)),
+        const hint = await this._fitText(GESTURE_HINT, 12, Math.max(12, Math.round(28 * scale)),
             frameWidth, availableHeight);
         if (!hint) throw noFit();
         const maxQuestionHeight = availableHeight - hint.height - gap - inset * 2;
         if (maxQuestionHeight < 12) throw noFit();
         const minimumSize = Math.max(12, Math.round(28 * scale));
-        const maximumSize = Math.max(minimumSize, Math.round(72 * scale));
+        const maximumSize = Math.max(minimumSize, Math.round(60 * scale));
         const question = await this._fitText(text, minimumSize, maximumSize, maxWidth, maxQuestionHeight)
             || await this._fitText(text, minimumSize, maximumSize, maxWidth, maxQuestionHeight, true);
         if (!question) {
@@ -143,6 +143,14 @@ class PromptDisplay {
         });
     }
 
+    async clear() {
+        if (this.device.isDisplayReady === false) await this._waitForDisplayReady();
+        // clear is its own asynchronous display operation in the SDK, not a
+        // buffered drawing primitive. Frame must finish clearing/switching its
+        // buffers before we write new pixels. No extra show command is needed.
+        return this._waitForDisplayReady(() => this.device.clearDisplay(true));
+    }
+
     async show(text) {
         const timingEnabled = process.env.DISPLAY_TIMING === "1" || process.env.DEBUG === "1";
         const startedAt = timingEnabled ? performance.now() : 0;
@@ -167,7 +175,7 @@ class PromptDisplay {
         // A preceding clear/show action can finish its SDK flush before the
         // device acknowledges it. Drain that event before drawing this prompt.
         if (this.device.isDisplayReady === false) await this._waitForDisplayReady();
-        const drawStartedAt = timingEnabled ? performance.now() : 0;
+        const setupStartedAt = timingEnabled ? performance.now() : 0;
         let tileCount = 0;
         let packedBitmapBytes = 0;
 
@@ -187,7 +195,12 @@ class PromptDisplay {
         await this.device.clearDisplayRotation(false);
         await this.device.clearDisplayCrop(false);
         await this.device.clearDisplayRotationCrop(false);
-        await this.device.clearDisplay(false);
+        // `false` only batches transport: the SDK flushes automatically at its
+        // MTU limit. Do not queue a clear alongside drawing or let its late
+        // displayReady event acknowledge the final show prematurely.
+        const clearStartedAt = timingEnabled ? performance.now() : 0;
+        await this.clear();
+        const drawStartedAt = timingEnabled ? performance.now() : 0;
 
         // A vector outline costs only a few commands; it does not increase
         // the one-bit text rasters or require a full-screen color bitmap.
@@ -231,7 +244,9 @@ class PromptDisplay {
             console.log("[Prompt display timing]", {
                 cache: cacheHit ? "hit" : "miss",
                 prepareMs: Number((preparedAt - startedAt).toFixed(2)),
-                previousReadyWaitMs: Number((drawStartedAt - preparedAt).toFixed(2)),
+                previousReadyWaitMs: Number((setupStartedAt - preparedAt).toFixed(2)),
+                setupMs: Number((clearStartedAt - setupStartedAt).toFixed(2)),
+                clearAndReadyMs: Number((drawStartedAt - clearStartedAt).toFixed(2)),
                 drawAndFlushMs: Number((flushedAt - drawStartedAt).toFixed(2)),
                 readyWaitMs: Number(Math.max(0, readyAt - flushedAt).toFixed(2)),
                 tileCount,

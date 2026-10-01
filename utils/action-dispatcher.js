@@ -125,6 +125,14 @@ class ActionDispatcher extends EventEmitter {
         if (this.device.displayStatus === "asleep") await this.device.wakeDisplay();
     }
 
+    _getPromptDisplay() {
+        if (!this.promptDisplay) {
+            const { PromptDisplay } = require("../display/lib/prompt-display");
+            this.promptDisplay = new PromptDisplay(this.device);
+        }
+        return this.promptDisplay;
+    }
+
     async dispatch(command) {
         if (this.device.isConnected === false) throw new Error("Device is disconnected");
         switch (command.action) {
@@ -133,15 +141,11 @@ class ActionDispatcher extends EventEmitter {
                 throw new Error("display.prompt requires 1–500 characters of text");
             }
             await this._readyDisplay();
-            if (!this.promptDisplay) {
-                const { PromptDisplay } = require("../display/lib/prompt-display");
-                this.promptDisplay = new PromptDisplay(this.device);
-            }
             // Prompt drawing owns black/white/amber palette slots. Existing image
             // renderers must refresh their palette before their next draw.
             this.displayManager?.invalidatePaletteCache();
             this.textDisplay?.displayManager?.invalidatePaletteCache();
-            await this.promptDisplay.show(command.text);
+            await this._getPromptDisplay().show(command.text);
             return;
         }
         case "display.text": {
@@ -159,8 +163,7 @@ class ActionDispatcher extends EventEmitter {
         }
         case "display.clear":
             await this._readyDisplay();
-            await this.device.clearDisplay(false);
-            await this.device.showDisplay(true);
+            await this._getPromptDisplay().clear();
             return;
         case "display.image": {
             if (typeof command.data !== "string" || command.data.length > Math.ceil(MAX_IMAGE_BYTES * 4 / 3) + 4 ||

@@ -20,8 +20,9 @@ This module provides a simple API to:
 The VRU interaction uses `display.prompt` with **Should I stop?**, a question
 from the approaching vehicle. Large bold white text sits inside a thick amber
 frame, with **Nod yes · Shake no** below it. The whole group is centered.
-The question uses the largest fitting font up to 72 px at 640 × 400, preferring
-one line; the gesture hint uses up to 32 px and the frame a 6 px stroke. Layout
+The question uses the largest fitting font up to 60 px at 640 × 400, preferring
+one line; the gesture hint uses up to 28 px and the frame a 6 px stroke with
+48 px side margins. Layout
 sizes scale with display dimensions. Long custom questions wrap without
 silently dropping text; questions that cannot fit at a readable size are rejected.
 Two-color displays keep the frame white instead of using an unavailable palette slot.
@@ -32,15 +33,23 @@ Two-color displays keep the frame white instead of using an unavailable palette 
 one-bit bitmaps, caches up to eight prepared layouts, and splits transfers to
 fit the device MTU. The amber frame uses the SDK rectangle primitive, so it adds
 only drawing commands without a larger bitmap or higher text pixel depth.
-It queues the clear and drawing commands before one final display
-update, then waits for the SDK's `displayReady` acknowledgement before returning
-and allowing gesture monitoring to start. It first drains any acknowledgement
-pending from an earlier display action; each acknowledgement wait is bounded
-to three seconds and a missing acknowledgement fails the prompt.
+It drains any pending `displayReady`, sends `clearDisplay(true)`, and waits for
+the clear's own acknowledgement before drawing. It then queues the frame and
+text, sends one final display update, and waits for a separate acknowledgement
+before allowing gesture monitoring to start. Each acknowledgement wait is
+bounded to three seconds and a missing acknowledgement fails the prompt.
+
+The SDK's `sendImmediately=false` batches transport only: commands are sent as
+soon as the MTU buffer fills. It does not make a clear plus drawing atomic.
+Both `clear` and `show` mark the display busy. Drawing during an unfinished
+Frame buffer clear/switch can lose early pixels; a late clear acknowledgement
+could also be mistaken for the final show's acknowledgement. The separate
+waits prevent those overlaps. The `display.clear` action uses the same
+acknowledged clear path without issuing a redundant `show` afterward.
 Packed pixel data depends on the question, font availability, and display size.
 
-Set `DISPLAY_TIMING=1` to log cache hits, preparation time, drawing/SDK flush
-time, previous/current acknowledgement wait times, tile count, packed pixel
+Set `DISPLAY_TIMING=1` to log cache hits, preparation time, palette/setup time,
+`clearAndReadyMs`, drawing/SDK flush time, previous/final acknowledgement waits, tile count, packed pixel
 bytes, and bitmap command bytes. Command bytes
 include bitmap headers but exclude palette/setup commands and transport
 overhead. The timing measures host processing, SDK calls, and receipt of the

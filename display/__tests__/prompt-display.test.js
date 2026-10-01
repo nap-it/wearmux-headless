@@ -18,6 +18,10 @@ function device(mtu = 247) {
         fake.isDisplayReady = true;
         for (const listener of [...listeners]) listener();
     };
+    fake.clearDisplay.mockImplementation(async () => {
+        fake.isDisplayReady = false;
+        fake.emitReady();
+    });
     fake.showDisplay.mockImplementation(async () => {
         fake.isDisplayReady = false;
         fake.emitReady();
@@ -63,8 +67,8 @@ function expectLayoutInsideDisplay(layout, width, height) {
     expect(Math.abs(question.y + question.height / 2 - frame.y - frame.height / 2)).toBeLessThanOrEqual(1);
     expect(hint.y).toBeGreaterThan(frame.y + frame.height);
     expect(Math.abs((frame.y + hint.y + hint.height) / 2 - height / 2)).toBeLessThanOrEqual(1);
-    expect(layout.questionFontSize).toBeLessThanOrEqual(72);
-    expect(layout.hintFontSize).toBeLessThanOrEqual(32);
+    expect(layout.questionFontSize).toBeLessThanOrEqual(60);
+    expect(layout.hintFontSize).toBeLessThanOrEqual(28);
 }
 
 test.each([23, 64, 247, 512])("draws bounded one-bit tiles at MTU %i, then makes one visible update", async (mtu) => {
@@ -95,7 +99,7 @@ test.each([23, 64, 247, 512])("draws bounded one-bit tiles at MTU %i, then makes
         transferredPixels += bitmap.pixels.length;
     }
     expect(transferredPixels).toBe(pixelCount);
-    expect(fake.clearDisplay).toHaveBeenCalledWith(false);
+    expect(fake.clearDisplay).toHaveBeenCalledWith(true);
     expect(fake.showDisplay).toHaveBeenCalledTimes(1);
     expect(fake.showDisplay).toHaveBeenCalledWith(true);
     expect(fake.drawDisplayRect).toHaveBeenCalledTimes(1);
@@ -206,6 +210,7 @@ test("reports opt-in host timing, cache hits, and bytes actually passed to the S
             cache: "miss",
             prepareMs: expect.any(Number),
             previousReadyWaitMs: expect.any(Number),
+            clearAndReadyMs: expect.any(Number),
             drawAndFlushMs: expect.any(Number),
             readyWaitMs: expect.any(Number),
             tileCount,
@@ -238,6 +243,70 @@ test("keeps show pending until displayReady after the SDK flush, then removes th
     expect(jest.getTimerCount()).toBe(0);
 });
 
+test("waits for the clear acknowledgement before drawing, then requires a separate show acknowledgement", async () => {
+    const fake = device();
+    let cleared;
+    const clearSent = new Promise((resolve) => { cleared = resolve; });
+    fake.clearDisplay.mockImplementation(async () => { fake.isDisplayReady = false; cleared(); });
+    let sent;
+    const showSent = new Promise((resolve) => { sent = resolve; });
+    fake.showDisplay.mockImplementation(async () => { fake.isDisplayReady = false; sent(); });
+    let settled = false;
+    const showing = simpleDisplay(fake).show("Question?").then(() => { settled = true; });
+    try {
+        await clearSent;
+        await jest.advanceTimersByTimeAsync(0);
+        // On Frame, clearing/switching buffers is asynchronous. Any pixels
+        // written before this acknowledgement can be erased by that operation.
+        expect(fake.drawDisplayRect).not.toHaveBeenCalled();
+        expect(fake.drawDisplayBitmap).not.toHaveBeenCalled();
+        expect(fake.showDisplay).not.toHaveBeenCalled();
+        expect(settled).toBe(false);
+        fake.emitReady();
+        await showSent;
+        expect(fake.drawDisplayRect).toHaveBeenCalledTimes(1);
+        expect(settled).toBe(false);
+        fake.emitReady();
+        await showing;
+        expect(fake.listeners.size).toBe(0);
+    } finally {
+        fake.emitReady();
+    }
+});
+
+test("does not draw a prompt if clearing is never acknowledged", async () => {
+    const fake = device();
+    let cleared;
+    const clearSent = new Promise((resolve) => { cleared = resolve; });
+    fake.clearDisplay.mockImplementation(async () => { fake.isDisplayReady = false; cleared(); });
+    const showing = simpleDisplay(fake).show("Question?");
+    const failed = expect(showing).rejects.toThrow("Timed out waiting for displayReady");
+    await clearSent;
+    await jest.advanceTimersByTimeAsync(3000);
+    await failed;
+    expect(fake.drawDisplayRect).not.toHaveBeenCalled();
+    expect(fake.drawDisplayBitmap).not.toHaveBeenCalled();
+    expect(fake.showDisplay).not.toHaveBeenCalled();
+    expect(fake.listeners.size).toBe(0);
+    expect(jest.getTimerCount()).toBe(0);
+});
+
+test("standalone clear waits for readiness and does not issue a second buffer swap", async () => {
+    const fake = device();
+    let sent;
+    const clearSent = new Promise((resolve) => { sent = resolve; });
+    fake.clearDisplay.mockImplementation(async () => { fake.isDisplayReady = false; sent(); });
+    let settled = false;
+    const clearing = new PromptDisplay(fake).clear().then(() => { settled = true; });
+    await clearSent;
+    expect(fake.clearDisplay).toHaveBeenCalledWith(true);
+    expect(settled).toBe(false);
+    fake.emitReady();
+    await clearing;
+    expect(fake.showDisplay).not.toHaveBeenCalled();
+    expect(fake.listeners.size).toBe(0);
+});
+
 test("drains a preceding displayReady before drawing and still requires the new acknowledgement", async () => {
     const fake = device();
     fake.isDisplayReady = false;
@@ -257,7 +326,7 @@ test("drains a preceding displayReady before drawing and still requires the new 
     expect(fake.listeners.size).toBe(1);
     fake.emitReady();
     await showing;
-    expect(fake.removeEventListener).toHaveBeenCalledTimes(2);
+    expect(fake.removeEventListener).toHaveBeenCalledTimes(3);
     expect(fake.listeners.size).toBe(0);
 });
 
