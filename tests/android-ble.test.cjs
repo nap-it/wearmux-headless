@@ -88,6 +88,36 @@ test('requires bearer authentication and a hello before accepting device traffic
     assert.equal(bridge.active, undefined);
 });
 
+test('local mode accepts an allowed socket peer without a token', async t => {
+    const { bridge, url } = await setup(t, { authMode: 'local', token: undefined,
+        localPeers: ['::ffff:127.0.0.1'] });
+    const ws = new WebSocket(url);
+    await once(ws, 'open');
+    const hello = once(ws, 'message');
+    send(ws, { type: 'hello', version: 1 });
+    assert.deepEqual(JSON.parse((await hello)[0]), { type: 'hello', version: 1 });
+    assert.equal(bridge.peer.hello, true);
+    ws.close();
+});
+
+test('local mode rejects other socket peers even with a spoofed forwarding header', async t => {
+    const { url } = await setup(t, { authMode: 'local', token: undefined,
+        localPeers: ['127.0.0.2'] });
+    const ws = new WebSocket(url, { headers: { 'X-Forwarded-For': '127.0.0.2' } });
+    ws.on('error', () => {});
+    const [, response] = await once(ws, 'unexpected-response');
+    assert.equal(response.statusCode, 401);
+    response.resume(); ws.terminate();
+});
+
+test('authentication configuration cannot silently allow an unrestricted listener', () => {
+    assert.throws(() => new AndroidBleBridge({ token: undefined }), /TOKEN/);
+    assert.throws(() => new AndroidBleBridge({ token, authMode: 'none' }), /auth/i);
+    for (const localPeers of [[], '', ['0.0.0.0/0'], ['localhost']]) {
+        assert.throws(() => new AndroidBleBridge({ authMode: 'local', localPeers }), /peer/i);
+    }
+});
+
 test('actual browser SDK initializes capabilities, configures 50 Hz acceleration and receives display readiness', { timeout: 3000 }, async t => {
     const sdk = await import('brilliantsole/browser');
     const { bridge, url, errors } = await setup(t, { sdk });

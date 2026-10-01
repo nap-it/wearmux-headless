@@ -11,7 +11,10 @@ services:
       DEVICE_TRANSPORT: android-ble
       ANDROID_BLE_BRIDGE_HOST: 0.0.0.0
       ANDROID_BLE_BRIDGE_PORT: 8765
-      ANDROID_BLE_BRIDGE_TOKEN: ${ANDROID_BLE_BRIDGE_TOKEN:?Set a shared token in .env.android}
+      # Android reaches Debian from its Droidspaces gateway; no token entry needed.
+      ANDROID_BLE_BRIDGE_AUTH_MODE: ${ANDROID_BLE_BRIDGE_AUTH_MODE:-local}
+      ANDROID_BLE_BRIDGE_LOCAL_PEERS: ${ANDROID_BLE_BRIDGE_LOCAL_PEERS:-127.0.0.1,::1,172.28.0.1}
+      ANDROID_BLE_BRIDGE_TOKEN: ${ANDROID_BLE_BRIDGE_TOKEN:-}
       DEVICE_ID: ${DEVICE_ID:-}
       DEVICE_NAME: ${DEVICE_NAME:-}
       MESSAGE_TRANSPORT: mqtt

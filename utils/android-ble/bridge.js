@@ -1,6 +1,7 @@
 const EventEmitter = require("events");
 const http = require("http");
 const { timingSafeEqual } = require("crypto");
+const { isIP } = require("net");
 const { WebSocketServer, WebSocket } = require("ws");
 const { AndroidBleConnection } = require("./connection");
 const { VERSION, PATH, MAX_PAYLOAD, normalizeId, parseFrame } = require("./protocol");
@@ -11,20 +12,32 @@ function authorized(header, token) {
     return supplied.length === expected.length && timingSafeEqual(supplied, expected);
 }
 
+const peerAddress = address => address.startsWith("::ffff:") ? address.slice(7) : address;
+
 class AndroidBleBridge extends EventEmitter {
     constructor({ sdk, host = process.env.ANDROID_BLE_BRIDGE_HOST || "127.0.0.1",
         port = Number(process.env.ANDROID_BLE_BRIDGE_PORT || 8765),
         token = process.env.ANDROID_BLE_BRIDGE_TOKEN,
+        authMode = process.env.ANDROID_BLE_BRIDGE_AUTH_MODE || "token",
+        localPeers = process.env.ANDROID_BLE_BRIDGE_LOCAL_PEERS || "127.0.0.1,::1",
         writeTimeoutMs = 10000, helloTimeoutMs = 10000, readyTimeoutMs = 30000, heartbeatMs = 15000 } = {}) {
         super();
-        if (typeof token !== "string" || token.length < 16 || token.length > 256 || /\s/.test(token)) {
+        if (!["token", "local"].includes(authMode)) throw new Error("Invalid Android bridge authentication mode");
+        if (authMode === "token" && (typeof token !== "string" || token.length < 16 || token.length > 256 || /\s/.test(token))) {
             throw new Error("ANDROID_BLE_BRIDGE_TOKEN must be 16–256 characters with no whitespace");
+        }
+        const peers = (typeof localPeers === "string" ? localPeers.split(",") : localPeers);
+        if (authMode === "local" && (!Array.isArray(peers) || !peers.length ||
+            peers.some(address => typeof address !== "string" || !isIP(address.trim())))) {
+            throw new Error("Local bridge peers must be a non-empty list of IP addresses");
         }
         if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid Android bridge port");
         this.sdk = sdk;
         this.host = host;
         this.port = port;
         this.token = token;
+        this.authMode = authMode;
+        this.localPeers = new Set(authMode === "local" ? peers.map(address => peerAddress(address.trim())) : []);
         this.writeTimeoutMs = writeTimeoutMs;
         this.helloTimeoutMs = helloTimeoutMs;
         this.readyTimeoutMs = readyTimeoutMs;
@@ -48,7 +61,11 @@ class AndroidBleBridge extends EventEmitter {
         });
         this.wss = new WebSocketServer({ server: this.server, maxPayload: MAX_PAYLOAD,
             verifyClient: ({ req }, done) => {
-                if (req.url !== PATH || !authorized(req.headers.authorization, this.token)) {
+                // Trust the actual TCP peer, never a client-supplied forwarding header.
+                const accepted = this.authMode === "local"
+                    ? this.localPeers.has(peerAddress(req.socket.remoteAddress || ""))
+                    : authorized(req.headers.authorization, this.token);
+                if (req.url !== PATH || !accepted) {
                     done(false, 401, "Unauthorized");
                 } else if (this.peer || this.stopping) {
                     done(false, 409, "An Android companion is already connected");
