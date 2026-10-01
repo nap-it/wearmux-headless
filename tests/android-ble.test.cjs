@@ -158,7 +158,11 @@ test('actual browser SDK initializes capabilities, configures 50 Hz acceleration
     send(ws, { type: 'connected', deviceId: id, mtu: 247 });
     assert.equal((await wait(resumed, 'reconnect'))[0], device);
     assert.equal(device.connectionManager.mtu, 247);
+    assert.equal(device.mtu, 247);
     assert.equal(observed.filter(type => type === 'getType').length, 2);
+    const { PromptDisplay } = require('../display/lib/prompt-display');
+    await wait(new PromptDisplay(device).show('Should I stop?'), '247-byte prompt');
+    assert.deepEqual(errors, []);
 });
 
 test('GATT link alone is not ready; write timeout invalidates the link and late acknowledgements are harmless', async t => {

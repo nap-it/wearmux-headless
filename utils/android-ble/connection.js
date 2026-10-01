@@ -134,7 +134,14 @@ class AndroidBleConnection {
                 if (!type || length > bytes.length - offset) throw new Error("Invalid SDK TLV payload");
                 // SDK parsers use dataView.buffer directly; give each message an exact buffer.
                 const copy = Uint8Array.from(bytes.subarray(offset, offset + length));
-                messages.push([type, new DataView(copy.buffer)]);
+                const view = new DataView(copy.buffer);
+                if (type === "getMtu") {
+                    if (length !== 2 || view.getUint16(0, true) < 23) throw new Error("Invalid firmware MTU response");
+                    // SDK display/file managers use Device.mtu, not our getter.
+                    // Give all SDK packetizers the effective negotiated limit.
+                    view.setUint16(0, Math.min(view.getUint16(0, true), this.attMtu), true);
+                }
+                messages.push([type, view]);
                 offset += length;
             }
             for (const [type, view] of messages) this.onMessageReceived?.(type, view);
