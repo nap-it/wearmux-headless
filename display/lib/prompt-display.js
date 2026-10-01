@@ -1,5 +1,8 @@
 const sharp = require("sharp");
 
+const GESTURE_HINT = "Nod yes · Shake no";
+const FRAME_COLOR = "#FFD05A";
+
 const escapeMarkup = (text) => text.replace(/&/g, "&amp;")
     .replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -17,7 +20,7 @@ class PromptDisplay {
             text: {
                 text: escapeMarkup(text),
                 font: `sans-serif ${bold ? "bold " : ""}${fontSize}`,
-                width: maxWidth,
+                ...(maxWidth ? { width: maxWidth } : {}),
                 align: "centre",
                 wrap: "word-char",
                 dpi: 72,
@@ -32,25 +35,70 @@ class PromptDisplay {
         };
     }
 
-    async _layout(text, width, height) {
-        const scale = Math.min(width / 640, height / 400, 1);
-        const maxWidth = Math.floor(width * 0.85);
-        const maxHeight = Math.floor(height * 0.8);
-        const minimumSize = Math.max(12, Math.round(18 * scale));
-        let question;
-        for (let size = Math.max(minimumSize, Math.round(32 * scale)); size >= minimumSize; size -= 2) {
-            question = await this._renderText(text, size, maxWidth, true);
-            if (question.height <= maxHeight) break;
+    async _fitText(text, minimumSize, maximumSize, maxWidth, maxHeight, wrap = false) {
+        const largest = await this._renderText(text, maximumSize, wrap ? maxWidth : undefined, true);
+        if (largest.width <= maxWidth && largest.height <= maxHeight) {
+            return { ...largest, fontSize: maximumSize };
         }
-        if (!question || question.height > maxHeight) {
+        maximumSize--;
+        let fitted;
+        // Prefer one line for a short question, with a bounded number of cold
+        // rasterizations. Long custom questions can use the wrapped fallback.
+        while (minimumSize <= maximumSize) {
+            const fontSize = Math.floor((minimumSize + maximumSize) / 2);
+            const bitmap = await this._renderText(text, fontSize, wrap ? maxWidth : undefined, true);
+            if (bitmap.width <= maxWidth && bitmap.height <= maxHeight) {
+                fitted = { ...bitmap, fontSize };
+                minimumSize = fontSize + 1;
+            } else {
+                maximumSize = fontSize - 1;
+            }
+        }
+        return fitted;
+    }
+
+    async _layout(text, width, height) {
+        const scale = Math.min(width / 640, height / 400);
+        const margin = Math.max(4, Math.round(32 * scale));
+        const padding = Math.max(4, Math.round(20 * scale));
+        const gap = Math.max(4, Math.round(24 * scale));
+        const lineWidth = Math.max(2, Math.round(6 * scale));
+        const frameWidth = width - margin * 2;
+        const inset = padding + lineWidth;
+        const maxWidth = frameWidth - inset * 2;
+        const availableHeight = height - margin * 2;
+        const noFit = () => new Error("Question with gesture hint does not fit the display; provide a shorter prompt");
+        if (maxWidth <= 0 || availableHeight <= 0) throw noFit();
+
+        const hint = await this._fitText(GESTURE_HINT, 12, Math.max(12, Math.round(32 * scale)),
+            frameWidth, availableHeight);
+        if (!hint) throw noFit();
+        const maxQuestionHeight = availableHeight - hint.height - gap - inset * 2;
+        if (maxQuestionHeight < 12) throw noFit();
+        const minimumSize = Math.max(12, Math.round(28 * scale));
+        const maximumSize = Math.max(minimumSize, Math.round(72 * scale));
+        const question = await this._fitText(text, minimumSize, maximumSize, maxWidth, maxQuestionHeight)
+            || await this._fitText(text, minimumSize, maximumSize, maxWidth, maxQuestionHeight, true);
+        if (!question) {
             throw new Error("Question does not fit the display; provide a shorter prompt");
         }
 
-        return [{
-            ...question,
-            x: Math.round((width - question.width) / 2),
-            y: Math.round((height - question.height) / 2),
-        }];
+        const frameHeight = question.height + inset * 2;
+        const top = Math.round((height - frameHeight - gap - hint.height) / 2);
+        return {
+            frame: { x: margin, y: top, width: frameWidth, height: frameHeight, lineWidth },
+            questionFontSize: question.fontSize,
+            hintFontSize: hint.fontSize,
+            blocks: [{
+                ...question,
+                x: Math.round((width - question.width) / 2),
+                y: top + inset,
+            }, {
+                ...hint,
+                x: Math.round((width - hint.width) / 2),
+                y: top + frameHeight + gap,
+            }],
+        };
     }
 
     _waitForDisplayReady(send) {
@@ -101,13 +149,14 @@ class PromptDisplay {
         const width = this.device.displayInformation?.width || 640;
         const height = this.device.displayInformation?.height || 400;
         const key = JSON.stringify([text, width, height]);
-        let blocks = this.cache.get(key);
-        const cacheHit = Boolean(blocks);
-        if (!blocks) {
-            blocks = await this._layout(text, width, height);
+        let layout = this.cache.get(key);
+        const cacheHit = Boolean(layout);
+        if (!layout) {
+            layout = await this._layout(text, width, height);
             if (this.cache.size >= 8) this.cache.delete(this.cache.keys().next().value);
-            this.cache.set(key, blocks);
+            this.cache.set(key, layout);
         }
+        const { blocks, frame } = layout;
 
         // The SDK reserves seven bytes of transport overhead, one command byte
         // and a 13-byte bitmap header. One-bit pixels pack eight per byte.
@@ -124,6 +173,8 @@ class PromptDisplay {
 
         await this.device.setDisplayColor(0, "#000000", false);
         await this.device.setDisplayColor(1, "#FFFFFF", false);
+        const frameColorIndex = Number(this.device.displayInformation?.pixelDepth) === 1 ? 1 : 2;
+        if (frameColorIndex === 2) await this.device.setDisplayColor(2, FRAME_COLOR, false);
         await this.device.setDisplayOpacity(1, false);
         await this.device.selectDisplayBackgroundColor(0, false);
         await this.device.selectDisplayBitmapColors([
@@ -133,7 +184,25 @@ class PromptDisplay {
         await this.device.setDisplayHorizontalAlignment("start", false);
         await this.device.setDisplayVerticalAlignment("start", false);
         await this.device.resetDisplayBitmapScale(false);
+        await this.device.clearDisplayRotation(false);
+        await this.device.clearDisplayCrop(false);
+        await this.device.clearDisplayRotationCrop(false);
         await this.device.clearDisplay(false);
+
+        // A vector outline costs only a few commands; it does not increase
+        // the one-bit text rasters or require a full-screen color bitmap.
+        await this.device.selectDisplayLineColor(frameColorIndex, false);
+        await this.device.setDisplayIgnoreFill(true, false);
+        await this.device.setDisplayIgnoreLine(false, false);
+        await this.device.setDisplayLineWidth(frame.lineWidth, false);
+        // The SDK adds the stroke footprint around the requested rectangle.
+        // Our layout stores its outer bounds, including that footprint.
+        const strokeExpansion = 2 * Math.ceil(frame.lineWidth / 2);
+        await this.device.drawDisplayRect(frame.x, frame.y,
+            frame.width - strokeExpansion, frame.height - strokeExpansion, false);
+        await this.device.setDisplayIgnoreFill(false, false);
+        await this.device.setDisplayLineWidth(0, false);
+        await this.device.selectDisplayLineColor(1, false);
 
         for (const block of blocks) {
             const tileWidth = Math.min(block.width, maxPixels);

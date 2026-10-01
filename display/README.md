@@ -18,16 +18,21 @@ This module provides a simple API to:
 ## Interaction prompts
 
 The VRU interaction uses `display.prompt` with **Should I stop?**, a question
-from the approaching vehicle. The display centers the bold question with no
-gesture instructions; the wearer answers naturally with a nod or shake.
-Custom questions wrap to fit without silently dropping text;
-questions that cannot fit at a readable size are rejected.
+from the approaching vehicle. Large bold white text sits inside a thick amber
+frame, with **Nod yes · Shake no** below it. The whole group is centered.
+The question uses the largest fitting font up to 72 px at 640 × 400, preferring
+one line; the gesture hint uses up to 32 px and the frame a 6 px stroke. Layout
+sizes scale with display dimensions. Long custom questions wrap without
+silently dropping text; questions that cannot fit at a readable size are rejected.
+Two-color displays keep the frame white instead of using an unavailable palette slot.
 
 ![Example VRU question on a 640 by 400 display](assets/vru-prompt-preview.png)
 
-`PromptDisplay` renders the question as a cropped black/white, one-bit
-bitmap, caches up to eight prepared layouts, and splits transfers to fit the
-device MTU. It queues the clear and drawing commands before one final display
+`PromptDisplay` renders the question and hint as separate cropped black/white,
+one-bit bitmaps, caches up to eight prepared layouts, and splits transfers to
+fit the device MTU. The amber frame uses the SDK rectangle primitive, so it adds
+only drawing commands without a larger bitmap or higher text pixel depth.
+It queues the clear and drawing commands before one final display
 update, then waits for the SDK's `displayReady` acknowledgement before returning
 and allowing gesture monitoring to start. It first drains any acknowledgement
 pending from an earlier display action; each acknowledgement wait is bounded

@@ -137,7 +137,7 @@ class ActionDispatcher extends EventEmitter {
                 const { PromptDisplay } = require("../display/lib/prompt-display");
                 this.promptDisplay = new PromptDisplay(this.device);
             }
-            // Prompt drawing owns black/white palette slots. Existing image
+            // Prompt drawing owns black/white/amber palette slots. Existing image
             // renderers must refresh their palette before their next draw.
             this.displayManager?.invalidatePaletteCache();
             this.textDisplay?.displayManager?.invalidatePaletteCache();

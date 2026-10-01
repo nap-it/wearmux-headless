@@ -235,13 +235,15 @@ microphone sessions, regardless of `ENABLED_SENSORS`. Acceleration is fixed to
 not dropped or slowed. If `TOPIC_PREFIX` changes from `bwear`, update both
 handler topics to use that same root.
 
-The display shows only the large centered question **Should I stop?**, spoken
-from the approaching vehicle's perspective. The wearer answers with a natural
-nod or shake, without on-screen instructions. Previous default handler questions
-are automatically updated to this wording; custom questions keep their meaning.
-Text is rendered into cropped monochrome bitmaps, cached for reuse, and shown
-in one display update. This avoids resizing a text image to the full display
-and reduces Bluetooth payload. Set `DISPLAY_TIMING=1` to log preparation,
+The display shows **Should I stop?** in large bold white text inside a thick
+amber frame, with **Nod yes · Shake no** below it. The question auto-fits the
+available space, preferring one line; long custom questions wrap without losing
+their meaning. At 640 × 400, the question fits up to 72 px, the hint up to 32 px,
+and the frame has a 6 px stroke. Two-color displays use a white frame instead.
+Previous default handler questions are automatically updated to this wording.
+Both text blocks are cropped one-bit bitmaps, cached for reuse. The frame uses
+a compact rectangle command, and everything appears in one display update.
+Set `DISPLAY_TIMING=1` to log preparation,
 command transfer, and display acknowledgement timing on your connection.
 
 ![Compact VRU question layout](display/assets/vru-prompt-preview.png)

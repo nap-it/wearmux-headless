@@ -4,10 +4,10 @@ class MessageDisplay {
     }
 
     async show(text) {
-        // Keep custom questions intact while removing historical gesture hints
-        // and updating the known stop-request questions from older handlers.
+        // Keep custom questions intact. The renderer owns the separate gesture
+        // hint, so strip legacy inline hints before normalizing older questions.
         let message = String(text || "").replace(/\s+/g, " ").trim();
-        message = message.replace(/\s+Nod yes; shake no\.?$/i, "").trim();
+        message = message.replace(/\s+Nod yes\s*[;·]\s*shake no\.?$/i, "").trim();
         if ([
             "Should the vehicle continue stopping?",
             "Keep vehicle stopped?",

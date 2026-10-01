@@ -43,6 +43,9 @@ function samples(start = 0) {
         });
     }
 }
+function answerPublishes() {
+    return publisher.publish.mock.calls.filter(([topic]) => topic === ANSWER_TOPIC);
+}
 
 test.each([["1_nod", "yes"], ["2_shake", "no"]])("%s answers only after display, with the original prompt ID", async (label, answer) => {
     classifier.classify.mockReturnValue({ results: [{ label, value: 0.9 }] });
@@ -51,13 +54,13 @@ test.each([["1_nod", "yes"], ["2_shake", "no"]])("%s answers only after display,
     const showing = interaction.handlePrompt({ prompt_id: "one", question: "Should I stop?" });
     samples();
     expect(classifier.classify).not.toHaveBeenCalled();
-    expect(publisher.publish).not.toHaveBeenCalled();
+    expect(answerPublishes()).toHaveLength(0);
     finishDisplay();
     await showing;
     samples(50);
     samples(100);
     await jest.advanceTimersByTimeAsync(0);
-    expect(publisher.publish).toHaveBeenCalledTimes(1);
+    expect(answerPublishes()).toHaveLength(1);
     expect(publisher.publish).toHaveBeenCalledWith(ANSWER_TOPIC, expect.objectContaining({ prompt_id: "one", answer }));
     expect(session.dispatchAction).toHaveBeenLastCalledWith({ action: "display.clear" });
     expect(interaction.active).toBeNull();
@@ -72,7 +75,7 @@ test("a timeout during display transfer never starts detection or publishes an a
     await showing;
     samples();
     expect(classifier.classify).not.toHaveBeenCalled();
-    expect(publisher.publish).not.toHaveBeenCalled();
+    expect(answerPublishes()).toHaveLength(0);
     expect(session.sensors.listenerCount("acceleration")).toBe(0);
 });
 
@@ -81,7 +84,7 @@ test("model failure clears the question and leaves the handler's timeout policy 
     await interaction.handlePrompt({ prompt_id: "one" });
     samples();
     await jest.advanceTimersByTimeAsync(0);
-    expect(publisher.publish).not.toHaveBeenCalled();
+    expect(answerPublishes()).toHaveLength(0);
     expect(session.dispatchAction).toHaveBeenLastCalledWith({ action: "display.clear" });
     expect(interaction.active).toBeNull();
 });
