@@ -1,5 +1,6 @@
 {
     "name": "wearmux-headless",
+    "license": "GPL-3.0-only",
     "engines": {
         "node": ">=22.16.0"
     },
