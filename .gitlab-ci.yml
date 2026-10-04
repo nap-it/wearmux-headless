@@ -67,8 +67,8 @@ before_script:
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
       changes:
         - $DOCKERFILE_PATH/**
-    # 2) Non-main branch pipelines
-    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    # 2) Branch pipelines, including main after a merge
+    - if: '$CI_COMMIT_BRANCH'
 
 # ------------------------------------------------------------------------------
 # 2) BUILD JOBS (one per component × arch)
@@ -142,8 +142,8 @@ build_wearmux_headless_arm64:
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
       changes:
         - $DOCKERFILE_PATH/**
-    # Non-main branch pipelines
-    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
+    # Branch pipelines, including main after a merge
+    - if: '$CI_COMMIT_BRANCH'
 
 # ------------------------------------------------------------------------------
 # 4) MANIFEST JOBS (one per component)
@@ -174,7 +174,7 @@ release:
   rules:
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
 # ------------------------------------------------------------------------------
-# 6) CLEANUP (remove all -amd64 / -arm64 tags) on tags & non-main branches
+# 6) CLEANUP (remove all -amd64 / -arm64 tags) on tags & branches
 # ------------------------------------------------------------------------------
 cleanup:
   stage: clean
@@ -185,7 +185,7 @@ cleanup:
     - curl -LO https://github.com/regclient/regclient/releases/download/v0.6.1/regctl-linux-amd64
     - chmod +x regctl-linux-amd64 && mv regctl-linux-amd64 /usr/local/bin/regctl
     - regctl registry login code.nap.av.it.pt:5050 -u "${CI_USER}" -p "${CI_TOKEN}"
-    - echo "→ Cleaning up tags for $CI_COMMIT_TAG or non-main branch $CI_COMMIT_BRANCH"
+    - echo "→ Cleaning up tags for $CI_COMMIT_TAG or branch $CI_COMMIT_BRANCH"
     - |
       for IMAGE in wearmux-headless; do
         echo "→ Cleaning up $IMAGE"
@@ -197,6 +197,5 @@ cleanup:
   rules:
     # Tag pipelines only
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
-    # Non-main branch pipelines
-    - if: '$CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH'
-
+    # Branch pipelines, including main after a merge
+    - if: '$CI_COMMIT_BRANCH'
