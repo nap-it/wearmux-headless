@@ -43,15 +43,13 @@ If you use WearMux in your research, please consider citing *WearMux: Real-Time 
 
 ## How It Works
 
-The paper describes WearMux as sensor, wearable, processing, and service layers. In Headless, the SDK-backed device manager and per-device sessions coordinate connections and capabilities. Modality modules acquire and prepare data; transport and action modules connect those capabilities to consumers and device outputs.
+The Headless host connects compatible wearables to applications. It collects available images, audio, and sensor data, and supports feedback through device displays and haptics.
+
+Applications can process data on the host or another machine using MQTT or Zenoh. The [technical guide](docs/technical-guide.md) describes the Headless modules and their implementation.
 
 ![WearMux architecture across wearable devices, Android and Headless hosts, and application services.](docs/images/wearmux-system-architecture.png)
 
 *Figure 1 from the WearMux manuscript. This repository implements the Headless host path.*
-
-![WearMux Headless modules, device manager, transports, consumers, and Zenoh bridge.](docs/images/wearmux-headless-architecture.png)
-
-*Figure 4 from the WearMux manuscript, showing the Headless implementation.*
 
 ## Supported Devices
 

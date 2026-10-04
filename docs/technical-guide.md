@@ -2,6 +2,12 @@
 
 Setup, configuration, messaging, and deployment reference for WearMux Headless. For the project overview, citation, and first-run instructions, see the [README](../README.md).
 
+The SDK-backed device manager and per-device sessions coordinate connections and capabilities. Modality modules acquire and prepare data; transport and action modules connect those capabilities to consumers and device outputs. The diagram below shows these Headless components; their source files are mapped in [Project Structure](#project-structure).
+
+![WearMux Headless modules, device manager, transports, consumers, and Zenoh bridge.](images/wearmux-headless-architecture.png)
+
+*Headless architecture, reproduced from Figure 4 of the WearMux manuscript supplied with this project.*
+
 ## Contents
 
 - [Prerequisites](#prerequisites)
