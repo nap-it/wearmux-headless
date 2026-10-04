@@ -9,6 +9,14 @@ const { VruStopRequestInteraction } = require("../interactions/vru-stop-request"
 // Own one session per discovered wearable while sharing a single transport connection.
 const normalizeId = (value) => String(value || "").toLowerCase().replaceAll(":", "");
 
+function supportsAction(capabilities, action) {
+    if (action.startsWith("display.")) return capabilities.display;
+    if (action === "haptic.vibrate") return capabilities.haptics;
+    if (action === "audio.beep") return capabilities.audio;
+    if (action === "notification.show") return capabilities.notifications;
+    return false;
+}
+
 class DeviceFleet {
     constructor() {
         this.sessions = new Map();
@@ -188,9 +196,7 @@ class DeviceFleet {
                 if (!session) throw new Error(`Device '${command.deviceId}' is not connected`);
             } else {
                 // Never broadcast an action: require a device ID if multiple devices can perform it.
-                const eligible = connected.filter((item) =>
-                    command.action.startsWith("display.") ? item.capabilities.display :
-                        command.action === "haptic.vibrate" && item.capabilities.haptics);
+                const eligible = connected.filter((item) => supportsAction(item.capabilities, command.action));
                 if (!eligible.length) throw new Error(`No connected device supports '${command.action}'`);
                 if (eligible.length > 1) throw new Error(`Multiple devices support '${command.action}'; set deviceId`);
                 session = eligible[0];

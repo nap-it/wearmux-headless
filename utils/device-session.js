@@ -15,7 +15,9 @@ class DeviceSession {
         this.cameraIndex = options.cameraIndex || 0;
         this.microphoneIndex = options.microphoneIndex || 0;
         this.info = { id: device.bluetoothId || device.id || null, name: device.name || null };
-        this.capabilities = { sensors: [], camera: false, microphone: false, display: false, haptics: false };
+        this.capabilities = {
+            sensors: [], camera: false, microphone: false, display: false, haptics: false, audio: false, notifications: false,
+        };
         this.actions = new ActionDispatcher(device, { publisher });
         this.pendingAction = Promise.resolve();
         this.sensorHandlers = new Map();
@@ -46,6 +48,8 @@ class DeviceSession {
             microphone: Boolean(this.device.hasMicrophone),
             display: Boolean(this.device.isDisplayAvailable),
             haptics: Array.isArray(this.device.vibrationLocations) && this.device.vibrationLocations.length > 0,
+            audio: Boolean(this.device.canBeep),
+            notifications: Boolean(this.device.canNotify),
         };
     }
 

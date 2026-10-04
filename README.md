@@ -87,7 +87,6 @@ wearmux-headless/
 │   ├── action-dispatcher.js        # Route incoming actions to device outputs
 │   ├── zenoh-manager.js            # Node→Python sidecar bridge (UDS)
 │   └── zenoh-subscriber.js         # Zenoh subscriber helper
-├── wearos/                         # Wear OS companion app (Gradle project)
 ├── docker-compose.yml              # Docker for Linux
 ├── requirements.txt                 # Core Zenoh bridge dependencies only
 ├── package.json
@@ -183,32 +182,38 @@ For off-device inference, see the [consumer guide](examples/consumers/README.md)
 
 ## Wear OS watches
 
-Wear OS watches (for example a Galaxy Watch) join the session runtime through the companion app in `wearos/`. The watch connects to this host over Wi-Fi, so both must be on the same network; no phone is involved. Each watch appears as a device with `acceleration`, `gyroscope`, `magnetometer` and `heartRate` sensors and supports `haptic.vibrate`. It has no display, camera or microphone, so the VRU interaction never selects it.
+Wear OS watches (for example a Galaxy Watch) join the session runtime through the WearMux watch app, which lives in the `wear` module of [wearmux-android](https://github.com/T4V4RES/wearmux-android). It has two tabs, Phone for the WearMux phone app and PC for this host, switched by tapping or swiping sideways. In PC mode the watch connects over Wi-Fi, so both must be on the same network; no phone is involved. Each watch appears as a device with `acceleration`, `gyroscope`, `magnetometer` and `heartRate` sensors and supports `haptic.vibrate`, `audio.beep` and `notification.show`. It has no display, camera or microphone, so the VRU interaction never selects it.
 
 1. Set `WEAROS_PORT` in `config/wearos.ini` (for example `8765`) and start `npm run sessions`.
-2. Build and install the app on the watch (API 30 or newer) with the watch connected over wireless debugging:
+2. Build and install the watch app (API 34 or newer) with the watch connected over wireless debugging:
    ```bash
-   cd wearos
+   git clone https://github.com/T4V4RES/wearmux-android.git
+   cd wearmux-android
    echo "sdk.dir=$HOME/Android/Sdk" > local.properties
-   echo "wearmux.host=<host-ip>" >> local.properties   # optional default address
-   ./gradlew installDebug
+   ./gradlew :wear:installDebug
    ```
-3. Set the address at runtime if needed, then tap Connect on the watch and grant the sensor permission:
-   ```bash
-   adb shell am start -n com.wearmux.headless.wear/.MainActivity --es host <host-ip> --ei port 8765
-   ```
+3. Open the PC tab, tap Connect and grant the sensor permission. The watch finds the host with a broadcast on the Wi-Fi network, so no address needs to be entered.
 
-The app uses its own package name, so it can be installed next to other Wear OS apps on the same watch. It keeps the watch on Wi-Fi while connected and reconnects automatically; the host restores the sensor configuration after each reconnect.
+On networks that drop broadcasts between clients, the watch uses the last address that worked. To set one by hand (this also opens the PC tab):
+```bash
+adb shell am start -n com.wearmux.android/.wear.MainActivity --es host <host-ip> --ei port 8765
+```
 
-The link is one JSON message per WebSocket frame:
+Only one tab streams at a time. Switching to PC stops the stream to the phone, and switching back disconnects from the host. While connected the app keeps the watch on Wi-Fi and reconnects automatically; the host restores the sensor configuration after each reconnect.
+
+Discovery is one UDP datagram each way; the link is one JSON message per WebSocket frame:
 
 | Direction | Message |
 |-----------|---------|
-| watch to host | `{"type":"hello","id":"wearos-<id>","name":"...","sensors":[...],"vibration":true}` (first message) |
+| watch to host (UDP broadcast) | `{"type":"discover"}` |
+| host to watch (UDP reply) | `{"type":"wearmux","port":8765,"name":"<hostname>"}` |
+| watch to host | `{"type":"hello","id":"wearos-<id>","name":"...","sensors":[...],"vibration":true,"beep":true,"notifications":true}` (first message) |
 | watch to host | `{"type":"sensor","sensor":"acceleration","timestamp":<ms>,"x":0,"y":0,"z":9.8}` (m/s², rad/s or μT) |
 | watch to host | `{"type":"sensor","sensor":"heartRate","timestamp":<ms>,"bpm":72}` |
 | host to watch | `{"type":"config","sensors":{"acceleration":50}}` (interval in ms per sensor; 0 or missing turns it off) |
 | host to watch | `{"type":"vibrate","effect":"doubleClick100"}` |
+| host to watch | `{"type":"beep","frequency":880,"durationMs":250}` |
+| host to watch | `{"type":"notify","level":"danger","title":"...","text":"..."}` |
 
 ## VRU stop-request interaction
 
@@ -342,6 +347,8 @@ In the session runtime, an action without `deviceId` goes to the sole connected 
 | `display.clear` | — | Clear the device display |
 | `display.image` | `data` | Show a base64 PNG or JPEG, up to 1 MiB |
 | `haptic.vibrate` | optional `effect`, `locations` | Trigger a supported SDK vibration effect; defaults to `strongClick100` |
+| `audio.beep` | optional `frequency` (40–8000 Hz, default 880), `durationMs` (10–5000, default 250) | Play a tone on a Wear OS watch |
+| `notification.show` | optional `level` (`warning`, `danger` or `safe`; default `warning`), `title`, `text` | Show a full-screen alert with vibration on a Wear OS watch |
 
 Use the included sender to publish an action and print its result:
 
@@ -351,6 +358,9 @@ npm run actions:send -- '{"action":"display.text","text":"Hello"}'
 
 # Target a specific wristband when more than one device can vibrate.
 npm run actions:send -- '{"action":"haptic.vibrate","deviceId":"<wristband-id>"}'
+
+# Alert a Wear OS watch.
+npm run actions:send -- '{"action":"notification.show","level":"danger","title":"Car approaching","text":"Wait"}'
 
 # MQTT, with `npm run mqtt:broker` running in another terminal.
 MESSAGE_TRANSPORT=mqtt npm run sessions

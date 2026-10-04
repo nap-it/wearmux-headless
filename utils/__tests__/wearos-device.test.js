@@ -1,5 +1,6 @@
 jest.mock("../../camera/lib/camera-session", () => ({ CameraSession: jest.fn() }));
 jest.mock("../../microphone/lib/microphone-session", () => ({ MicrophoneSession: jest.fn() }));
+const dgram = require("dgram");
 const WebSocket = require("ws");
 const { WearOsServer } = require("../wearos-device");
 const { DeviceSession } = require("../device-session");
@@ -9,7 +10,7 @@ jest.useRealTimers();
 
 const HELLO = {
     type: "hello", id: "wearos-test", name: "Galaxy Watch8",
-    sensors: ["acceleration", "gyroscope", "magnetometer", "heartRate"], vibration: true,
+    sensors: ["acceleration", "gyroscope", "magnetometer", "heartRate"], vibration: true, beep: true, notifications: true,
 };
 const oldEnv = { ...process.env };
 let server;
@@ -66,12 +67,12 @@ async function startSession() {
     return { watch, device: devices[0], publisher };
 }
 
-test("a watch hello becomes a session with sensor and haptic capabilities only", async () => {
+test("a watch hello becomes a session with sensor, haptic, beep and notification capabilities only", async () => {
     const { watch } = await startSession();
     expect(session.info).toEqual({ id: "wearos-test", name: "Galaxy Watch8" });
     expect(session.capabilities).toEqual({
         sensors: ["acceleration", "magnetometer", "gyroscope", "heartRate"],
-        camera: false, microphone: false, display: false, haptics: true,
+        camera: false, microphone: false, display: false, haptics: true, audio: true, notifications: true,
     });
     await waitFor(() => watch.received.some((packet) => packet.type === "config"));
     expect(watch.received.find((packet) => packet.type === "config").sensors).toEqual({
@@ -100,6 +101,23 @@ test("haptic.vibrate is forwarded to the watch", async () => {
     expect(watch.received.find((packet) => packet.type === "vibrate")).toEqual({ type: "vibrate", effect: "strongClick100" });
 });
 
+test("audio.beep is forwarded to the watch with defaults", async () => {
+    const { watch } = await startSession();
+    await session.dispatchAction({ action: "audio.beep" });
+    await waitFor(() => watch.received.some((packet) => packet.type === "beep"));
+    expect(watch.received.find((packet) => packet.type === "beep")).toEqual({ type: "beep", frequency: 880, durationMs: 250 });
+});
+
+test("notification.show is forwarded to the watch and rejects unknown levels", async () => {
+    const { watch } = await startSession();
+    await session.dispatchAction({ action: "notification.show", level: "danger", title: "Car", text: "Stop" });
+    await waitFor(() => watch.received.some((packet) => packet.type === "notify"));
+    expect(watch.received.find((packet) => packet.type === "notify")).toEqual({
+        type: "notify", level: "danger", title: "Car", text: "Stop",
+    });
+    await expect(session.dispatchAction({ action: "notification.show", level: "loud" })).rejects.toThrow("level");
+});
+
 test("a reconnecting watch keeps its device and gets its sensor configuration back", async () => {
     const { watch, device } = await startSession();
     const statuses = jest.fn();
@@ -125,4 +143,15 @@ test("a connection that does not start with hello is closed", async () => {
     const code = await new Promise((resolve) => client.once("close", resolve));
     expect(code).toBe(1008);
     expect(devices).toHaveLength(0);
+});
+
+test("a discovery broadcast is answered with the watch port", async () => {
+    const udp = dgram.createSocket("udp4");
+    const reply = new Promise((resolve) => udp.once("message", (data) => resolve(JSON.parse(data.toString()))));
+    udp.send(JSON.stringify({ type: "discover" }), server.port, "127.0.0.1");
+    try {
+        expect(await reply).toEqual(expect.objectContaining({ type: "wearmux", port: server.port }));
+    } finally {
+        udp.close();
+    }
 });

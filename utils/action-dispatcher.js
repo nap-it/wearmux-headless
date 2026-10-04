@@ -5,6 +5,7 @@ const { topic } = require("./topics");
 const ACTION_TOPIC = topic("actions");
 const RESULT_TOPIC = topic("actions", "result");
 const MAX_IMAGE_BYTES = 1024 * 1024;
+const NOTIFICATION_LEVELS = ["warning", "danger", "safe"];
 
 class ActionDispatcher extends EventEmitter {
     constructor(device, options = {}) {
@@ -203,6 +204,36 @@ class ActionDispatcher extends EventEmitter {
                 segments: [{ effect }],
                 ...(locations ? { locations } : {}),
             }]);
+            return;
+        }
+        case "audio.beep": {
+            if (!this.device.canBeep) throw new Error("Beep is unavailable on this device");
+            const frequency = command.frequency ?? 880;
+            const durationMs = command.durationMs ?? 250;
+            if (!Number.isInteger(frequency) || frequency < 40 || frequency > 8000) {
+                throw new Error("audio.beep frequency must be an integer from 40 to 8000 Hz");
+            }
+            if (!Number.isInteger(durationMs) || durationMs < 10 || durationMs > 5000) {
+                throw new Error("audio.beep durationMs must be an integer from 10 to 5000");
+            }
+            await this.device.playBeep({ frequency, durationMs });
+            return;
+        }
+        case "notification.show": {
+            if (!this.device.canNotify) throw new Error("Notifications are unavailable on this device");
+            const level = command.level ?? "warning";
+            if (!NOTIFICATION_LEVELS.includes(level)) {
+                throw new Error(`notification.show level must be one of ${NOTIFICATION_LEVELS.join(", ")}`);
+            }
+            const title = command.title ?? "WearMux";
+            const text = command.text ?? "";
+            if (typeof title !== "string" || !title.trim() || title.length > 100) {
+                throw new Error("notification.show requires a title of 1–100 characters");
+            }
+            if (typeof text !== "string" || text.length > 500) {
+                throw new Error("notification.show text must be at most 500 characters");
+            }
+            await this.device.showNotification({ level, title, text });
             return;
         }
         default:

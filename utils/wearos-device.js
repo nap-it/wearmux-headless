@@ -1,4 +1,6 @@
+const dgram = require("dgram");
 const EventEmitter = require("events");
+const os = require("os");
 const { WebSocketServer } = require("ws");
 
 // Sensors the Wear OS companion streams, in the SDK's units (m/s², rad/s, µT) plus heart rate in BPM.
@@ -9,12 +11,14 @@ const PING_INTERVAL_MS = 10000;
 
 // Exposes a watch through the subset of the SDK Device API used by DeviceSession.
 class WearOsDevice extends EventEmitter {
-    constructor({ id, name, sensors, vibration }) {
+    constructor({ id, name, sensors, vibration, beep, notifications }) {
         super();
         this.id = id;
         this.name = name || "Wear OS";
         this.availableSensorTypes = WEAROS_SENSORS.filter((sensor) => sensors?.includes(sensor));
         this.vibrationLocations = vibration ? ["wrist"] : [];
+        this.canBeep = Boolean(beep);
+        this.canNotify = Boolean(notifications);
         this.hasCamera = false;
         this.hasMicrophone = false;
         this.isDisplayAvailable = false;
@@ -85,6 +89,14 @@ class WearOsDevice extends EventEmitter {
         }
     }
 
+    async playBeep({ frequency, durationMs }) {
+        if (!this._send({ type: "beep", frequency, durationMs })) throw new Error("Wear OS device is not connected");
+    }
+
+    async showNotification({ level, title, text }) {
+        if (!this._send({ type: "notify", level, title, text })) throw new Error("Wear OS device is not connected");
+    }
+
     async disconnect() {
         const socket = this.socket;
         this.socket = null;
@@ -120,6 +132,28 @@ class WearOsServer extends EventEmitter {
             }
         }, PING_INTERVAL_MS);
         this.pingTimer.unref?.();
+        this._startDiscovery();
+    }
+
+    // Answers watch discovery on UDP. Bound to every interface, since one address alone misses broadcasts.
+    _startDiscovery() {
+        const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
+        socket.on("message", (data, remote) => {
+            let packet;
+            try { packet = JSON.parse(data.toString()); }
+            catch { return; }
+            if (packet?.type !== "discover") return;
+            const reply = JSON.stringify({ type: "wearmux", port: this.port, name: os.hostname() });
+            socket.send(reply, remote.port, remote.address);
+        });
+        socket.on("error", (error) => {
+            console.warn("[WearOS] discovery off:", error?.message || error);
+            if (this.discovery === socket) this.discovery = null;
+            socket.close();
+        });
+        socket.bind(this.port);
+        socket.unref();
+        this.discovery = socket;
     }
 
     _accept(socket, request) {
@@ -149,6 +183,8 @@ class WearOsServer extends EventEmitter {
 
     async stop() {
         clearInterval(this.pingTimer);
+        this.discovery?.close();
+        this.discovery = null;
         if (!this.server) return;
         for (const socket of this.server.clients) socket.terminate();
         await new Promise((resolve) => this.server.close(() => resolve()));
