@@ -8,7 +8,25 @@ const { VruStopRequestInteraction } = require("../interactions/vru-stop-request"
 // Own one session per discovered wearable while sharing a single transport connection.
 const normalizeId = (value) => String(value || "").toLowerCase().replaceAll(":", "");
 
+/**
+ * Owns one {@link DeviceSession} per connected wearable and routes transport actions.
+ *
+ * @class
+ * @example
+ * const { DeviceFleet } = require("./utils/device-fleet");
+ * const fleet = new DeviceFleet();
+ * async function main() {
+ *     try {
+ *         await fleet.start();
+ *         // Application uses the configured data streams here.
+ *     } finally {
+ *         await fleet.stop();
+ *     }
+ * }
+ * main().catch(console.error);
+ */
 class DeviceFleet {
+    /** Create a fleet using the selected transport and optional VRU interaction. */
     constructor() {
         this.sessions = new Map();
         this.connecting = new Set();
@@ -43,6 +61,12 @@ class DeviceFleet {
         };
     }
 
+    /**
+     * Start transport listeners, attach existing devices, and begin scanning.
+     * @returns {Promise<void>}
+     * @throws {Error} If no scanner is available and `DEVICE_IP` is not configured,
+     * or startup of a selected transport fails.
+     */
     async start() {
         // Start messaging before scanning so the first connected device can publish immediately.
         if (this.publisher) {
@@ -83,12 +107,18 @@ class DeviceFleet {
         console.log("[Fleet] Discovering all compatible devices");
     }
 
+    /** Request a scan when the SDK scanner is available and idle. */
     scan() {
         if (this.stopping || !this.scanner?.isScanningAvailable || this.scanner.isScanning) return;
         try { this.scanner.startScan(); }
         catch (error) { console.warn("[Fleet] scan:", error?.message || error); }
     }
 
+    /**
+     * Check the optional ID and name filters from the environment.
+     * @param {Object} device SDK device or discovery record.
+     * @returns {boolean} Whether the filters accept the device.
+     */
     matches(device) {
         // Filters are optional. With neither set, every compatible device is accepted.
         const id = process.env.DEVICE_ID || process.env.MIC_DEVICE_ID;
@@ -98,6 +128,12 @@ class DeviceFleet {
         return true;
     }
 
+    /**
+     * Queue a discovered device for serialized connection and session attachment.
+     * Repeated advertisements for the same normalized ID are deduplicated.
+     * @param {Object} discoveredDevice SDK discovery record.
+     * @returns {void}
+     */
     discovered(discoveredDevice) {
         if (!discoveredDevice || this.stopping || !this.matches(discoveredDevice)) return;
         const rawId = discoveredDevice.bluetoothId || discoveredDevice.id;
@@ -128,6 +164,12 @@ class DeviceFleet {
         }).catch((error) => console.warn(`[Fleet] ${rawId}:`, error?.message || error));
     }
 
+    /**
+     * Attach a connected SDK device as a managed session.
+     * @param {Object} device Connected SDK device.
+     * @returns {Promise<void>}
+     * @throws {Error} If session startup fails; the session is removed before rejection.
+     */
     async attach(device) {
         if (this.stopping || !device || device.isConnected === false || !this.matches(device)) return;
         const key = normalizeId(device.bluetoothId || device.id);
@@ -145,6 +187,11 @@ class DeviceFleet {
         }
     }
 
+    /**
+     * Validate, target, and execute one action payload, then publish its result.
+     * @param {ActionCommand|string} payload JSON action object or encoded JSON string.
+     * @returns {Promise<void>}
+     */
     async routeAction(payload) {
         let command = payload;
         try {
@@ -190,10 +237,20 @@ class DeviceFleet {
         await this.publishActionResult(result);
     }
 
+    /**
+     * Publish an action result on the configured result topic.
+     * @param {ActionResult} result
+     * @returns {Promise<void>}
+     */
     async publishActionResult(result) {
         await this.publisher.publish(RESULT_TOPIC, { ts: Date.now(), device: null, ...result });
     }
 
+    /**
+     * Stop scanning, inbound actions, VRU interaction, sessions, and the shared publisher.
+     * Existing SDK device connections are explicitly disconnected after sessions stop.
+     * @returns {Promise<void>}
+     */
     async stop() {
         if (this.stopping) return;
         this.stopping = true;

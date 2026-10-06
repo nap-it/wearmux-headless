@@ -10,7 +10,21 @@ const { topic } = require("./topics");
 
 // Native bindings are not supported in Node here; we use a small Python sidecar.
 
+/**
+ * Publishes sensor envelopes through the Python Zenoh sidecar over a local UDS.
+ * @class
+ * @extends EventEmitter
+ * @param {Object} [options]
+ * @param {string} [options.keyPrefix] Prefix for published sensor keys.
+ * @param {string} [options.udsPath] Local Unix socket path; generated when omitted.
+ */
 class ZenohManager extends EventEmitter {
+    /**
+     * Create a Zenoh publisher backed by a Python sidecar.
+     * @param {Object} [options]
+     * @param {string} [options.keyPrefix] Prefix for published sensor keys.
+     * @param {string} [options.udsPath] Unix socket path.
+     */
     constructor(options = {}) {
         super();
         this.keyPrefix = options.keyPrefix || topic("sensors");
@@ -28,10 +42,20 @@ class ZenohManager extends EventEmitter {
         this._udsSocket = null;
     }
 
+    /**
+     * Set optional device identity included in subsequent sensor envelopes.
+     * @param {DeviceIdentity|null} info
+     * @returns {void}
+     */
     setDeviceInfo(info) {
         this._deviceInfo = info || null;
     }
 
+    /**
+     * Start the Python sidecar and UDS connection, then emit `ready`.
+     * @returns {Promise<Object>} Sidecar session descriptor.
+     * @throws {Error} If the sidecar or UDS cannot start.
+     */
     async start() {
         if (this.session || this._child) return this.session;
         this._stopping = false;
@@ -40,6 +64,11 @@ class ZenohManager extends EventEmitter {
         return this.session;
     }
 
+    /**
+     * Start the Python publisher sidecar and connect its UDS.
+     * @private
+     * @returns {Promise<void>}
+     */
     async _startPythonBridge() {
         const script = path.resolve(__dirname, "../tools/zenoh_py_publisher.py");
         const fs = require("fs");
@@ -109,6 +138,10 @@ class ZenohManager extends EventEmitter {
         this.session = { bridge: "python" };
     }
 
+    /**
+     * Stop sensor listeners, close the UDS, and terminate the owned sidecar.
+     * @returns {Promise<void>}
+     */
     async stop() {
         this._stopping = true;
         try {
@@ -134,10 +167,22 @@ class ZenohManager extends EventEmitter {
         }
     }
 
+    /**
+     * Build a key for one sensor type.
+     * @private
+     * @param {string} sensorType
+     * @returns {string}
+     */
     _topicFor(sensorType) {
         return `${this.keyPrefix}/${sensorType}`;
     }
 
+    /**
+     * Serialize a payload before MessagePack framing.
+     * @private
+     * @param {*} payload
+     * @returns {string}
+     */
     _serialize(payload) {
         if (payload == null) return "null";
         try {
@@ -148,6 +193,13 @@ class ZenohManager extends EventEmitter {
         }
     }
 
+    /**
+     * Publish one JSON payload through the sidecar, honoring UDS backpressure.
+     * @param {string} key
+     * @param {*} payload
+     * @returns {Promise<void>}
+     * @throws {Error} If the UDS is unavailable or closes.
+     */
     async publish(key, payload) {
         if (!this._udsSocket) throw new Error("UDS socket is not connected");
         // Pre-serialize JSON on the JS side: msgpack would turn any Buffer field
@@ -174,6 +226,12 @@ class ZenohManager extends EventEmitter {
     }
 
     // Attach all enabled sensors from SensorManager and publish
+    /**
+     * Bind selected sensor events to Zenoh publications.
+     * @param {Object} sensorManager
+     * @param {SensorAttachmentOptions} [options]
+     * @returns {Promise<void>}
+     */
     async attachToSensorManager(sensorManager, options = {}) {
         if (this._attached) return;
         if (!this.session) await this.start();
@@ -229,6 +287,11 @@ class ZenohManager extends EventEmitter {
         this._attached = true;
     }
 
+    /**
+     * Remove all listeners installed by {@link ZenohManager#attachToSensorManager}.
+     * @param {Object} [sensorManager]
+     * @returns {Promise<void>}
+     */
     async detachAll(sensorManager) {
         if (!this._attached) return;
         const sm = sensorManager || this._sensorManager;
@@ -246,5 +309,15 @@ class ZenohManager extends EventEmitter {
         this._attached = false;
     }
 }
+
+/**
+ * @event ZenohManager#ready
+ * @description Emitted after the Python sidecar and UDS are ready.
+ */
+/**
+ * @event ZenohManager#error
+ * @description Emitted for sidecar, socket, or publish failures.
+ * @property {Error} error The failure.
+ */
 
 module.exports = { ZenohManager };

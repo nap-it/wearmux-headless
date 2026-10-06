@@ -3,10 +3,29 @@ const sharp = require("sharp");
 const RgbQuant = require("rgbquant");
 const { Config } = require("../../utils/config");
 
+/**
+ * Resize images, reduce them to a device palette, and upload tiled bitmaps.
+ * The caller owns the connected device and serializes display operations.
+ * Rendering resolves after SDK calls complete, without a separate displayReady wait.
+ * @class
+ * @see ActionDispatcher
+ * @see {@tutorial display}
+ */
 class DisplayManager {
     /**
-     * @param {Device} device - SDK device instance (already connected)
-     * @param {Object} options - Configuration options
+     * @param {Object} device Connected SDK device with an available display.
+     * @param {Object} [options={}] Rendering defaults overriding Config.getDisplayConfig().
+     * @param {number} [options.width] Target width in pixels; falls back to device information, then 640.
+     * @param {number} [options.height] Target height in pixels; falls back to device information, then 400.
+     * @param {number} [options.pixelDepth] Palette depth of 1, 2, or 4 bits per pixel.
+     * @param {string} [options.fit] Sharp resize mode, normally contain.
+     * @param {string} [options.align] top, bottom, left, right, or center.
+     * @param {number} [options.x] Horizontal placement; zero uses automatic centering.
+     * @param {number} [options.y] Vertical placement; zero uses automatic centering.
+     * @param {number} [options.tileMaxPixels] Fallback/minimum tile size used with the device MTU.
+     * @param {number} [options.inputHeight] Optional host processing height in pixels.
+     * @param {number} [options.outputHeight] Optional scaled display height in pixels.
+     * @throws {Error} When the device is missing or its display is unavailable.
      */
     constructor(device, options = {}) {
         if (!device) {
@@ -44,10 +63,20 @@ class DisplayManager {
         }
     }
 
+    /**
+     * Forget palette slots after another renderer changes the device palette.
+     * @returns {void}
+     */
     invalidatePaletteCache() {
         this._devicePaletteCache = null;
     }
 
+    /**
+     * Decode and render an image file. Rejects on decoding or device command failure.
+     * @param {string} filePath Path to an image readable by Sharp.
+     * @param {DisplayRenderOptions} [opts={}] Per-image sizing and placement.
+     * @returns {Promise<boolean>} Resolves true when SDK rendering calls finish.
+     */
     async showImageFile(filePath, opts = {}) {
         const { data, info } = await sharp(filePath)
             .toColourspace("srgb")
@@ -57,6 +86,13 @@ class DisplayManager {
         return this._renderToDevice(data, info, opts);
     }
 
+    /**
+     * Decode and render encoded image bytes. Rejects on decoding or device errors.
+     * @param {Buffer} buffer Encoded image data readable by Sharp.
+     * @param {string} [mimeType="image/png"] Compatibility argument; Sharp detects the actual format.
+     * @param {DisplayRenderOptions} [opts={}] Per-image sizing and placement.
+     * @returns {Promise<boolean>} Resolves true when SDK rendering calls finish.
+     */
     async showImageBuffer(buffer, mimeType = "image/png", opts = {}) {
         const { data, info } = await sharp(buffer)
             .toColourspace("srgb")
@@ -66,6 +102,7 @@ class DisplayManager {
         return this._renderToDevice(data, info, opts);
     }
 
+    /** @private */
     async _renderToDevice(rawRgbBuffer, srcInfo, opts) {
         if (!this.device) throw new Error("Device not connected");
         if (!this.device.isDisplayAvailable) throw new Error("Display not available on this device");
@@ -429,6 +466,13 @@ class DisplayManager {
         return true;
     }
 
+    /**
+     * Render each file once in order, waiting after each image, including the last.
+     * @param {string[]} files Image paths.
+     * @param {number} [intervalMs=1000] Delay in milliseconds after rendering each file.
+     * @param {DisplayRenderOptions} [opts={}] Shared rendering options.
+     * @returns {Promise<void>} Rejects on the first rendering failure.
+     */
     async slideshow(files, intervalMs = 1000, opts = {}) {
         if (!Array.isArray(files) || files.length === 0)
             throw new Error("slideshow requires a non-empty files array");
@@ -440,6 +484,7 @@ class DisplayManager {
         }
     }
 
+    /** @private */
     async _quantizeRGBToIndexed(rgbaBuffer, width, height, numberOfColors) {
         const isSmall = width * height < 4;
         const method = isSmall ? 1 : 2;

@@ -61,6 +61,8 @@ DISPLAY_INPUT_HEIGHT=120 DISPLAY_OUTPUT_HEIGHT=240 npm run display -- ./sample.p
 
 ## API
 
+The [generated JSDoc reference](../docs/documentation.md) documents DisplayManager, TextDisplay, PromptDisplay, and their lifecycle/error contracts. The summary below covers image rendering.
+
 - `new DisplayManager(device, options?)`
   - `device`: connected SDK device with `isDisplayAvailable` set
   - options:
@@ -87,7 +89,7 @@ DISPLAY_INPUT_HEIGHT=120 DISPLAY_OUTPUT_HEIGHT=240 npm run display -- ./sample.p
   - Same as above but accepts raw buffers.
 
 - `slideshow(files, intervalMs, opts)`
-  - Cycles through a list of files at `intervalMs` per frame.
+  - Renders each file once in order, waiting `intervalMs` after each frame.
 
 ## Environment variables
 

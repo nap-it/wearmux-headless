@@ -8,8 +8,23 @@ const { ViewerServer } = require("./viewer-server");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Captures camera frames for either a standalone command or a device session.
+/**
+ * Acquire camera frames from one connected SDK device, optionally saving JPEGs,
+ * serving a browser viewer, and publishing metadata and raw media.
+ * The caller owns the device connection and publisher; stop() releases only the
+ * camera listeners, timers, and viewer. Configuration is read from the environment.
+ * @class
+ * @see DeviceSession
+ * @see {@tutorial camera}
+ */
 class CameraSession {
+    /**
+     * @param {Object} device Connected SDK device with camera capabilities.
+     * @param {?Publisher} publisher Started shared publisher, or null for local capture.
+     * @param {Object} options Session identity and viewer port offset.
+     * @param {DeviceIdentity} options.deviceInfo Source identity included in metadata and filenames.
+     * @param {number} [options.cameraIndex=0] Offset added to CAMERA_VIEW_PORT.
+     */
     constructor(device, publisher, options = {}) {
         this.device = device;
         this.publisher = publisher;
@@ -22,12 +37,23 @@ class CameraSession {
         this.timer = null;
         this.collectionTimer = null;
         this.sequence = 0;
+        /**
+         * Resolves true after the first valid frame is processed, or false on a
+         * single-capture timeout or stop. It is created once per session instance.
+         * @type {Promise<boolean>}
+         */
         this.firstFrame = new Promise((resolve) => { this.resolveFirstFrame = resolve; });
         this.onImage = (event) => {
             this.receiveImage(event).catch((error) => console.warn(`[Camera][${this.deviceInfo.id}]`, error?.message || error));
         };
     }
 
+    /**
+     * Attach acquisition, apply supported controls, and schedule the first capture.
+     * Calling while running has no effect. Completion does not wait for a frame;
+     * await firstFrame separately. Startup errors reject after local cleanup.
+     * @returns {Promise<void>}
+     */
     async start() {
         if (this.running) return;
         this.running = true;
@@ -49,6 +75,7 @@ class CameraSession {
         }
     }
 
+    /** @private */
     async configure() {
         const configured = this.config;
         const available = new Set(this.device.availableCameraConfigurationTypes || []);
@@ -81,6 +108,7 @@ class CameraSession {
         await this.device.setSensorConfiguration({ camera: configured.rate }, false, true);
     }
 
+    /** @private */
     async command(label, invoke) {
         // SDK commands may finish late; stop waiting here without cancelling the device operation.
         const timeoutMs = Math.max(500, Number(process.env.CAMERA_COMMAND_TIMEOUT_MS || 1500));
@@ -95,6 +123,7 @@ class CameraSession {
         }
     }
 
+    /** @private */
     async focus() {
         const timeoutMs = Math.max(1500, Number(process.env.CAMERA_FOCUS_IDLE_TIMEOUT_MS || 3000));
         let timer;
@@ -117,6 +146,7 @@ class CameraSession {
         }
     }
 
+    /** @private */
     schedule(delay) {
         clearTimeout(this.timer);
         if (!this.running || this.device.isConnected === false) return;
@@ -130,6 +160,12 @@ class CameraSession {
         }, Math.max(0, delay));
     }
 
+    /**
+     * Request a capture if running, connected, and not already capturing.
+     * Resolves after issuing the device command, before the image is processed.
+     * SDK command failures reject; late failures and scheduled captures are logged.
+     * @returns {Promise<void>}
+     */
     async capture() {
         if (!this.running || this.capturing || this.device.isConnected === false) return;
         this.capturing = true;
@@ -157,6 +193,7 @@ class CameraSession {
         }
     }
 
+    /** @private */
     async receiveImage(event) {
         if (!this.running || !this.capturing) return;
         const image = event?.message;
@@ -172,6 +209,7 @@ class CameraSession {
         }, 300);
     }
 
+    /** @private */
     async finishCapture() {
         if (!this.capturing || !this.images.length) return;
         clearTimeout(this.timer);
@@ -208,12 +246,18 @@ class CameraSession {
         }
     }
 
+    /** @private */
     completeFirstFrame(received) {
         if (!this.resolveFirstFrame) return;
         this.resolveFirstFrame(received);
         this.resolveFirstFrame = null;
     }
 
+    /**
+     * Reapply camera settings and restart capture after the owner reconnects the device.
+     * Has no effect when stopped; configuration failures reject.
+     * @returns {Promise<void>}
+     */
     async resume() {
         if (!this.running) return;
         this.capturing = false;
@@ -224,6 +268,12 @@ class CameraSession {
         this.schedule(0);
     }
 
+    /**
+     * Cancel timers, detach acquisition, close the viewer, and settle firstFrame.
+     * Does not disconnect the device, stop the shared publisher, or disable its
+     * sensor configuration. Viewer cleanup errors are logged.
+     * @returns {Promise<void>}
+     */
     async stop() {
         this.running = false;
         this.completeFirstFrame(false);

@@ -7,7 +7,23 @@ const EventEmitter = require("events");
 const mqtt = require("mqtt");
 const { topic } = require("./topics");
 
+/**
+ * Subscribes to MQTT keys and emits decoded transport messages.
+ * @class
+ * @extends EventEmitter
+ * @param {Object} [options]
+ * @param {string} [options.topicFilter] MQTT subscription filter.
+ * @param {string} [options.keyExpression] Alias for `topicFilter`.
+ * @param {string} [options.brokerUrl] MQTT URL; defaults to `MQTT_BROKER_URL` or localhost.
+ */
 class MqttSubscriber extends EventEmitter {
+    /**
+     * Create an MQTT subscriber.
+     * @param {Object} [options]
+     * @param {string} [options.topicFilter] MQTT subscription filter.
+     * @param {string} [options.keyExpression] Alias for `topicFilter`.
+     * @param {string} [options.brokerUrl] MQTT broker URL.
+     */
     constructor(options = {}) {
         super();
         this.topicFilter = options.topicFilter || options.keyExpression || topic("#");
@@ -15,6 +31,11 @@ class MqttSubscriber extends EventEmitter {
         this.client = null;
     }
 
+    /**
+     * Connect and subscribe, then emit `ready`.
+     * @returns {Promise<void>}
+     * @throws {Error} On connection or subscription failure.
+     */
     async start() {
         if (this.client?.connected) return;
         this.client = mqtt.connect(this.brokerUrl, {
@@ -48,11 +69,30 @@ class MqttSubscriber extends EventEmitter {
         this.emit("ready");
     }
 
+    /**
+     * End the MQTT client connection.
+     * @returns {Promise<void>}
+     */
     async stop() {
         if (!this.client) return;
         await new Promise((resolve) => this.client.end(false, {}, resolve));
         this.client = null;
     }
 }
+
+/**
+ * @event MqttSubscriber#ready
+ * @description Emitted after the MQTT subscription is active.
+ */
+/**
+ * @event MqttSubscriber#message
+ * @description Emitted for each matching message.
+ * @property {TransportMessage} message Decoded transport message.
+ */
+/**
+ * @event MqttSubscriber#error
+ * @description Emitted for broker errors.
+ * @property {Error} error The failure.
+ */
 
 module.exports = { MqttSubscriber };

@@ -7,14 +7,41 @@ const { MicrophoneSession } = require("../microphone/lib/microphone-session");
 const { GESTURE_SENSOR } = require("../interactions/vru-stop-request/nod-detector");
 
 // Coordinates the capabilities exposed by one already-connected physical device.
+/**
+ * Coordinates sensors, camera, microphone, actions, and status for one device.
+ * Uses a supplied, started publisher without taking ownership of it. The owner
+ * keeps the device connected and stops pending actions before tearing down the session.
+ * @class
+ * @param {Object} device Connected SDK device.
+ * @param {Publisher|null} publisher Transport publisher, or null to disable publication.
+ * @param {Object} [options]
+ * @param {number} [options.cameraIndex=0] Camera viewer index.
+ * @param {number} [options.microphoneIndex=0] Offset for additional RTSP microphone paths.
+ */
 class DeviceSession {
+    /**
+     * Create a session around an already connected SDK device.
+     * @param {Object} device Connected SDK device.
+     * @param {Publisher|null} publisher Sensor/status publisher, or null to disable publication.
+     * @param {Object} [options]
+     * @param {number} [options.cameraIndex=0] Camera viewer index.
+     * @param {number} [options.microphoneIndex=0] Offset for additional RTSP microphone paths.
+     */
     constructor(device, publisher, options = {}) {
         this.device = device;
         this.publisher = publisher;
         this.vruInteractionEnabled = process.env.VRU_INTERACTION_ENABLED === "1";
         this.cameraIndex = options.cameraIndex || 0;
         this.microphoneIndex = options.microphoneIndex || 0;
+        /**
+         * Source identity shared by this device's modality messages.
+         * @type {DeviceIdentity}
+         */
         this.info = { id: device.bluetoothId || device.id || null, name: device.name || null };
+        /**
+         * Latest capability snapshot, refreshed on start and reconnect.
+         * @type {DeviceCapabilities}
+         */
         this.capabilities = { sensors: [], camera: false, microphone: false, display: false, haptics: false };
         this.actions = new ActionDispatcher(device, { publisher });
         this.pendingAction = Promise.resolve();
@@ -34,6 +61,10 @@ class DeviceSession {
         };
     }
 
+    /**
+     * Refresh the identity and capability snapshot from SDK-reported properties.
+     * @returns {void}
+     */
     refreshCapabilities() {
         this.info.id = this.device.bluetoothId || this.device.id || this.info.id;
         this.info.name = this.device.name || this.info.name;
@@ -49,6 +80,13 @@ class DeviceSession {
         };
     }
 
+    /**
+     * Start configured sensors and optional camera/microphone sessions.
+     * Sensor startup errors stop the partially initialized session and reject;
+     * optional camera and microphone startup errors are logged and skipped.
+     * @returns {Promise<void>}
+     * @throws {Error} If required sensor setup fails.
+     */
     async start() {
         if (this.running) return;
         this.refreshCapabilities();
@@ -81,6 +119,11 @@ class DeviceSession {
         }
     }
 
+    /**
+     * Start configured sensors and attach non-blocking publishers.
+     * @private
+     * @returns {Promise<void>}
+     */
     async startSensors() {
         const requested = process.env.ENABLED_SENSORS?.split(",").map((sensor) => sensor.trim()).filter(Boolean);
         const enabled = this.vruInteractionEnabled
@@ -121,6 +164,11 @@ class DeviceSession {
         await this.sensors.startSensors();
     }
 
+    /**
+     * Queue an action; commands execute in submission order even when prior actions fail.
+     * @param {ActionCommand} command
+     * @returns {Promise<void>} Rejects if dispatch fails. Does not publish a result.
+     */
     dispatchAction(command) {
         this.pendingAction = this.pendingAction
             .catch(() => {})
@@ -128,6 +176,11 @@ class DeviceSession {
         return this.pendingAction;
     }
 
+    /**
+     * Reapply sensor and media configuration after an SDK reconnection.
+     * Individual resume failures are logged so other features can recover.
+     * @returns {Promise<void>}
+     */
     async resume() {
         if (this.resuming) return this.resuming;
         this.resuming = (async () => {
@@ -155,6 +208,11 @@ class DeviceSession {
         return this.resuming;
     }
 
+    /**
+     * Publish a device status envelope; publication failures are logged and swallowed.
+     * @param {string} status
+     * @returns {Promise<void>}
+     */
     async publishStatus(status) {
         if (!this.publisher) return;
         try {
@@ -166,6 +224,12 @@ class DeviceSession {
         }
     }
 
+    /**
+     * Stop feature sessions, remove listeners, and publish disconnected status.
+     * Does not disconnect the device, stop the supplied publisher, or drain queued
+     * actions; the fleet or embedding application owns those steps.
+     * @returns {Promise<void>}
+     */
     async stop() {
         this.running = false;
         this.ready = false;

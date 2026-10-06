@@ -101,7 +101,9 @@ Applications can subscribe to modality data and send supported display or haptic
 
 ## Documentation and Demonstration
 
-The [technical guide](docs/technical-guide.md) covers project structure, device setup, configuration, data topics, consumer examples, Docker deployment, and troubleshooting. The [consumer guide](examples/consumers/README.md) describes the message contract for separate Whisper and YOLO examples.
+The [technical guide](docs/technical-guide.md) covers project structure, device setup, configuration, data topics, Docker deployment, and troubleshooting. For applications and extensions, see the [developer integration guide](docs/api/integration.md) and [message contracts](docs/api/message-contract.md). The [consumer guide](examples/consumers/README.md) describes separate Whisper and YOLO examples.
+
+The core interfaces have a **JSDoc API reference**, generated directly from source comments. Build it locally with `npm run docs` after installing dependencies, then open `docs/api/html/index.html`. It includes the guides, class and method references, shared payload types, events, and source links. GitHub Actions builds downloadable documentation artifacts and publishes `main` to [the documentation site](https://nap-it.github.io/wearmux-headless/) once GitHub Pages is enabled. See [documentation setup and maintenance](docs/documentation.md) for the one-time Pages setup and validation commands.
 
 The paper demonstrates WearMux in outdoor pedestrian-assistance scenarios involving smartglasses, a smartwatch, a smartphone, and remote processing. Watch the [WearMux demonstration](https://youtu.be/r0GW5SRqzHw).
 

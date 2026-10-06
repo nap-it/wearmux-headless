@@ -77,12 +77,14 @@ npm run camera
 
 ## Notes
 
-- Images are saved with timestamps: `bwear-2026-02-02T16-20-01-123Z-0000.jpg`
+- Images are saved as `<device-id>-<host-unix-ms>-<sequence>.jpg`, using a filename-safe device ID.
 - If `CAMERA_OUTPUT_DIR` is not set, images are captured but not saved to disk
 - The browser viewer auto-refreshes or streams via MJPEG depending on `CAMERA_VIEW_MJPEG`
 - Use `DEBUG=1` or `CAMERA_DEBUG=1` for verbose logging
 
 See the [camera configuration reference](../docs/technical-guide.md#camera) for timeouts, viewer settings, and device-specific controls.
+
+For the CameraSession lifecycle and its first-frame promise, see the [API reference and local build instructions](../docs/documentation.md).
 
 ## Related Example
 

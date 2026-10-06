@@ -3,7 +3,12 @@ const EventEmitter = require("events");
 const { createPublisher, selectedTransport } = require("../../utils/transport");
 const { topic } = require("../../utils/topics");
 
-// Baseline rates for sensors known by the SDK; each device enables only the types it supports.
+/**
+ * Baseline SDK sensor-configuration values. These are passed to the device SDK;
+ * they are distinct from the host emission throttle in *_RATE environment variables.
+ * Device firmware determines the interpretation of these values.
+ * @type {Object<string, number>}
+ */
 const DEFAULT_SENSOR_RATES = Object.freeze({
     acceleration: 50,
     magnetometer: 50,
@@ -19,10 +24,29 @@ const DEFAULT_SENSOR_RATES = Object.freeze({
     pressure: 50,
 });
 
+/**
+ * Configure supported sensors and forward SDK events through Node's EventEmitter.
+ * Subscribe with on(sensorType, handler); the handler receives the SDK event,
+ * optionally extended with a side label. The owner keeps the device connected.
+ * Attach an error listener before changing configuration during monitoring.
+ * Configure enabled sensors before startSensors(); that method installs listeners
+ * for the initial selection. Later selection changes do not rebuild those listeners.
+ * @class
+ * @extends EventEmitter
+ * @fires SensorManager#error
+ * @see {@tutorial sensors}
+ */
 class SensorManager extends EventEmitter {
     /**
-     * @param {Device} device - SDK device instance (already connected)
-     * @param {Object} options - Configuration options
+     * @param {Object} device Connected SDK device.
+     * @param {Object} [options={}] Configuration and publisher ownership settings.
+     * @param {string[]} [options.enabledSensors=[]] Initial selection; empty enables all known supported sensors.
+     * @param {?string} [options.side=null] Optional side label added to forwarded events.
+     * @param {boolean} [options.clearRest=true] Whether SDK configuration replaces other active modes.
+     * @param {string} [options.transport] mqtt, zenoh, or none; defaults to selectedTransport().
+     * @param {boolean} [options.publisherEnabled] Defaults to true when a transport is selected.
+     * @param {string} [options.publisherKeyPrefix] Sensor topic root, normally bwear/sensors.
+     * @throws {Error} When device is missing or the selected transport is invalid.
      */
     constructor(device, options = {}) {
         super();
@@ -58,6 +82,12 @@ class SensorManager extends EventEmitter {
         this.outputThrottleMs = this._buildOutputThrottleMap();
     }
 
+    /**
+     * Start an owned publisher when enabled, configure sensors, then attach listeners.
+     * Call once per start/stop cycle. Publisher startup failures are logged and
+     * monitoring proceeds; device configuration failures reject.
+     * @returns {Promise<void>}
+     */
     async startSensors() {
         // If a transport is selected, start the publisher and attach sensors
         if (this.publisherEnabled && this.transport !== "none") {
@@ -91,6 +121,7 @@ class SensorManager extends EventEmitter {
         this.isMonitoring = true;
     }
 
+    /** @private */
     async _configureSensors() {
         // Build sensor configuration - ONLY for enabled sensors
         this.sensorConfiguration = {};
@@ -136,6 +167,7 @@ class SensorManager extends EventEmitter {
         }
     }
 
+    /** @private */
     _buildOutputThrottleMap() {
         // Accept per-sensor RATE as either Hz (number) or ms (string with 'ms')
         const sensors = Object.keys(this.availableSensors);
@@ -159,6 +191,7 @@ class SensorManager extends EventEmitter {
         return map;
     }
 
+    /** @private */
     _setupSensorEventListeners() {
         if (typeof this.device.addEventListener !== "function") {
             console.warn("[SensorManager] Device does not support addEventListener");
@@ -213,6 +246,7 @@ class SensorManager extends EventEmitter {
         }
     }
 
+    /** @private */
     _removeDeviceListeners() {
         if (!this._deviceListeners || typeof this.device?.removeEventListener !== "function") return;
         for (const [sensorType, handler] of this._deviceListeners.entries()) {
@@ -221,6 +255,11 @@ class SensorManager extends EventEmitter {
         this._deviceListeners.clear();
     }
 
+    /**
+     * Stop the owned publisher and remove SDK listeners. Does not disconnect the
+     * device or disable sensor configuration on it. Publisher errors are logged.
+     * @returns {Promise<void>}
+     */
     async stop() {
         try {
             if (this.publisher) {
@@ -235,12 +274,24 @@ class SensorManager extends EventEmitter {
         this.isMonitoring = false;
     }
 
+    /**
+     * Reapply the current sensor selection after reconnection, if monitoring.
+     * @returns {Promise<void>} Rejects on SDK configuration failure.
+     */
     async reconfigure() {
         // Reapply rates after the device SDK reports a connection has resumed.
         if (this.isMonitoring) await this._configureSensors();
     }
 
     // Sensor-specific methods
+    /**
+     * Add a known sensor to the selection; asynchronous configuration failures
+     * during monitoring emit error. Does not install new event listeners.
+     * @param {string} sensorType Key from DEFAULT_SENSOR_RATES.
+     * @param {?number} [sampleRate=null] SDK configuration value; null preserves its current value.
+     * @returns {void}
+     * @throws {Error} When the sensor type is unknown.
+     */
     enableSensor(sensorType, sampleRate = null) {
         if (!this.availableSensors.hasOwnProperty(sensorType)) {
             throw new Error(`Unknown sensor type: ${sensorType}`);
@@ -259,6 +310,13 @@ class SensorManager extends EventEmitter {
         }
     }
 
+    /**
+     * Remove a sensor from the requested selection and reconfigure when monitoring.
+     * Existing listeners remain until stop(); an empty selection enables defaults
+     * on the next configuration pass. Async failures emit error.
+     * @param {string} sensorType Sensor name to remove.
+     * @returns {void}
+     */
     disableSensor(sensorType) {
         const index = this.enabledSensors.indexOf(sensorType);
         if (index > -1) {
@@ -270,6 +328,14 @@ class SensorManager extends EventEmitter {
         }
     }
 
+    /**
+     * Set the SDK configuration value for a known sensor. During monitoring,
+     * reconfiguration is asynchronous and failures emit error.
+     * @param {string} sensorType Key from DEFAULT_SENSOR_RATES.
+     * @param {number} sampleRate Value passed to the SDK, independent of host throttling.
+     * @returns {void}
+     * @throws {Error} When the sensor type is unknown.
+     */
     setSensorRate(sensorType, sampleRate) {
         if (!this.availableSensors.hasOwnProperty(sensorType)) {
             throw new Error(`Unknown sensor type: ${sensorType}`);
@@ -282,13 +348,22 @@ class SensorManager extends EventEmitter {
         }
     }
 
+    /** @returns {string[]} Copy of the current requested sensor selection. */
     getEnabledSensors() {
         return [...this.enabledSensors];
     }
 
+    /** @returns {Object<string, number>} Copy of the last generated SDK configuration. */
     getSensorConfiguration() {
         return { ...this.sensorConfiguration };
     }
 }
 
 module.exports = { SensorManager, DEFAULT_SENSOR_RATES };
+
+/**
+ * Asynchronous configuration failure from enableSensor(), disableSensor(), or
+ * setSensorRate() while monitoring.
+ * @event SensorManager#error
+ * @type {Error}
+ */

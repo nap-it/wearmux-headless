@@ -1,12 +1,21 @@
 const EventEmitter = require("events");
 const { spawn } = require("child_process");
 
+/** @private */
 function clampSample(sample) {
   if (sample > 1) return 1;
   if (sample < -1) return -1;
   return sample;
 }
 
+/**
+ * Encode normalized audio samples for FFmpeg's raw input.
+ * Integer formats clamp to [-1, 1]; float output preserves sample values.
+ * @param {Float32Array|number[]} samples Interleaved normalized audio samples.
+ * @param {string} sampleFormat f32le, s16le, or s8.
+ * @returns {Buffer} Encoded bytes; empty when no samples are supplied.
+ * @throws {Error} When a nonempty input requests an unsupported format.
+ */
 function serializeSamples(samples, sampleFormat) {
   if (!samples || samples.length === 0) return Buffer.alloc(0);
 
@@ -41,7 +50,25 @@ function serializeSamples(samples, sampleFormat) {
   }
 }
 
+/**
+ * Own an FFmpeg process that encodes raw samples as Opus and publishes over RTSP/TCP.
+ * Requires FFmpeg and a reachable RTSP server. Register an error listener before start().
+ * @class
+ * @extends EventEmitter
+ * @fires RtspPublisher#error
+ * @see MicrophoneSession
+ */
 class RtspPublisher extends EventEmitter {
+  /**
+   * @param {Object} options FFmpeg input and publishing configuration.
+   * @param {string} options.rtspUrl Destination RTSP URL.
+   * @param {string} [options.ffmpegPath="ffmpeg"] Executable path/name.
+   * @param {string} [options.ffmpegLogLevel="error"] FFmpeg log verbosity.
+   * @param {number} [options.sampleRate=16000] Input sample rate in Hz.
+   * @param {number} [options.channels=1] Interleaved input channel count.
+   * @param {string} [options.sampleFormat="s16le"] f32le, s16le, or s8.
+   * @param {string} [options.audioBitrate="64k"] Opus output bitrate.
+   */
   constructor(options = {}) {
     super();
     this.rtspUrl = options.rtspUrl;
@@ -58,10 +85,19 @@ class RtspPublisher extends EventEmitter {
     this._stderrTail = [];
   }
 
+  /**
+   * Whether an FFmpeg child process is currently held.
+   * @type {boolean}
+   */
   get isRunning() {
     return Boolean(this._child);
   }
 
+  /**
+   * Spawn FFmpeg and wait for a short startup window. Does not guarantee that
+   * the RTSP server has accepted the stream. Repeated calls while held have no effect.
+   * @returns {Promise<void>} Rejects when URL is absent, spawn fails, or FFmpeg exits during startup.
+   */
   async start() {
     if (!this.rtspUrl) {
       throw new Error("RTSP_URL is not configured");
@@ -167,12 +203,24 @@ class RtspPublisher extends EventEmitter {
     });
   }
 
+  /**
+   * Queue sample serialization and writes with FFmpeg stdin backpressure.
+   * Pass a stable sample array until the promise settles. A rejected write leaves
+   * this instance's write chain rejected; stop it and create a new publisher to recover.
+   * @param {Float32Array|number[]} samples Normalized, interleaved samples matching configured channels/rate.
+   * @returns {Promise<void>} Resolves for empty input; rejects on format, process, or write failure.
+   */
   async write(samples) {
     if (!samples || samples.length === 0) return;
     this._writeChain = this._writeChain.then(() => this._writeOnce(samples));
     return this._writeChain;
   }
 
+  /**
+   * Drain queued writes, close stdin, and terminate FFmpeg if it does not exit.
+   * Attempts SIGTERM after 500 ms and SIGKILL after 2000 ms. Has no effect without a process.
+   * @returns {Promise<void>}
+   */
   async stop() {
     const child = this._child;
     if (!child) return;
@@ -225,6 +273,7 @@ class RtspPublisher extends EventEmitter {
     });
   }
 
+  /** @private */
   async _writeOnce(samples) {
     const child = this._child;
     if (!child || !child.stdin || child.stdin.destroyed || child.exitCode !== null) {
@@ -267,6 +316,7 @@ class RtspPublisher extends EventEmitter {
     });
   }
 
+  /** @private */
   _createExitError(code, signal) {
     const details = this._stderrTail.length ? ` (${this._stderrTail.join(" | ")})` : "";
     return new Error(`[RTSP] ffmpeg exited code=${code} signal=${signal}${details}`);
@@ -277,3 +327,9 @@ module.exports = {
   RtspPublisher,
   serializeSamples,
 };
+
+/**
+ * Unexpected FFmpeg exit or an active stdin error other than EPIPE.
+ * @event RtspPublisher#error
+ * @type {Error}
+ */
