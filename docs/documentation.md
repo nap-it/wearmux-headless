@@ -27,6 +27,8 @@ The expected site address is [nap-it.github.io/wearmux-headless](https://nap-it.
 
 Branch and pull-request builds produce downloadable artifacts without replacing the public site. The public reference follows `main` and is not a versioned release archive. Link to a repository tag when documenting an older release.
 
+This branch includes the Android BLE adapter, protocol, and Droidspaces guides in its generated artifact. Repository links use the local branch or exact detached CI commit rather than always pointing to `main`. Set `DOCUMENTATION_REF` when generating from a source archive without Git metadata, or when intentionally targeting a tag.
+
 ## Update the reference
 
 - Keep setup and user-facing instructions in the README, technical guide, or focused module guides.

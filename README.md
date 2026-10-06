@@ -4,6 +4,8 @@ WearMux Headless is the Node.js host in the WearMux toolchain. It connects compa
 
 This repository complements the [WearMux Android hub](https://github.com/nap-it/wearmux-android), which handles phone sensors and Wear OS integration. The two hosts share an architecture but have different device coverage.
 
+This branch also lets Android own a wearable's BLE connection while Headless processes its protocol and data. See the [Android BLE guide](docs/api/android-ble.md) and [Droidspaces deployment](docs/android-deployment.md) for setup and firmware requirements.
+
 ## Key Features
 
 - **Capability-based device sessions:** discover compatible devices over Bluetooth Low Energy and use configured Wi-Fi transports where supported by the device firmware.
@@ -11,6 +13,7 @@ This repository complements the [WearMux Android hub](https://github.com/nap-it/
 - **Wearable feedback:** send supported display and haptic actions to connected devices.
 - **Local or distributed processing:** run consumers on the host or forward data and actions through MQTT or Zenoh.
 - **Multi-device operation:** manage concurrent device sessions, reconnections, and device-tagged modality data.
+- **Android BLE proxy:** use the companion's GATT connection with one active peripheral per bridge listener, without a native HCI backend in Headless.
 - **Optional consumer examples:** connect separate speech-to-text and object-detection processes; these are not part of the core runtime.
 
 ## Citation
@@ -104,6 +107,8 @@ Applications can subscribe to modality data and send supported display or haptic
 The [technical guide](docs/technical-guide.md) covers project structure, device setup, configuration, data topics, Docker deployment, and troubleshooting. For applications and extensions, see the [developer integration guide](docs/api/integration.md) and [message contracts](docs/api/message-contract.md). The [consumer guide](examples/consumers/README.md) describes separate Whisper and YOLO examples.
 
 The core interfaces have a **JSDoc API reference**, generated directly from source comments. Build it locally with `npm run docs` after installing dependencies, then open `docs/api/html/index.html`. It includes the guides, class and method references, shared payload types, events, and source links. GitHub Actions builds downloadable documentation artifacts and publishes `main` to [the documentation site](https://nap-it.github.io/wearmux-headless/) once GitHub Pages is enabled. See [documentation setup and maintenance](docs/documentation.md) for the one-time Pages setup and validation commands.
+
+This branch's local reference and Documentation action artifacts also include the Android BLE APIs and guides. The public Pages site follows `main`, so those additions appear there after a merge.
 
 The paper demonstrates WearMux in outdoor pedestrian-assistance scenarios involving smartglasses, a smartwatch, a smartphone, and remote processing. Watch the [WearMux demonstration](https://youtu.be/r0GW5SRqzHw).
 

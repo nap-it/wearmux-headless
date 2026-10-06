@@ -64,10 +64,11 @@ class DeviceFleet {
     }
 
     /**
-     * Start transport listeners, attach existing devices, and begin scanning.
+     * Start transports and device discovery, or an AndroidBleBridge in android-ble mode.
+     * Android bridge mode waits for companion events instead of starting the SDK scanner.
      * @returns {Promise<void>}
-     * @throws {Error} If no scanner is available and `DEVICE_IP` is not configured,
-     * or startup of a selected transport fails.
+     * @throws {Error} If the selected discovery/transport cannot start, or DEVICE_IP
+     * is combined with android-ble mode. Stop the fleet after a failed start.
      */
     async start() {
         // Start messaging before scanning so the first connected device can publish immediately.

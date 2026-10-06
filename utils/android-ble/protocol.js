@@ -1,12 +1,45 @@
+/**
+ * Android companion wire validation and constants.
+ * @namespace AndroidBleProtocol
+ * @see {@tutorial android-ble-protocol}
+ */
+/**
+ * Protocol version accepted in hello frames.
+ * @constant {number}
+ * @memberof AndroidBleProtocol
+ */
 const VERSION = 1;
+/**
+ * WebSocket upgrade path.
+ * @constant {string}
+ * @memberof AndroidBleProtocol
+ */
 const PATH = "/android-ble";
+/**
+ * Maximum JSON text-frame size in bytes.
+ * @constant {number}
+ * @memberof AndroidBleProtocol
+ */
 const MAX_PAYLOAD = 64 * 1024;
 const CHARACTERISTICS = new Set([
     "rx", "batteryLevel", "manufacturerName", "modelNumber", "hardwareRevision",
     "firmwareRevision", "softwareRevision", "serialNumber", "pnpId",
 ]);
+/**
+ * Lowercase a device identity and remove colon separators for comparisons.
+ * @memberof AndroidBleProtocol
+ * @param {*} id Device identity; missing/falsy values become an empty string.
+ * @returns {string}
+ */
 const normalizeId = (id) => String(id || "").toLowerCase().replaceAll(":", "");
 
+/**
+ * Decode bounded canonical standard Base64 without accepting alternate encodings.
+ * @memberof AndroidBleProtocol
+ * @param {string} data Encoded characteristic value; at most MAX_PAYLOAD characters.
+ * @returns {Buffer}
+ * @throws {Error} If the input is not bounded canonical Base64.
+ */
 function decodeData(data) {
     if (typeof data !== "string" || data.length > MAX_PAYLOAD ||
         !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) {
@@ -17,6 +50,16 @@ function decodeData(data) {
     return bytes;
 }
 
+/**
+ * Validate one inbound companion frame and decode value.data into frame.bytes.
+ * This checks shape and bounds, not protocol sequence or active-device ownership;
+ * those are enforced by AndroidBleBridge. Outbound write frames are not accepted.
+ * @memberof AndroidBleProtocol
+ * @param {Buffer|string} data JSON text received through WebSocket.
+ * @param {boolean} [isBinary=false] Binary WebSocket messages are rejected.
+ * @returns {AndroidBleFrame} Parsed frame; value frames gain a bytes Buffer.
+ * @throws {Error} If size, JSON, version, device ID, or type-specific fields are invalid.
+ */
 function parseFrame(data, isBinary = false) {
     if (isBinary || Buffer.byteLength(data) > MAX_PAYLOAD) throw new Error("Expected bounded JSON text frame");
     let frame;

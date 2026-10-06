@@ -2,6 +2,11 @@
   "source": {
     "include": [
       "docs/api/types.js",
+      "docs/api/android-ble.js",
+      "utils/android-ble/bridge.js",
+      "utils/android-ble/connection.js",
+      "utils/android-ble/protocol.js",
+      "utils/sdk.js",
       "utils/device-manager.js",
       "utils/device-fleet.js",
       "utils/device-session.js",

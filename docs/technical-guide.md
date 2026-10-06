@@ -15,6 +15,7 @@ The SDK-backed device manager and per-device sessions coordinate connections and
 - [Prerequisites](#prerequisites)
 - [Running the Host](#running-the-host)
 - [Configuration](#configuration)
+- [Android BLE bridge](#android-ble-bridge)
 - [Core Module Capabilities](#core-module-capabilities)
 - [Messaging and reverse actions](#messaging-and-reverse-actions)
 - [Published data topics](#published-data-topics)
@@ -96,6 +97,12 @@ run=sessions
 Leave `DEVICE_ID` and `DEVICE_NAME` unset to discover multiple compatible BLE devices. If both are set, the ID filter takes precedence. `DEVICE_IP` adds a configured Wi-Fi connection in the session runtime; standalone commands use it instead of BLE discovery. Set `DEVICE_TRANSPORT=websocket` or `udp` as supported by the device firmware.
 
 Set `WEARMUX_CONFIG_PATH` to select another configuration directory or a single INI file. The [environment variable reference](#environment-variables) lists the main runtime options.
+
+## Android BLE bridge
+
+On this branch, `DEVICE_TRANSPORT=android-ble` delegates GATT to the WearMux Android companion. Headless uses the browser SDK for the peripheral protocol and supports one companion and one active peripheral per listener. This mode replaces fleet BLE scanning; leave `DEVICE_IP` unset.
+
+Use the [Android BLE developer guide](api/android-ble.md) for setup, API ownership, events, deadlines, and readiness. The [wire protocol](android-ble-protocol.md) defines the companion frames and GATT characteristics; [Droidspaces deployment](android-deployment.md) describes the phone/container setup and matching Android branch. This adapter requires compatible custom BrilliantSole/BrilliantWear firmware and does not support stock Frame firmware.
 
 ## Core Module Capabilities
 
@@ -360,7 +367,7 @@ These tables cover the main runtime settings. Defaults marked with an INI filena
 | `DEVICE_ID`        | In `sessions`, restrict to one Bluetooth device; unset discovers all compatible devices | unset | Bluetooth ID |
 | `DEVICE_NAME`      | Restrict discovery to one advertised device name | unset | `Brilliant Frame 12` |
 | `DEVICE_IP` | Add a configured Wi-Fi device; standalone commands use it instead of BLE | unset | `192.168.1.100` |
-| `DEVICE_TRANSPORT` | Wi-Fi protocol | `websocket` | `websocket`, `udp` |
+| `DEVICE_TRANSPORT` | Device connection path | `websocket` | `websocket`, `udp`, `android-ble` |
 | `DEVICE_WIFI_SECURE` | Use TLS for WebSocket connections | `0` | `0`, `1` |
 | `DEVICE_SIDE` | Optional side label included in sensor events | unset | `left`, `right` |
 | `MIC_DEVICE_ID`    | Legacy alias for `DEVICE_ID`                | unset     | Bluetooth ID                 |

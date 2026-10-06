@@ -96,6 +96,8 @@ Choose sensors before starting. SensorManager installs listeners for that initia
 
 ## Add a device integration
 
+This branch includes an [Android BLE adapter](android-ble.md). Android owns GATT while Headless uses the browser SDK; DeviceFleet or DeviceManager owns the bridge when `DEVICE_TRANSPORT=android-ble`. The adapter guide covers custom session ownership, readiness, and reconnection.
+
 The SDK-backed runtime derives capabilities from a connected device. A new device should expose the SDK-compatible methods and events used by DeviceSession and the relevant modality module. Read the upstream SDK contract before adapting a protocol; the Headless API reference documents the calls it makes, without reimplementing the SDK reference.
 
 DeviceSession inspects `availableSensorTypes`, `hasCamera`, `hasMicrophone`, `isDisplayAvailable`, and `vibrationLocations`. It derives identity from `bluetoothId` or `id`, plus `name`. The device must provide event registration and connection state, and implement the operations for every capability it advertises. Unsupported capabilities must remain absent/false. The main host currently recognizes the sensor names in DEFAULT_SENSOR_RATES.

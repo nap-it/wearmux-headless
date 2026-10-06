@@ -14,7 +14,27 @@ function authorized(header, token) {
 
 const peerAddress = address => address.startsWith("::ffff:") ? address.slice(7) : address;
 
+/**
+ * Owns one authenticated Android WebSocket companion and its active BLE peripheral.
+ * Android handles GATT; the supplied browser SDK decodes device capabilities and
+ * sensor messages. Register an error listener before start(), and create a new
+ * bridge instance after stop(). A deviceConnected event follows SDK initialization,
+ * rather than the companion's initial GATT connection announcement.
+ * @class
+ * @extends EventEmitter
+ * @fires AndroidBleBridge#error
+ * @fires AndroidBleBridge#status
+ * @fires AndroidBleBridge#companionConnected
+ * @fires AndroidBleBridge#companionDisconnected
+ * @fires AndroidBleBridge#deviceConnected
+ * @see {@tutorial android-ble}
+ */
 class AndroidBleBridge extends EventEmitter {
+    /**
+     * Validate settings without opening a listener.
+     * @param {AndroidBleBridgeOptions} [options] Environment variables provide listener/auth defaults.
+     * @throws {Error} If the port, authentication mode, token, or local peers are invalid.
+     */
     constructor({ sdk, host = process.env.ANDROID_BLE_BRIDGE_HOST || "127.0.0.1",
         port = Number(process.env.ANDROID_BLE_BRIDGE_PORT || 8765),
         token = process.env.ANDROID_BLE_BRIDGE_TOKEN,
@@ -48,6 +68,13 @@ class AndroidBleBridge extends EventEmitter {
         this.stopping = false;
     }
 
+    /**
+     * Load the browser SDK if needed, bind HTTP/WebSocket, and start ping/pong checks.
+     * The bound port is available as port after this resolves; port 0 selects a free port.
+     * Repeated calls while listening do nothing. Call stop() even after a failed start.
+     * @returns {Promise<void>}
+     * @throws {Error} If SDK import or listener startup fails; listener errors also emit error.
+     */
     async start() {
         if (this.server) return;
         if (!this.sdk) this.sdk = await import("brilliantsole/browser");
@@ -94,6 +121,7 @@ class AndroidBleBridge extends EventEmitter {
         console.log(`[Android BLE] Listening on ${this.host}:${this.port}${PATH}`);
     }
 
+    /** @private */
     accept(socket) {
         // verifyClient and connection are separate callbacks; guard simultaneous upgrades too.
         if (this.peer || this.stopping) { socket.close(1008, "Companion already connected"); return; }
@@ -114,12 +142,14 @@ class AndroidBleBridge extends EventEmitter {
         });
     }
 
+    /** @private */
     send(peer, frame) {
         if (peer !== this.peer || peer.socket.readyState !== WebSocket.OPEN) throw new Error("Android companion disconnected");
         if (peer.socket.bufferedAmount > MAX_PAYLOAD * 4) throw new Error("Android bridge send queue is full");
         peer.socket.send(JSON.stringify(frame));
     }
 
+    /** @private */
     receive(peer, frame) {
         if (peer !== this.peer) return;
         if (!peer.hello) {
@@ -190,6 +220,7 @@ class AndroidBleBridge extends EventEmitter {
         }
     }
 
+    /** @private */
     checkReady(entry) {
         if (this.active !== entry || entry.ready || !entry.device.isConnected) return;
         const { device } = entry;
@@ -205,6 +236,7 @@ class AndroidBleBridge extends EventEmitter {
         this.emit("deviceConnected", device);
     }
 
+    /** @private */
     write(entry, bytes) {
         const peer = this.peer;
         if (!peer?.hello || this.active !== entry) return Promise.reject(new Error("Android BLE link is not active"));
@@ -224,11 +256,13 @@ class AndroidBleBridge extends EventEmitter {
         });
     }
 
+    /** @private */
     cancelledWrite(peer, id, deviceId) {
         peer.cancelled.set(id, normalizeId(deviceId));
         if (peer.cancelled.size > 256) peer.cancelled.delete(peer.cancelled.keys().next().value);
     }
 
+    /** @private */
     failDevice(entry, error) {
         this.emit("error", error);
         if (this.active !== entry) return;
@@ -236,6 +270,7 @@ class AndroidBleBridge extends EventEmitter {
         this.disconnectEntry(entry);
     }
 
+    /** @private */
     disconnectEntry(entry) {
         if (!entry) return;
         clearTimeout(entry.readyTimer);
@@ -251,6 +286,7 @@ class AndroidBleBridge extends EventEmitter {
         entry.manager.markDisconnected();
     }
 
+    /** @private */
     drop(peer) {
         clearTimeout(peer.timer);
         if (this.peer !== peer) return;
@@ -259,6 +295,12 @@ class AndroidBleBridge extends EventEmitter {
         this.emit("companionDisconnected");
     }
 
+    /**
+     * Stop heartbeat checks, drop the companion, reject outstanding writes, remove
+     * SDK connection callbacks, and close owned listeners. Stop any DeviceSession
+     * using an emitted device before calling this; sessions are not owned here.
+     * @returns {Promise<void>}
+     */
     async stop() {
         this.stopping = true;
         clearInterval(this.heartbeat);
@@ -271,4 +313,27 @@ class AndroidBleBridge extends EventEmitter {
     }
 }
 
+/**
+ * Listener, socket, protocol, initialization, or BLE write failure.
+ * @event AndroidBleBridge#error
+ * @type {Error}
+ */
+/**
+ * Diagnostic error text sent by the companion; does not itself disconnect the link.
+ * @event AndroidBleBridge#status
+ * @type {string}
+ */
+/**
+ * Authenticated companion completed protocol hello; no peripheral readiness implied.
+ * @event AndroidBleBridge#companionConnected
+ */
+/**
+ * Companion disconnected; any active peripheral and pending writes are invalidated.
+ * @event AndroidBleBridge#companionDisconnected
+ */
+/**
+ * Fully initialized SDK device. Reconnection reuses the device object for its normalized MAC.
+ * @event AndroidBleBridge#deviceConnected
+ * @type {Object}
+ */
 module.exports = { AndroidBleBridge };
