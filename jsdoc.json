@@ -2,6 +2,8 @@
   "source": {
     "include": [
       "docs/api/types.js",
+      "docs/api/wearos-types.js",
+      "utils/wearos-device.js",
       "utils/device-manager.js",
       "utils/device-fleet.js",
       "utils/device-session.js",

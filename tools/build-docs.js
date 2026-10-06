@@ -8,7 +8,11 @@ const { spawnSync } = require('child_process');
 const root = path.resolve(__dirname, '..');
 const config = JSON.parse(fs.readFileSync(path.join(root, 'jsdoc.json'), 'utf8'));
 const output = path.resolve(root, config.opts.destination);
-const repository = 'https://github.com/nap-it/wearmux-headless/blob/main/';
+// Detached CI checkouts use the exact commit; local builds use their branch.
+const gitBranch = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' });
+const gitCommit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' });
+const sourceRef = process.env.DOCUMENTATION_REF || gitBranch.stdout.trim() || gitCommit.stdout.trim() || 'main';
+const repository = `https://github.com/nap-it/wearmux-headless/blob/${encodeURIComponent(sourceRef)}/`;
 const guides = {
     overview: ['README.md', 'Project overview and quick start'],
     'technical-guide': ['docs/technical-guide.md', 'Technical guide'],
@@ -20,6 +24,7 @@ const guides = {
     sensors: ['sensors/README.md', 'Sensors'],
     display: ['display/README.md', 'Display'],
     consumers: ['examples/consumers/README.md', 'External consumers'],
+    wearos: ['docs/api/wearos.md', 'Direct Wear OS developer guide'],
 };
 const guideByPath = new Map(Object.entries(guides).map(([name, [file]]) => [file, name]));
 
@@ -64,6 +69,7 @@ function checkApi(doclets) {
         'MqttManager', 'MqttSubscriber', 'ZenohManager', 'ZenohSubscriber',
         'Config', 'CameraSession', 'MicrophoneSession', 'RtspPublisher',
         'SensorManager', 'DisplayManager', 'TextDisplay', 'PromptDisplay',
+        'WearOsDevice', 'WearOsServer',
     ];
     for (const name of expectedClasses) {
         if (!doclets.some((item) => item.kind === 'class' && item.longname === name && !item.undocumented)) {

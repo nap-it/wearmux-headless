@@ -4,6 +4,8 @@ WearMux Headless is the Node.js host in the WearMux toolchain. It connects compa
 
 This repository complements the [WearMux Android hub](https://github.com/nap-it/wearmux-android), which handles phone sensors and Wear OS integration. The two hosts share an architecture but have different device coverage. This branch also includes a direct Wi-Fi watch adapter; its [client requirements](docs/technical-guide.md#wear-os-watches) are documented in the technical guide.
 
+For this branch's watch APIs, protocol, and client examples, see the [direct Wear OS developer guide](docs/api/wearos.md).
+
 ## Key Features
 
 - **Capability-based device sessions:** discover compatible devices over Bluetooth Low Energy and use configured Wi-Fi transports where supported by the device firmware.
@@ -105,6 +107,8 @@ Applications can subscribe to modality data and send supported device actions ba
 The [technical guide](docs/technical-guide.md) covers project structure, device setup, configuration, data topics, Docker deployment, and troubleshooting. For applications and extensions, see the [developer integration guide](docs/api/integration.md) and [message contracts](docs/api/message-contract.md). The [consumer guide](examples/consumers/README.md) describes separate Whisper and YOLO examples.
 
 The core interfaces have a **JSDoc API reference**, generated directly from source comments. Build it locally with `npm run docs` after installing dependencies, then open `docs/api/html/index.html`. It includes the guides, class and method references, shared payload types, events, and source links. GitHub Actions builds downloadable documentation artifacts and publishes `main` to [the documentation site](https://nap-it.github.io/wearmux-headless/) once GitHub Pages is enabled. See [documentation setup and maintenance](docs/documentation.md) for the one-time Pages setup and validation commands.
+
+This branch's local reference and Documentation action artifacts also include the direct Wear OS APIs and guide. The public Pages site follows `main`, so those additions appear there after a merge.
 
 The paper demonstrates WearMux in outdoor pedestrian-assistance scenarios involving smartglasses, a smartwatch, a smartphone, and remote processing. Watch the [WearMux demonstration](https://youtu.be/r0GW5SRqzHw).
 

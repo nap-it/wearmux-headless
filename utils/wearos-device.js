@@ -4,13 +4,36 @@ const os = require("os");
 const { WebSocketServer } = require("ws");
 
 // Sensors the Wear OS companion streams, in the SDK's units (m/s², rad/s, µT) plus heart rate in BPM.
+/**
+ * Sensor names accepted by the direct Wear OS adapter. Vector units are m/s²,
+ * rad/s, and µT; heart rate is BPM. The hello packet advertises the available subset.
+ * @constant {string[]}
+ */
 const WEAROS_SENSORS = Object.freeze(["acceleration", "gyroscope", "magnetometer", "heartRate"]);
 const VECTOR_SENSORS = new Set(["acceleration", "gyroscope", "magnetometer"]);
 const HELLO_TIMEOUT_MS = 5000;
 const PING_INTERVAL_MS = 10000;
 
 // Exposes a watch through the subset of the SDK Device API used by DeviceSession.
+/**
+ * Adapts one watch's JSON WebSocket protocol to the DeviceSession device interface.
+ * WearOsServer owns the sockets and retains this object by hello.id across reconnects.
+ * Camera, microphone, and SDK display capabilities are always absent. Device events
+ * use the SDK-style envelope; addEventListener/removeEventListener alias on/off.
+ * @class
+ * @extends EventEmitter
+ * @fires WearOsDevice#isConnected
+ * @fires WearOsDevice#acceleration
+ * @fires WearOsDevice#gyroscope
+ * @fires WearOsDevice#magnetometer
+ * @fires WearOsDevice#heartRate
+ * @see {@tutorial wearos}
+ */
 class WearOsDevice extends EventEmitter {
+    /**
+     * Create a disconnected device using the first hello's capability advertisement.
+     * @param {WearOsHello} hello Identity and capabilities; the server validates type/id.
+     */
     constructor({ id, name, sensors, vibration, beep, notifications }) {
         super();
         this.id = id;
@@ -29,6 +52,14 @@ class WearOsDevice extends EventEmitter {
         this.removeEventListener = this.off.bind(this);
     }
 
+    /**
+     * Replace the active socket, restore saved configuration, then emit connected.
+     * The name may change on reconnect; the original capabilities remain unchanged.
+     * Server integrations call this after validating hello, not ordinary session users.
+     * @param {Object} socket Connected ws WebSocket, owned by WearOsServer.
+     * @param {WearOsHello} hello Current connection's hello.
+     * @returns {void}
+     */
     bind(socket, hello) {
         if (this.socket && this.socket !== socket) this.socket.terminate();
         this.socket = socket;
@@ -46,12 +77,14 @@ class WearOsDevice extends EventEmitter {
         this._setConnected(true);
     }
 
+    /** @private */
     _setConnected(isConnected) {
         if (this.isConnected === isConnected) return;
         this.isConnected = isConnected;
         this.emit("isConnected", { type: "isConnected", target: this, message: { isConnected } });
     }
 
+    /** @private */
     _handle(text) {
         let packet;
         try { packet = JSON.parse(text); }
@@ -65,12 +98,22 @@ class WearOsDevice extends EventEmitter {
         this.emit(sensorType, { type: sensorType, target: this, message });
     }
 
+    /** @private */
     _send(packet) {
         if (this.socket?.readyState !== 1) return false;
         this.socket.send(JSON.stringify(packet));
         return true;
     }
 
+    /**
+     * Store supported sensor intervals and send a config packet when connected.
+     * Values are coerced to nonnegative numbers; unknown sensor names are ignored.
+     * Configuration persists while disconnected and is resent on bind(). No watch
+     * acknowledgement is awaited. These values are intervals in milliseconds.
+     * @param {Object<string, number>} configuration Sensor name to requested interval; 0 disables.
+     * @param {boolean} [clearRest=true] Replace configuration, or merge into saved values when false.
+     * @returns {Promise<void>}
+     */
     async setSensorConfiguration(configuration, clearRest = true) {
         const next = clearRest ? {} : { ...this.sensorConfiguration };
         for (const [sensor, interval] of Object.entries(configuration || {})) {
@@ -80,6 +123,13 @@ class WearOsDevice extends EventEmitter {
         this._send({ type: "config", sensors: next });
     }
 
+    /**
+     * Send one vibrate packet per waveform segment; timing/location details are not forwarded.
+     * Missing segment effects default to strongClick100. Does not await wearer feedback.
+     * @param {Object[]} waveforms SDK-style waveforms with segments containing effect names.
+     * @returns {Promise<void>}
+     * @throws {Error} If the adapter is disconnected.
+     */
     async triggerVibration(waveforms) {
         if (!this.isConnected) throw new Error("Wear OS device is not connected");
         for (const waveform of waveforms || []) {
@@ -89,14 +139,35 @@ class WearOsDevice extends EventEmitter {
         }
     }
 
+    /**
+     * Send a beep packet. ActionDispatcher validates frequency and duration for routed actions.
+     * @param {Object} options
+     * @param {number} options.frequency Tone frequency in Hz.
+     * @param {number} options.durationMs Tone duration in milliseconds.
+     * @returns {Promise<void>} Packet accepted for sending on an open socket; no watch acknowledgement.
+     * @throws {Error} If there is no open socket; asynchronous socket errors are logged separately.
+     */
     async playBeep({ frequency, durationMs }) {
         if (!this._send({ type: "beep", frequency, durationMs })) throw new Error("Wear OS device is not connected");
     }
 
+    /**
+     * Send a notify packet. ActionDispatcher validates fields for routed actions.
+     * @param {Object} options
+     * @param {string} options.level warning, danger, or safe.
+     * @param {string} options.title Alert title.
+     * @param {string} options.text Alert body.
+     * @returns {Promise<void>} Packet accepted for sending on an open socket; no watch acknowledgement.
+     * @throws {Error} If there is no open socket; asynchronous socket errors are logged separately.
+     */
     async showNotification({ level, title, text }) {
         if (!this._send({ type: "notify", level, title, text })) throw new Error("Wear OS device is not connected");
     }
 
+    /**
+     * Close the active socket and emit disconnected while retaining sensor configuration.
+     * @returns {Promise<void>}
+     */
     async disconnect() {
         const socket = this.socket;
         this.socket = null;
@@ -106,7 +177,22 @@ class WearOsDevice extends EventEmitter {
 }
 
 // Accepts watch connections and keeps one device object per watch across reconnects.
+/**
+ * Owns the direct watch WebSocket listener, UDP discovery, and heartbeat checks.
+ * Retains devices under their exact hello.id and emits device on every accepted
+ * connection. This protocol has no authentication or TLS; deploy on a trusted
+ * network. DeviceFleet owns it when WEAROS_PORT is set.
+ * @class
+ * @extends EventEmitter
+ * @fires WearOsServer#device
+ * @fires WearOsServer#error
+ * @see {@tutorial wearos}
+ */
 class WearOsServer extends EventEmitter {
+    /**
+     * Create an unstarted listener. DeviceFleet validates the configured TCP port.
+     * @param {WearOsServerOptions} [options] Direct callers should supply port explicitly.
+     */
     constructor({ port, host } = {}) {
         super();
         this.port = port;
@@ -114,6 +200,14 @@ class WearOsServer extends EventEmitter {
         this.devices = new Map();
     }
 
+    /**
+     * Bind WebSocket TCP and start discovery UDP on the actual bound port.
+     * UDP binds all IPv4 interfaces regardless of host; discovery bind failures
+     * are logged and disable discovery without rejecting a working TCP listener.
+     * Call once per instance lifecycle and stop() after any failed startup.
+     * @returns {Promise<void>}
+     * @throws {Error} If WebSocket listener startup fails; later listener errors emit error.
+     */
     async start() {
         this.server = new WebSocketServer({ port: this.port, host: this.host });
         await new Promise((resolve, reject) => {
@@ -136,6 +230,7 @@ class WearOsServer extends EventEmitter {
     }
 
     // Answers watch discovery on UDP. Bound to every interface, since one address alone misses broadcasts.
+    /** @private */
     _startDiscovery() {
         const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
         socket.on("message", (data, remote) => {
@@ -156,6 +251,7 @@ class WearOsServer extends EventEmitter {
         this.discovery = socket;
     }
 
+    /** @private */
     _accept(socket, request) {
         socket.alive = true;
         socket.on("pong", () => { socket.alive = true; });
@@ -181,6 +277,11 @@ class WearOsServer extends EventEmitter {
         });
     }
 
+    /**
+     * Stop heartbeat/discovery, terminate clients, and close the owned TCP server.
+     * Stop any DeviceSessions using the devices first; this server does not own sessions.
+     * @returns {Promise<void>}
+     */
     async stop() {
         clearInterval(this.pingTimer);
         this.discovery?.close();
@@ -192,4 +293,39 @@ class WearOsServer extends EventEmitter {
     }
 }
 
+/**
+ * Accepted watch connection, including reconnects using the same retained object.
+ * @event WearOsServer#device
+ * @type {WearOsDevice}
+ */
+/**
+ * TCP listener error after startup. UDP and individual socket errors are logged separately.
+ * @event WearOsServer#error
+ * @type {Error}
+ */
+/**
+ * Connection-state transition in message.isConnected.
+ * @event WearOsDevice#isConnected
+ * @type {WearOsConnectionEvent}
+ */
+/**
+ * Acceleration vector in message.acceleration, in m/s².
+ * @event WearOsDevice#acceleration
+ * @type {WearOsSensorEvent}
+ */
+/**
+ * Angular velocity in message.gyroscope, in rad/s.
+ * @event WearOsDevice#gyroscope
+ * @type {WearOsSensorEvent}
+ */
+/**
+ * Magnetic field in message.magnetometer, in µT.
+ * @event WearOsDevice#magnetometer
+ * @type {WearOsSensorEvent}
+ */
+/**
+ * Heart rate in message.heartRate, in BPM.
+ * @event WearOsDevice#heartRate
+ * @type {WearOsSensorEvent}
+ */
 module.exports = { WearOsDevice, WearOsServer, WEAROS_SENSORS };

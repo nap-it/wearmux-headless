@@ -98,7 +98,9 @@ Choose sensors before starting. SensorManager installs listeners for that initia
 
 The SDK-backed runtime derives capabilities from a connected device. A new device should expose the SDK-compatible methods and events used by DeviceSession and the relevant modality module. Read the upstream SDK contract before adapting a protocol; the Headless API reference documents the calls it makes, without reimplementing the SDK reference.
 
-DeviceSession inspects `availableSensorTypes`, `hasCamera`, `hasMicrophone`, `isDisplayAvailable`, `vibrationLocations`, `canBeep`, and `canNotify`. It derives identity from `bluetoothId` or `id`, plus `name`. The device must provide event registration and connection state, and implement the operations for every capability it advertises. Unsupported capabilities must remain absent/false. The host recognizes the sensor names in DEFAULT_SENSOR_RATES; `heartRate` requires explicit selection.
+DeviceSession inspects `availableSensorTypes`, `hasCamera`, `hasMicrophone`, `isDisplayAvailable`, `vibrationLocations`, `canBeep`, and `canNotify`. It derives identity from `bluetoothId` or `id`, plus `name`. The device must provide event registration and connection state, and implement the operations for every capability it advertises. Unsupported capabilities must remain absent/false. The host recognizes the sensor names in DEFAULT_SENSOR_RATES. The session runtime selects all advertised sensors, including `heartRate`, when ENABLED_SENSORS is unset; a standalone SensorManager with an empty selection excludes heart rate.
+
+The [direct Wear OS adapter](wearos.md) shows a non-SDK discovery path that feeds the same DeviceSession interface. Its guide covers the watch wire protocol, millisecond intervals, client example, and current Android client limitation.
 
 Connect the device through DeviceManager/DeviceFleet, or supply an already-connected compatible object to DeviceSession. Discovery itself is SDK-specific; supporting an unrelated device protocol also requires an explicit connection/discovery integration. Keep protocol parsing in that adapter and application-specific processing in a consumer or interaction.
 

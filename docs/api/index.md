@@ -8,6 +8,7 @@ WearMux Headless is the Node.js host for acquiring data and sending feedback acr
 - [Technical guide](../technical-guide.md): configuration, commands, messaging, Docker, and troubleshooting.
 - [Developer integration guide](integration.md): embed the host, manage resources, and add device or transport integrations.
 - [Message contracts](message-contract.md): identities, time bases, raw media framing, and action outcomes.
+- [Direct Wear OS developer guide](wearos.md): watch setup, discovery, protocol, rate semantics, and current client requirements.
 
 ## Core interfaces
 
@@ -15,6 +16,7 @@ WearMux Headless is the Node.js host for acquiring data and sending feedback acr
 | --- | --- |
 | Discover and run several devices | {@link DeviceFleet} |
 | Connect one device | {@link DeviceManager} |
+| Accept direct Wi-Fi watch connections | {@link WearOsServer}, {@link WearOsDevice}, {@link WEAROS_SENSORS} |
 | Coordinate one connected device's capabilities | {@link DeviceSession} |
 | Camera acquisition and browser viewing | {@link CameraSession} |
 | Microphone acquisition, levels, and streaming | {@link MicrophoneSession}, {@link RtspPublisher} |
@@ -38,3 +40,5 @@ Classes and methods link to their source. The reference covers the host's integr
 | Raw media framing | {@link RawMediaMetadata}, {@link RawMediaChunk} |
 | Feedback commands and outcomes | {@link ActionCommand}, {@link ActionResult} |
 | Rendering and INI settings | {@link DisplayRenderOptions}, {@link ParsedIni} |
+| Direct watch settings and packets | {@link WearOsServerOptions}, {@link WearOsHello}, {@link WearOsSensorPacket}, {@link WearOsHostCommand}, {@link WearOsDiscoveryReply} |
+| Local watch events | {@link WearOsConnectionEvent}, {@link WearOsSensorEvent} |

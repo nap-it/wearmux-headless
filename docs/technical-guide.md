@@ -101,7 +101,7 @@ Set `WEARMUX_CONFIG_PATH` to select another configuration directory or a single 
 
 ## Wear OS Watches
 
-This branch includes a direct Wi-Fi watch adapter in `utils/wearos-device.js`. It requires a watch client implementing the WebSocket protocol below. The imported `wear` module in [WearMux Android](https://github.com/nap-it/wearmux-android) currently connects to the phone through Google Wear Data Layer; it does not include the PC-mode client described by the Headless changes. Building that Android watch module alone does not enable direct Headless connections.
+This branch includes a direct Wi-Fi watch adapter in `utils/wearos-device.js`. It requires a watch client implementing the [direct Wear OS protocol](api/wearos.md). The imported `wear` module in [WearMux Android](https://github.com/nap-it/wearmux-android) currently connects to the phone through Google Wear Data Layer; it does not include the PC-mode client described by the Headless changes. Building that Android watch module alone does not enable direct Headless connections.
 
 The host adapter exposes acceleration, gyroscope, magnetometer, and heart-rate sensors when advertised by a compatible client, plus haptics, beeps, and alerts. It does not expose camera, microphone, or SDK display capabilities, so the VRU stop-request interaction does not select it.
 
@@ -113,19 +113,7 @@ WEAROS_PORT=8765 npm run sessions
 
 Leave the variable unset to disable watch connections. The listener uses TCP for WebSockets and UDP on the same port for discovery; allow both through the host firewall. A compatible client on the same Wi-Fi network connects to `ws://<host-ip>:8765` and sends a `hello` message first. It may discover the host through the UDP exchange below. The host keeps one device identity across reconnections and restores the last sensor configuration. `ENABLED_SENSORS` restricts which advertised sensors the host requests.
 
-Discovery uses one UDP datagram each way. The connection carries one JSON message per WebSocket frame:
-
-| Direction | Message |
-| --- | --- |
-| Watch → host (UDP broadcast) | `{"type":"discover"}` |
-| Host → watch (UDP reply) | `{"type":"wearmux","port":8765,"name":"<hostname>"}` |
-| Watch → host (first WebSocket message) | `{"type":"hello","id":"wearos-<id>","name":"...","sensors":[...],"vibration":true,"beep":true,"notifications":true}` |
-| Watch → host | `{"type":"sensor","sensor":"acceleration","timestamp":1234,"x":0,"y":0,"z":9.8}` (m/s²; gyroscope uses rad/s and magnetometer uses μT) |
-| Watch → host | `{"type":"sensor","sensor":"heartRate","timestamp":1234,"bpm":72}` |
-| Host → watch | `{"type":"config","sensors":{"acceleration":50}}` (intervals in milliseconds; 0 or missing disables a sensor) |
-| Host → watch | `{"type":"vibrate","effect":"doubleClick100"}` |
-| Host → watch | `{"type":"beep","frequency":880,"durationMs":250}` |
-| Host → watch | `{"type":"notify","level":"danger","title":"...","text":"..."}` |
+The [watch developer guide](api/wearos.md) defines discovery and WebSocket packet fields, millisecond sampling intervals, heartbeat/readiness behavior, ownership, and example clients. It also documents the current shared *_RATE conversion limitation. Unset ENABLED_SENSORS selects all advertised sensors, including heart rate, in the session runtime; the standalone SensorManager default excludes heart rate.
 
 Applications use the shared [device actions](#device-actions) and [sensor topics](#sensors-bwearsensors), rather than connecting to the watch socket themselves. The adapter is implemented in `utils/wearos-device.js`. A matching watch client is still needed before this direct path can be used with the current Android app.
 

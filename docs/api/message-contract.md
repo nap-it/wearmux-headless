@@ -10,6 +10,8 @@ Top-level `ts` values are host Unix time in **milliseconds**, generally captured
 
 Acceleration is reported in m/s², gyroscope in rad/s, magnetometer in μT, and Euler orientation in degrees according to the SDK modality contract. Quaternion and pressure structures remain SDK payloads; confirm their shape and units for the relevant hardware/firmware. *_RATE environment settings accept Hz or an `Xms` period for host event throttling. Device configuration values are handled separately through the SDK; do not assume the same number directly guarantees a measured device sampling rate.
 
+For direct Wear OS, heartRate values are BPM and watch timestamps pass through as numeric milliseconds, with host Date.now() as the fallback for missing/zero/nonnumeric input. The watch config wire values are millisecond intervals. The [watch protocol guide](wearos.md#sensor-packets-and-configuration) explains the current mismatch between shared *_RATE parsing and watch intervals, and the difference between session and standalone heart-rate selection.
+
 ## Metadata and media bytes
 
 CameraImage and MicrophoneLevel messages describe frames/packets; they do not contain encoded media. Raw publication is enabled separately with `CAMERA_RAW_ENABLE=1` and `MIC_RAW_ENABLE=1`.
