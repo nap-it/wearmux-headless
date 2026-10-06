@@ -36,3 +36,5 @@ These options configure the recorder directly. Streaming settings are documented
 ## Runtime Notes
 
 The session runtime also handles microphone acquisition and raw audio publishing through MQTT or Zenoh. See the [messaging guide](../docs/technical-guide.md#messaging-and-reverse-actions) for transport setup and topics. Avoid running a standalone microphone command and `npm run sessions` against the same BLE device at the same time.
+
+The MicrophoneSession and RtspPublisher interfaces are documented in the [generated API reference](../docs/documentation.md), including callbacks, stream ownership, and cleanup.

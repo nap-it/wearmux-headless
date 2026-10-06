@@ -1,5 +1,9 @@
 const EventEmitter = require("events");
-/** @type {import("brilliantsole/node")?} */
+/**
+ * Lazily loaded BrilliantSole Node SDK module.
+ * @type {Object|null}
+ * @private
+ */
 let BS = null;
 
 const debugLog = (...args) => {
@@ -8,7 +12,24 @@ const debugLog = (...args) => {
     }
 };
 
+/**
+ * Connects one BrilliantWear device over BLE or Wi‑Fi.
+ *
+ * @class
+ * @extends EventEmitter
+ * @fires DeviceManager#error
+ * @fires DeviceManager#reconnected
+ * @example
+ * const { DeviceManager } = require("./utils/device-manager");
+ * const manager = new DeviceManager();
+ * manager.on("error", console.error);
+ * manager.connectToDevice()
+ *     .then((device) => console.log(device.name))
+ *     .finally(() => manager.disconnect())
+ *     .catch(console.error);
+ */
 class DeviceManager extends EventEmitter {
+    /** Create an unconnected manager. Connection filters come from environment variables. */
     constructor() {
         super();
         this.device = null;
@@ -16,6 +37,12 @@ class DeviceManager extends EventEmitter {
         this._lastFilters = { id: "", name: "" };
     }
 
+    /**
+     * Connect to the configured device and wait until it reports connected.
+     * `DEVICE_IP` selects Wi‑Fi; otherwise the BrilliantSole scanner is used.
+     * @returns {Promise<Object>} The SDK device instance.
+     * @throws {Error} If scanning, transport setup, or the connection timeout fails.
+     */
     async connectToDevice() {
         const wifiIp = process.env.DEVICE_IP;
         if (wifiIp) {
@@ -44,6 +71,11 @@ class DeviceManager extends EventEmitter {
         }
     }
 
+    /**
+     * Connect using the SDK BLE manager or scanner.
+     * @private
+     * @returns {Promise<void>}
+     */
     async _connectViaBle() {
         if (!BS) BS = await import("brilliantsole/node");
 
@@ -62,6 +94,12 @@ class DeviceManager extends EventEmitter {
         }
     }
 
+    /**
+     * Connect the SDK device to a Wi‑Fi endpoint.
+     * @private
+     * @param {string} ipAddress
+     * @returns {Promise<void>}
+     */
     async _connectViaWifi(ipAddress) {
         const transport = (process.env.DEVICE_TRANSPORT || "websocket").toLowerCase();
         const isSecure = process.env.DEVICE_WIFI_SECURE === "1";
@@ -127,6 +165,11 @@ class DeviceManager extends EventEmitter {
         }
     }
 
+    /**
+     * Read optional environment-based device filters.
+     * @private
+     * @returns {{id:string,name:string}}
+     */
     _getFilters() {
         return {
             id: process.env.DEVICE_ID || process.env.MIC_DEVICE_ID || "",
@@ -134,6 +177,13 @@ class DeviceManager extends EventEmitter {
         };
     }
 
+    /**
+     * Select a matching device already known to the SDK.
+     * @private
+     * @param {string} filterId
+     * @param {string} filterName
+     * @returns {Object|null}
+     */
     _pickFromDeviceManager(filterId, filterName) {
         try {
             const dm = BS?.DeviceManager;
@@ -147,6 +197,13 @@ class DeviceManager extends EventEmitter {
         }
     }
 
+    /**
+     * Scan, filter, and connect to one BLE device.
+     * @private
+     * @param {string} filterId
+     * @param {string} filterName
+     * @returns {Promise<void>}
+     */
     async _connectViaScanner(filterId, filterName) {
         const scanner = BS.Scanner;
         debugLog(
@@ -215,6 +272,13 @@ class DeviceManager extends EventEmitter {
         }
     }
 
+    /**
+     * Wait for the scanner's adapter-ready event.
+     * @private
+     * @param {Object} scanner
+     * @param {number} [timeoutMs=20000]
+     * @returns {Promise<boolean>}
+     */
     async _waitForScanningAvailable(scanner, timeoutMs = 20000) {
         if (scanner.isScanningAvailable) return true;
         debugLog("[DeviceManager] Waiting for BLE adapter to be ready...");
@@ -231,6 +295,11 @@ class DeviceManager extends EventEmitter {
         });
     }
 
+    /**
+     * Attach listeners for SDK connection status and reconnect events.
+     * @private
+     * @returns {void}
+     */
     _setupEventListeners() {
         try {
             this.device.addEventListener?.("connectionStatus", () => {
@@ -259,6 +328,11 @@ class DeviceManager extends EventEmitter {
         }
     }
 
+    /**
+     * Wait until the selected device reports a connected state.
+     * @private
+     * @returns {Promise<void>}
+     */
     async _waitForConnection() {
         if (this.device?.isConnected) return;
         await Promise.race([
@@ -273,10 +347,19 @@ class DeviceManager extends EventEmitter {
         ]);
     }
 
+    /**
+     * Return the currently selected SDK device.
+     * @returns {Object|null} The selected device, or null before connection.
+     */
     getDevice() {
         return this.device;
     }
 
+    /**
+     * Disconnect the current device.
+     * Cleanup failures are logged and swallowed so shutdown remains best effort.
+     * @returns {Promise<void>}
+     */
     async disconnect() {
         try {
             if (this.device && typeof this.device.disconnect === "function") {
@@ -287,5 +370,16 @@ class DeviceManager extends EventEmitter {
         }
     }
 }
+
+/**
+ * @event DeviceManager#reconnected
+ * @description Emitted when the SDK reports an automatic reconnection.
+ * @property {Object} device The reconnected SDK device.
+ */
+/**
+ * @event DeviceManager#error
+ * @description Emitted when connection setup fails before rejection is returned.
+ * @property {Error} error The connection error.
+ */
 
 module.exports = { DeviceManager };

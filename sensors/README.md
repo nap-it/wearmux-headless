@@ -61,3 +61,5 @@ DEBUG=1 npm run sensors
 ```
 
 For connection and transport failures, use the shared [troubleshooting guide](../docs/technical-guide.md#troubleshooting). Avoid running this standalone monitor and `npm run sessions` against the same BLE device at the same time.
+
+For SensorManager events, initial sensor selection, configuration changes, and connection ownership, see the [developer integration guide](../docs/api/integration.md) and [generated API reference](../docs/documentation.md).

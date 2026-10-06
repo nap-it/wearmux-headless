@@ -14,7 +14,21 @@ const { topic } = require("./topics");
  * 
  * Uses a Python sidecar to subscribe to topics and forwards messages to Node.js via UDS
  */
+/**
+ * Receives Zenoh messages from the Python sidecar through a local UDS server.
+ * @class
+ * @extends EventEmitter
+ * @param {Object} [options]
+ * @param {string} [options.keyExpression] Zenoh expression; defaults to the project root.
+ * @param {string} [options.udsPath] Local Unix socket path; generated when omitted.
+ */
 class ZenohSubscriber extends EventEmitter {
+    /**
+     * Create a Zenoh subscriber backed by a Python sidecar.
+     * @param {Object} [options]
+     * @param {string} [options.keyExpression] Zenoh subscription expression.
+     * @param {string} [options.udsPath] Unix socket path.
+     */
     constructor(options = {}) {
         super();
         this.keyExpression = options.keyExpression || topic("**");
@@ -26,6 +40,11 @@ class ZenohSubscriber extends EventEmitter {
         this._udsSocket = null;
     }
 
+    /**
+     * Start the UDS server and Python subscriber sidecar, then emit `ready`.
+     * @returns {Promise<void>}
+     * @throws {Error} If the UDS server or sidecar cannot start.
+     */
     async start() {
         if (this._child) return;
         this._stopping = false;
@@ -39,6 +58,11 @@ class ZenohSubscriber extends EventEmitter {
         this.emit("ready");
     }
 
+    /**
+     * Start the local server that receives MessagePack frames.
+     * @private
+     * @returns {Promise<void>}
+     */
     async _startUDSServer() {
         return new Promise((resolve, reject) => {
             const server = net.createServer((socket) => {
@@ -89,6 +113,11 @@ class ZenohSubscriber extends EventEmitter {
         });
     }
 
+    /**
+     * Start the Python subscriber sidecar and wait for readiness.
+     * @private
+     * @returns {Promise<void>}
+     */
     async _startPythonBridge() {
         const script = path.resolve(__dirname, "../tools/zenoh_py_subscriber_bridge.py");
         const fs = require("fs");
@@ -145,6 +174,10 @@ class ZenohSubscriber extends EventEmitter {
         });
     }
 
+    /**
+     * Close the UDS server and terminate the owned Python sidecar.
+     * @returns {Promise<void>}
+     */
     async stop() {
         this._stopping = true;
         try {
@@ -173,5 +206,20 @@ class ZenohSubscriber extends EventEmitter {
         }
     }
 }
+
+/**
+ * @event ZenohSubscriber#ready
+ * @description Emitted after the UDS server and Python sidecar are ready.
+ */
+/**
+ * @event ZenohSubscriber#message
+ * @description Emitted for each decoded MessagePack transport message.
+ * @property {TransportMessage} message Transport message.
+ */
+/**
+ * @event ZenohSubscriber#error
+ * @description Emitted for sidecar, socket, or MessagePack failures.
+ * @property {Error} error The failure.
+ */
 
 module.exports = { ZenohSubscriber };

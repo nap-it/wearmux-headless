@@ -18,7 +18,8 @@
         "ws": "^8.19.0"
     },
     "devDependencies": {
-        "jest": "^29.7.0"
+        "jest": "^29.7.0",
+        "jsdoc": "4.0.5"
     },
     "scripts": {
         "test": "jest",
@@ -45,6 +46,8 @@
         "examples:latency": "node tools/run-with-config.js examples/latency-evaluation/index.js",
         "examples:test": "jest examples",
         "clean:recordings": "node -e \"const p='microphone/recordings',fs=require('fs');fs.readdirSync(p).forEach(f=>fs.rmSync(p+'/'+f,{recursive:true,force:true}))\"",
-        "clean:training-data": "node -e \"const p='sensors/model',fs=require('fs');fs.readdirSync(p).filter(f=>!['.gitkeep','README.md','brilliantwear-glasses'].includes(f)).forEach(f=>fs.rmSync(p+'/'+f,{recursive:true,force:true}))\""
+        "clean:training-data": "node -e \"const p='sensors/model',fs=require('fs');fs.readdirSync(p).filter(f=>!['.gitkeep','README.md','brilliantwear-glasses'].includes(f)).forEach(f=>fs.rmSync(p+'/'+f,{recursive:true,force:true}))\"",
+        "docs": "node tools/build-docs.js",
+        "docs:check": "node tools/build-docs.js --check"
     }
 }

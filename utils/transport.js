@@ -7,6 +7,11 @@ const { ZenohSubscriber } = require("./zenoh-subscriber");
 const { MqttManager } = require("./mqtt-manager");
 const { MqttSubscriber } = require("./mqtt-subscriber");
 
+/**
+ * Read and validate the shared message transport selection.
+ * @returns {string} `mqtt`, `zenoh`, or `none`.
+ * @throws {Error} If `MESSAGE_TRANSPORT` is unsupported.
+ */
 function selectedTransport() {
     const transport = process.env.MESSAGE_TRANSPORT?.trim().toLowerCase() || "none";
     if (!["mqtt", "zenoh", "none"].includes(transport)) {
@@ -15,6 +20,11 @@ function selectedTransport() {
     return transport;
 }
 
+/**
+ * Create the configured publisher, or null when messaging is disabled.
+ * @param {TransportOptions} [options]
+ * @returns {Publisher|null}
+ */
 function createPublisher(options = {}) {
     const transport = options.transport || selectedTransport();
     if (transport === "mqtt") return new MqttManager(options);
@@ -22,6 +32,11 @@ function createPublisher(options = {}) {
     return null;
 }
 
+/**
+ * Create the configured subscriber, or null when messaging is disabled.
+ * @param {TransportOptions} [options]
+ * @returns {Subscriber|null}
+ */
 function createSubscriber(options = {}) {
     const transport = options.transport || selectedTransport();
     if (transport === "mqtt") {

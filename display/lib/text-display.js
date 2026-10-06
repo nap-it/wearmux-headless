@@ -4,11 +4,22 @@ const { DisplayManager } = require("./display-manager");
 const { Config } = require("../../utils/config");
 
 /**
- * TextDisplay - Renders text messages on Brilliant Wear Frame display using SVG + sharp
- *
- * Uses image-based rendering (no browser APIs) - compatible with Node.js.
+ * Render text through host-side SVG rasterization and DisplayManager.
+ * Call loadFont() before showText(). The owner keeps the device connected and
+ * serializes display operations; font family and weight are constructor settings.
+ * @class
+ * @see {@tutorial display}
  */
 class TextDisplay {
+    /**
+     * @param {Object} device Connected SDK device with an available display.
+     * @param {Object} [options={}] Text rendering defaults.
+     * @param {number} [options.fontSize=24] SVG font size.
+     * @param {string} [options.fontFamily="sans-serif"] Host font family.
+     * @param {string} [options.fontWeight="normal"] Host font weight.
+     * @param {string} [options.color="#FFFFFF"] Text color.
+     * @throws {Error} When the device is missing or display unavailable.
+     */
     constructor(device, options = {}) {
         if (!device) {
             throw new Error("TextDisplay requires a device instance");
@@ -32,9 +43,10 @@ class TextDisplay {
     }
 
     /**
-     * Load font (validates path for @font-face; optional for SVG fallback)
-     * @param {string} fontPath - Path to TTF/OTF font file
-     * @param {number} fontSize - Font size in points
+     * Initialize the renderer and its cache, optionally changing the font size.
+     * Uses fonts available to the host SVG renderer; no font file is loaded.
+     * @param {?number} [fontSize=null] SVG font size; null preserves the constructor value.
+     * @returns {Promise<void>}
      */
     async loadFont(fontSize = null) {
         if (fontSize) {
@@ -117,6 +129,7 @@ ${textElements}
         return { buffer, width: svgWidth, height: svgHeight };
     }
 
+    /** @private */
     _escapeXml(str) {
         return str
             .replace(/&/g, "&amp;")
@@ -129,13 +142,11 @@ ${textElements}
     /**
      * Show text on the display
      * @param {string} text - Text to display (supports \n for line breaks)
-     * @param {Object} options - Display options
-     * @param {boolean} options.clearBefore - Clear display before rendering (needed for partial updates)
-     * @param {string} options.color - Text color (hex)
-     * @param {number} options.fontSize - Font size override
-     * @param {string} options.fontFamily - Font family override
-     * @param {string} options.fontWeight - Font weight override
-     * @param {number} options.pixelDepth - Pixel depth override
+     * @param {Object} [options={}] Supported display options.
+     * @param {boolean} [options.clearBefore=false] Clear before rendering.
+     * @param {string} [options.color] Text color; defaults to setColor()/constructor setting.
+     * @param {number} [options.pixelDepth] Palette depth override.
+     * @returns {Promise<boolean>} Resolves true after rendering; rejects if uninitialized or rendering fails.
      */
     async showText(text, options = {}) {
         if (!this.initialized) {
@@ -187,7 +198,8 @@ ${textElements}
     }
 
     /**
-     * Clear the display
+     * Clear and show the device display when those SDK methods are available.
+     * @returns {Promise<void>} Rejects on a device command failure.
      */
     async clear() {
         if (this.device && this.device.clearDisplay) {
@@ -196,10 +208,20 @@ ${textElements}
         }
     }
 
+    /**
+     * Change the font size for subsequent uncached text.
+     * @param {number} fontSize SVG font size.
+     * @returns {void}
+     */
     setFontSize(fontSize) {
         this.currentFontSize = fontSize;
     }
 
+    /**
+     * Change the default text color for subsequent calls.
+     * @param {string} color Text color.
+     * @returns {void}
+     */
     setColor(color) {
         this.defaultColor = color;
     }

@@ -1,5 +1,19 @@
+/**
+ * Read modality settings from process.env. Load INI configuration first with
+ * loadConfigFile() when embedding the host; constructors read these settings
+ * at different lifecycle stages, so configure the environment before creating them.
+ * @class
+ * @see loadConfigFile
+ * @see {@tutorial technical-guide}
+ */
 class Config {
     // Returns per-sensor rates (null when env var is not set) with Hz/"Xms" parsing.
+    /**
+     * Parse *_RATE as positive Hz or an Xms period, then round to multiples of five.
+     * Returned numbers are passed to SDK configuration by DeviceSession. Host event
+     * throttling is computed separately by SensorManager; firmware determines device timing.
+     * @returns {Object<string, ?number>} Known sensor names mapped to parsed values, or null when unset/invalid.
+     */
     static getSensorRates() {
         const parseRateHz = (raw) => {
             if (!raw) return null;
@@ -32,6 +46,7 @@ class Config {
         };
     }
 
+    /** @returns {Object} Display defaults from DISPLAY_* environment variables. */
     static getDisplayConfig() {
         const n = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined);
         const s = (v) => (v !== undefined && v !== null && v !== "" ? String(v) : undefined);
@@ -55,6 +70,7 @@ class Config {
         };
     }
 
+    /** @returns {Object} Camera controls, viewer, output, and capture settings from CAMERA_* variables. */
     static getCameraConfig() {
         const n = (v) => (v !== undefined && v !== null && v !== "" ? Number(v) : undefined);
         const s = (v) => (v !== undefined && v !== null && v !== "" ? String(v) : undefined);

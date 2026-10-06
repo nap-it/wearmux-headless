@@ -1,0 +1,73 @@
+name: Documentation
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - '**/*.js'
+      - '**/*.md'
+      - 'docs/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'jsdoc.json'
+      - '.github/workflows/documentation.yml'
+  pull_request:
+    paths:
+      - '**/*.js'
+      - '**/*.md'
+      - 'docs/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'jsdoc.json'
+      - '.github/workflows/documentation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: documentation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install documentation dependencies without native build scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Generate and validate documentation
+        run: npm run docs:check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wearmux-headless-docs-${{ github.sha }}
+          path: docs/api/html/
+          retention-days: 14
+          if-no-files-found: error
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          path: docs/api/html/
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Publish documentation
+        id: deployment
+        uses: actions/deploy-pages@v4
