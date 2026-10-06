@@ -2,9 +2,10 @@ const { MessageDisplay } = require("../message-display");
 
 test.each([
     "Should the vehicle continue stopping? Nod yes; shake no.",
+    "Should the vehicle continue stopping? Nod yes · Shake no",
     "Keep vehicle stopped?",
     "Do you want me to stop? Answer yes (keep stopping) or no (send DENM back).",
-])("updates the legacy question without gesture instructions: %s", async (question) => {
+])("normalizes the legacy question and leaves the separate hint to the renderer: %s", async (question) => {
     const session = { dispatchAction: jest.fn().mockResolvedValue(undefined) };
     await new MessageDisplay(session).show(question);
     expect(session.dispatchAction).toHaveBeenCalledWith({ action: "display.prompt", text: "Should I stop?" });

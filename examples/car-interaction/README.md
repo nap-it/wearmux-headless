@@ -1,6 +1,6 @@
-# Car Interaction Demo
+# Car Interaction Example
 
-AR gesture demo: AV asks pedestrian (glasses) permission to stop via nod/shake.
+The car simulator asks a pedestrian wearing compatible glasses whether it should stop. The wearable controller displays the question and returns a nod/shake response through the selected messaging transport.
 
 ```mermaid
 sequenceDiagram
@@ -20,48 +20,36 @@ sequenceDiagram
 ```
 
 
-## Quick Start (Demo Mode - No Glasses)
+## Setup
 
-1. Install:
-   ```bash
-   cd wearmux-headless
-   npm install
-   pip3 install zenoh msgpack
-   ```
+Run commands from the repository root after installing the Node.js dependencies. Connect compatible glasses with a display and motion sensors, and follow the [transport setup](../../docs/technical-guide.md#transport-setup) for MQTT or Zenoh. Both processes must use the same transport and broker/router.
 
-2. Start Zenoh:
-   ```bash
-   docker run -d -p 7447:7447 --name zenoh eclipse/zenoh:latest
-   ```
+In the first terminal, start the wearable controller with the repository configuration:
 
-3. Run:
-   ```bash
-   cd examples/car-interaction
-   npm run glasses:demo  # T1: y/n for gestures
-   npm run car           # T2: sim car
-   ```
-
-Car approaches every 5-15s. Press y/n or timeout → confirmation.
-
-## Full Mode (With Glasses)
-
-`npm run glasses` (T1), `npm run car` (T2).
-
-## Config (.env)
-
-```
-MIN_APPROACH_DELAY=5000
-MAX_APPROACH_DELAY=15000
-GESTURE_TIMEOUT=5000
-APPROACH_MSG="Car approaching. Stop?"
+```bash
+node tools/run-with-config.js examples/car-interaction/glasses-controller.js
 ```
 
-## Troubleshoot
+In the second terminal, start the car simulator:
 
-- Zenoh fail? `docker restart zenoh-router`
-- No ML? Put model in ../../sensors/model/
-- BT issues? `sudo setcap cap_net_raw+eip $(which node)`
+```bash
+npm run examples:car
+```
 
-## Customize
+Both commands load the INI files in `config/`; shell variables override those values. The simulator generates an approach every 5–15 seconds. Nod or shake to answer the displayed question. When no answer arrives before the timeout, the simulator applies its timeout behavior.
 
-Edit messages/timings in js files.
+## Configuration
+
+Device and transport settings use the [shared configuration](../../docs/technical-guide.md#configuration). Example messages, timing, and gesture thresholds are defined in [`constants.js`](constants.js).
+
+## Troubleshooting and Tests
+
+For connection and transport failures, see the [shared troubleshooting guide](../../docs/technical-guide.md#troubleshooting). Gesture model setup and provenance are covered in the [model guide](../../sensors/model/README.md).
+
+Run the example tests with:
+
+```bash
+npm run examples:test
+```
+
+Run the complete repository suite with `npm test`.

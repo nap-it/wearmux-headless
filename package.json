@@ -1,5 +1,6 @@
 {
     "name": "wearmux-headless",
+    "license": "GPL-3.0-only",
     "engines": {
         "node": ">=22.16.0"
     },
@@ -20,6 +21,7 @@
         "jest": "^29.7.0"
     },
     "scripts": {
+        "test": "jest",
         "start": "node tools/launcher.js",
         "help": "echo 'Available scripts: start, sessions, sensors, actions, actions:send, microphone:rtsp, microphone:record, display, camera, examples:car, examples:latency, examples:test'",
         "sessions": "node tools/run-with-config.js tools/sessions.js",
@@ -38,9 +40,8 @@
         "mqtt:broker": "node tools/mqtt-broker.js",
         "display": "node tools/run-with-config.js display/index.js",
         "camera": "node tools/run-with-config.js camera/index.js",
-        "examples:car-help": "echo 'Car demo (examples/car-interaction):\n  npm run examples:car-demo   # Glasses (demo mode)\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
-        "examples:car-demo": "cd examples/car-interaction && node glasses-controller.js\n  npm run examples:car        # Car sim\n  npm run examples:test       # Tests'",
-        "examples:car": "cd examples/car-interaction && node car-simulator.js",
+        "examples:car-help": "echo 'Car interaction (examples/car-interaction):\n  npm run examples:car        # Car simulator\n  npm run examples:test       # Example tests\n  See examples/car-interaction/README.md for wearable setup.'",
+        "examples:car": "node tools/run-with-config.js examples/car-interaction/car-simulator.js",
         "examples:latency": "node tools/run-with-config.js examples/latency-evaluation/index.js",
         "examples:test": "jest examples",
         "clean:recordings": "node -e \"const p='microphone/recordings',fs=require('fs');fs.readdirSync(p).forEach(f=>fs.rmSync(p+'/'+f,{recursive:true,force:true}))\"",

@@ -9,7 +9,10 @@ jest.mock("../../display/lib/text-display", () => ({
 }));
 const { TextDisplay } = require("../../display/lib/text-display");
 jest.mock("../../display/lib/prompt-display", () => ({
-    PromptDisplay: jest.fn().mockImplementation(() => ({ show: jest.fn().mockResolvedValue(undefined) })),
+    PromptDisplay: jest.fn().mockImplementation(() => ({
+        show: jest.fn().mockResolvedValue(undefined),
+        clear: jest.fn().mockResolvedValue(undefined),
+    })),
 }));
 const { PromptDisplay } = require("../../display/lib/prompt-display");
 
@@ -73,7 +76,7 @@ test("unsupported actions report an error without touching the device", async ()
     await dispatcher.stop();
 });
 
-test("display.clear reaches the wearable display", async () => {
+test("display.clear uses the acknowledged clear path without an extra show", async () => {
     const device = fakeDevice();
     const publisher = new FakeTransport();
     const subscriber = new FakeTransport();
@@ -83,12 +86,27 @@ test("display.clear reaches the wearable display", async () => {
     subscriber.emit("message", { key: ACTION_TOPIC, payload: { id: "clear-1", action: "display.clear" } });
     await dispatcher._pending;
 
-    expect(device.clearDisplay).toHaveBeenCalledWith(false);
-    expect(device.showDisplay).toHaveBeenCalledWith(true);
+    expect(PromptDisplay.mock.results.at(-1).value.clear).toHaveBeenCalledTimes(1);
+    expect(device.showDisplay).not.toHaveBeenCalled();
     expect(publisher.publish).toHaveBeenCalledWith(RESULT_TOPIC, expect.objectContaining({
         id: "clear-1", ok: true,
     }));
     await dispatcher.stop();
+});
+
+test("display.clear does not finish until the renderer acknowledges it", async () => {
+    const dispatcher = new ActionDispatcher(fakeDevice(), { transport: "mqtt" });
+    await dispatcher.dispatch({ action: "display.prompt", text: "Should I stop?" });
+    const renderer = PromptDisplay.mock.results.at(-1).value;
+    let acknowledge;
+    renderer.clear.mockImplementation(() => new Promise((resolve) => { acknowledge = resolve; }));
+    let finished = false;
+    const clearing = dispatcher.dispatch({ action: "display.clear" }).then(() => { finished = true; });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(finished).toBe(false);
+    acknowledge();
+    await clearing;
+    expect(finished).toBe(true);
 });
 
 test("display.text uses the existing wearable text renderer", async () => {
