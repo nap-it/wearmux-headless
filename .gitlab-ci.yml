@@ -5,8 +5,8 @@ variables:
 
 stages:
   - build
-  - release
   - manifest
+  - release
   - clean
 
 before_script:
@@ -91,8 +91,9 @@ manage_release:
     - chmod +x ~/release-cli
   script:
     - |
-      # Repository tag writes require an API token; job tokens support releases only.
+      # Use the API token for release administration and latest Git tag writes.
       : "${CI_TOKEN:?Set CI_TOKEN with API write access to update the latest Git tag}"
+      export GITLAB_PRIVATE_TOKEN="$CI_TOKEN"
       delete_if_present() {
         response_code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
           --request DELETE --header "$2" "$1") || return 1
@@ -107,15 +108,25 @@ manage_release:
         PREVIOUS_PATCH_VERSION=$(expr "${CI_COMMIT_TAG##*.}" - 1 || true)
         PREVIOUS_TAG="${CI_COMMIT_TAG%.*}.$PREVIOUS_PATCH_VERSION"
         echo "Deleting previous patch release $PREVIOUS_TAG"
-        delete_if_present "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/$PREVIOUS_TAG" "JOB-TOKEN: $CI_JOB_TOKEN"
+        delete_if_present "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/$PREVIOUS_TAG" "PRIVATE-TOKEN: $CI_TOKEN"
       fi
 
-      echo "Creating new release for tag $CI_COMMIT_TAG"
-      ~/release-cli create --name "Release $CI_COMMIT_TAG" --description "Release files and assets for the version $CI_COMMIT_TAG" \
-        --tag-name "$CI_COMMIT_TAG" --ref "$CI_COMMIT_TAG"
+      # A previous attempt may already have created the version release.
+      release_url="$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/$CI_COMMIT_TAG"
+      response_code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+        --header "PRIVATE-TOKEN: $CI_TOKEN" "$release_url")
+      case "$response_code" in
+        200) echo "Release $CI_COMMIT_TAG already exists; preserving its description and assets" ;;
+        404)
+          echo "Creating new release for tag $CI_COMMIT_TAG"
+          ~/release-cli create --name "Release $CI_COMMIT_TAG" --description "Release files and assets for the version $CI_COMMIT_TAG" \
+            --tag-name "$CI_COMMIT_TAG" --ref "$CI_COMMIT_TAG"
+          ;;
+        *) echo "Release lookup failed with HTTP $response_code for $release_url"; exit 1 ;;
+      esac
 
       echo "Updating latest release"
-      delete_if_present "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/latest" "JOB-TOKEN: $CI_JOB_TOKEN"
+      delete_if_present "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/latest" "PRIVATE-TOKEN: $CI_TOKEN"
       delete_if_present "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/tags/latest" "PRIVATE-TOKEN: $CI_TOKEN"
       echo "Creating Latest Release for version $CI_COMMIT_TAG"
       ~/release-cli create --name "Release Latest" --description "Release files and assets for the version $CI_COMMIT_TAG" \
