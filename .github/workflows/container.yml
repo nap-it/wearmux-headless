@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - name: Check out the release tag
@@ -103,3 +103,35 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=wearmux-headless-container
           cache-to: type=gha,mode=max,scope=wearmux-headless-container
+
+      - name: Publish release notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          STABLE_RELEASE: ${{ steps.release.outputs.stable }}
+        run: |
+          notes="docs/releases/$RELEASE_TAG.md"
+          title_file="docs/releases/$RELEASE_TAG.title.txt"
+          title="Release $RELEASE_TAG"
+          if [[ -s "$title_file" ]]; then
+            title=$(cat "$title_file")
+          fi
+          args=(--verify-tag --title "$title")
+          if [[ "$STABLE_RELEASE" == true ]]; then
+            args+=(--prerelease=false --latest)
+          else
+            args+=(--prerelease --latest=false)
+          fi
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            if [[ -f "$notes" ]]; then
+              gh release edit "$RELEASE_TAG" "${args[@]}" --notes-file "$notes"
+            else
+              echo "Release $RELEASE_TAG already exists; preserving its notes"
+            fi
+          elif [[ -f "$notes" ]]; then
+            gh release create "$RELEASE_TAG" "${args[@]}" --notes-file "$notes"
+          else
+            gh release create "$RELEASE_TAG" "${args[@]}" --generate-notes
+          fi

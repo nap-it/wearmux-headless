@@ -95,6 +95,14 @@ manage_release:
       : "${CI_TOKEN:?Set CI_TOKEN with API write access to update the latest Git tag}"
       export GITLAB_PRIVATE_TOKEN="$CI_TOKEN"
       delete_if_present() {
+        # GitLab can return 403 when DELETE targets a missing release.
+        response_code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+          --header "$2" "$1") || return 1
+        case "$response_code" in
+          404) echo "Already absent: $1"; return 0 ;;
+          200) ;;
+          *) echo "Lookup failed with HTTP $response_code for $1"; return 1 ;;
+        esac
         response_code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
           --request DELETE --header "$2" "$1") || return 1
         case "$response_code" in
@@ -111,15 +119,36 @@ manage_release:
         delete_if_present "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/$PREVIOUS_TAG" "PRIVATE-TOKEN: $CI_TOKEN"
       fi
 
+      release_notes="docs/releases/$CI_COMMIT_TAG.md"
+      release_title="docs/releases/$CI_COMMIT_TAG.title.txt"
+      release_name="Release $CI_COMMIT_TAG"
+      release_description="Release files and assets for the version $CI_COMMIT_TAG"
+      if [ -s "$release_title" ]; then
+        release_name=$(cat "$release_title")
+      fi
+      if [ -f "$release_notes" ]; then
+        release_description=$(cat "$release_notes")
+      fi
+
       # A previous attempt may already have created the version release.
       release_url="$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/$CI_COMMIT_TAG"
       response_code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
         --header "PRIVATE-TOKEN: $CI_TOKEN" "$release_url")
       case "$response_code" in
-        200) echo "Release $CI_COMMIT_TAG already exists; preserving its description and assets" ;;
+        200)
+          if [ -f "$release_notes" ]; then
+            echo "Updating release $CI_COMMIT_TAG from $release_notes"
+            curl --fail --silent --show-error --output /dev/null \
+              --request PUT --header "PRIVATE-TOKEN: $CI_TOKEN" \
+              --data-urlencode "name=$release_name" \
+              --data-urlencode "description@$release_notes" "$release_url"
+          else
+            echo "Release $CI_COMMIT_TAG already exists; preserving its description and assets"
+          fi
+          ;;
         404)
           echo "Creating new release for tag $CI_COMMIT_TAG"
-          ~/release-cli create --name "Release $CI_COMMIT_TAG" --description "Release files and assets for the version $CI_COMMIT_TAG" \
+          ~/release-cli create --name "$release_name" --description "$release_description" \
             --tag-name "$CI_COMMIT_TAG" --ref "$CI_COMMIT_TAG"
           ;;
         *) echo "Release lookup failed with HTTP $response_code for $release_url"; exit 1 ;;
@@ -129,7 +158,7 @@ manage_release:
       delete_if_present "$CI_API_V4_URL/projects/$CI_PROJECT_ID/releases/latest" "PRIVATE-TOKEN: $CI_TOKEN"
       delete_if_present "$CI_API_V4_URL/projects/$CI_PROJECT_ID/repository/tags/latest" "PRIVATE-TOKEN: $CI_TOKEN"
       echo "Creating Latest Release for version $CI_COMMIT_TAG"
-      ~/release-cli create --name "Release Latest" --description "Release files and assets for the version $CI_COMMIT_TAG" \
+      ~/release-cli create --name "Release Latest" --description "$release_description" \
         --tag-name "latest" --ref "$CI_COMMIT_TAG" \
         --assets-link "{\"name\":\"${CI_PROJECT_NAME}\",\"url\":\"https://${CI_REGISTRY_IMAGE}:latest\"}"
   dependencies:
