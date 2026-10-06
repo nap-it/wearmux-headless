@@ -52,16 +52,18 @@ before_script:
     - echo "→ Logging in to Docker registry"
     - echo "$CI_TOKEN" | docker login -u "$CI_USER" --password-stdin code.nap.av.it.pt:5050
     - |
-      echo "→ Building ${IMAGE_NAME}:${DOCKER_TAG}-${ARCH}"
-      docker build \
+      echo "→ Building and pushing ${IMAGE_NAME}:${DOCKER_TAG}-${ARCH} on the native ${ARCH} runner"
+      docker buildx build \
+        --builder default \
+        --platform "linux/${ARCH}" \
+        --provenance=false \
+        --sbom=false \
+        --push \
         --build-arg VERSION="$DOCKER_TAG" \
         --build-arg COMMIT="$CI_COMMIT_SHORT_SHA" \
-        -t ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-${ARCH} \
-        -f ${DOCKERFILE_PATH}/Dockerfile \
+        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-${ARCH}" \
+        -f "${DOCKERFILE_PATH}/Dockerfile" \
         .
-    - |
-      echo "→ Pushing ${IMAGE_NAME}:${DOCKER_TAG}-${ARCH}"
-      docker push ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-${ARCH}
   rules:
     # 1) Tag pipelines (except tag "latest")
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
@@ -117,25 +119,20 @@ build_wearmux_headless_arm64:
       fi
     - |
       echo "→ Creating multi-arch manifest ${IMAGE_NAME}:${DOCKER_TAG}"
-      docker manifest create ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG} \
-        ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-amd64 \
-        ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-arm64
-      docker manifest annotate ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG} \
-        ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-amd64 --arch amd64
-      docker manifest annotate ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG} \
-        ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-arm64 --arch arm64
-      docker manifest push ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}
+      IMAGE_REF="${CI_REGISTRY_IMAGE}/${IMAGE_NAME}"
+      docker buildx imagetools create -t "${IMAGE_REF}:${DOCKER_TAG}" \
+        "${IMAGE_REF}:${DOCKER_TAG}-amd64" \
+        "${IMAGE_REF}:${DOCKER_TAG}-arm64"
+      INSPECT_OUTPUT="$(docker buildx imagetools inspect "${IMAGE_REF}:${DOCKER_TAG}")"
+      echo "$INSPECT_OUTPUT"
+      echo "$INSPECT_OUTPUT" | grep -q "linux/amd64" || { echo "Missing linux/amd64 in ${IMAGE_REF}:${DOCKER_TAG}"; exit 1; }
+      echo "$INSPECT_OUTPUT" | grep -q "linux/arm64" || { echo "Missing linux/arm64 in ${IMAGE_REF}:${DOCKER_TAG}"; exit 1; }
       # Only on tag pipelines, also bump :latest
       if [[ -n "$CI_COMMIT_TAG" && "$CI_COMMIT_TAG" != "latest" ]]; then
         echo "→ Also updating multi-arch manifest ${IMAGE_NAME}:latest"
-        docker manifest create ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest \
-          ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-amd64 \
-          ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-arm64
-        docker manifest annotate ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest \
-          ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-amd64 --arch amd64
-        docker manifest annotate ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest \
-          ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DOCKER_TAG}-arm64 --arch arm64
-        docker manifest push ${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:latest
+        docker buildx imagetools create -t "${IMAGE_REF}:latest" \
+          "${IMAGE_REF}:${DOCKER_TAG}-amd64" \
+          "${IMAGE_REF}:${DOCKER_TAG}-arm64"
       fi
   rules:
     # Tag pipelines only
