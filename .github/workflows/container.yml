@@ -99,6 +99,7 @@ jobs:
           build-args: NODE_BASE_IMAGE=docker.io/library/node:22-bookworm-slim
           platforms: linux/amd64,linux/arm64
           push: true
+          provenance: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=wearmux-headless-container
