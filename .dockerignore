@@ -92,6 +92,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# Generated API documentation is published separately from the runtime image.
+docs/api/html/
+
 # PyBuilder
 .pybuilder/
 target/

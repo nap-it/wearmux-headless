@@ -3,8 +3,24 @@ const { RtspPublisher } = require("./rtsp-publisher");
 const { topic } = require("../../utils/topics");
 const { publishRawMedia } = require("../../utils/raw-media");
 
-// Configures microphone capture and fans audio out to local metrics, transport, and optional RTSP.
+/**
+ * Acquire one device's audio, report levels, and optionally publish raw samples
+ * and an RTSP stream. The owner supplies the connected device and shared publisher.
+ * Raw batches are ordered; packets arriving while a batch is in flight are skipped.
+ * @class
+ * @see DeviceSession
+ * @see {@tutorial microphone}
+ */
 class MicrophoneSession {
+    /**
+     * @param {Object} device Connected SDK device with microphone capabilities.
+     * @param {?Publisher} publisher Started publisher, or null for local monitoring.
+     * @param {Object} options Session identity and optional local callbacks.
+     * @param {DeviceIdentity} options.deviceInfo Source identity for outgoing messages.
+     * @param {number} [options.microphoneIndex=0] RTSP suffix index; zero uses the base URL.
+     * @param {function(MicrophoneLevel):void} [options.onLevel] Synchronous level callback.
+     * @param {function(string):void} [options.onStatus] Synchronous SDK status callback.
+     */
     constructor(device, publisher, options = {}) {
         this.device = device;
         this.publisher = publisher;
@@ -27,6 +43,12 @@ class MicrophoneSession {
         };
     }
 
+    /**
+     * Attach listeners and start the device microphone using environment settings.
+     * Repeated calls while running have no effect. SDK setup failures reject after
+     * cleanup; unavailable RTSP is logged and acquisition continues without it.
+     * @returns {Promise<void>}
+     */
     async start() {
         if (this.running) return;
         this.running = true;
@@ -64,6 +86,7 @@ class MicrophoneSession {
         }
     }
 
+    /** @private */
     async configure() {
         await this.device.setMicrophoneConfiguration({
             sampleRate: String(process.env.SAMPLE_RATE || 16000),
@@ -76,6 +99,7 @@ class MicrophoneSession {
         });
     }
 
+    /** @private */
     async receiveData(event) {
         if (!this.running) return;
         const { samples, sampleRate, bitDepth } = event.message || {};
@@ -113,16 +137,28 @@ class MicrophoneSession {
         }
     }
 
+    /** @private */
     async publish(key, data) {
         if (!this.publisher) return;
         try { await this.publisher.publish(key, data); }
         catch (error) { console.warn(`[Microphone][${this.deviceInfo.id}] publish:`, error?.message || error); }
     }
 
+    /**
+     * Restore microphone configuration after the owner reconnects the device.
+     * Has no effect when stopped; configuration errors reject.
+     * @returns {Promise<void>}
+     */
     async resume() {
         if (this.running) await this.configure();
     }
 
+    /**
+     * Detach listeners, request microphone stop, finish an in-flight raw batch,
+     * and stop the owned RTSP process. Does not disconnect the device or shared
+     * publisher. A device stop failure is logged rather than rethrown.
+     * @returns {Promise<void>}
+     */
     async stop() {
         this.running = false;
         this.device.removeEventListener?.("microphoneData", this.onData);

@@ -8,7 +8,21 @@ const EventEmitter = require("events");
 const mqtt = require("mqtt");
 const { topic } = require("./topics");
 
+/**
+ * Publishes sensor envelopes through MQTT and can bind to a SensorManager.
+ * @class
+ * @extends EventEmitter
+ * @param {Object} [options]
+ * @param {string} [options.keyPrefix] Prefix for published sensor keys.
+ * @param {string} [options.brokerUrl] MQTT URL; defaults to `MQTT_BROKER_URL` or localhost.
+ */
 class MqttManager extends EventEmitter {
+    /**
+     * Create an MQTT publisher.
+     * @param {Object} [options]
+     * @param {string} [options.keyPrefix] Prefix for published sensor keys.
+     * @param {string} [options.brokerUrl] MQTT broker URL.
+     */
     constructor(options = {}) {
         super();
         this.keyPrefix = options.keyPrefix || topic("sensors");
@@ -21,10 +35,20 @@ class MqttManager extends EventEmitter {
         this._deviceInfo = null;
     }
 
+    /**
+     * Set optional device identity included in subsequent sensor envelopes.
+     * @param {DeviceIdentity|null} info
+     * @returns {void}
+     */
     setDeviceInfo(info) {
         this._deviceInfo = info || null;
     }
 
+    /**
+     * Connect to the broker and emit `ready`.
+     * @returns {Promise<Object>} MQTT client.
+     * @throws {Error} On initial connection failure.
+     */
     async start() {
         if (this.client?.connected) return this.client;
         this.client = mqtt.connect(this.brokerUrl, {
@@ -46,6 +70,10 @@ class MqttManager extends EventEmitter {
         return this.client;
     }
 
+    /**
+     * Detach sensor listeners and close the MQTT client.
+     * @returns {Promise<void>}
+     */
     async stop() {
         try { await this.detachAll(this._sensorManager); } catch { }
         if (this.client) {
@@ -55,10 +83,22 @@ class MqttManager extends EventEmitter {
         this._sensorManager = null;
     }
 
+    /**
+     * Build a key for one sensor type.
+     * @private
+     * @param {string} sensorType
+     * @returns {string}
+     */
     _topicFor(sensorType) {
         return `${this.keyPrefix}/${sensorType}`;
     }
 
+    /**
+     * Serialize a payload for MQTT.
+     * @private
+     * @param {*} payload
+     * @returns {string}
+     */
     _serialize(payload) {
         if (payload == null) return "null";
         try {
@@ -68,6 +108,13 @@ class MqttManager extends EventEmitter {
         }
     }
 
+    /**
+     * Publish one JSON-serialized payload at QoS 0.
+     * @param {string} topic
+     * @param {*} payload
+     * @returns {Promise<void>}
+     * @throws {Error} If disconnected or publishing fails.
+     */
     async publish(topic, payload) {
         if (!this.client?.connected) throw new Error("MQTT client is not connected");
         const body = this._serialize(payload);
@@ -78,6 +125,12 @@ class MqttManager extends EventEmitter {
         });
     }
 
+    /**
+     * Subscribe to selected sensor events and publish them under the configured prefix.
+     * @param {Object} sensorManager
+     * @param {SensorAttachmentOptions} [options]
+     * @returns {Promise<void>}
+     */
     async attachToSensorManager(sensorManager, options = {}) {
         if (this._attached) return;
         if (!this.client?.connected) await this.start();
@@ -123,6 +176,11 @@ class MqttManager extends EventEmitter {
         this._attached = true;
     }
 
+    /**
+     * Remove all listeners installed by {@link MqttManager#attachToSensorManager}.
+     * @param {Object} [sensorManager]
+     * @returns {Promise<void>}
+     */
     async detachAll(sensorManager) {
         if (!this._attached) return;
         const sm = sensorManager || this._sensorManager;
@@ -136,5 +194,15 @@ class MqttManager extends EventEmitter {
         this._attached = false;
     }
 }
+
+/**
+ * @event MqttManager#ready
+ * @description Emitted after the MQTT broker connection is established.
+ */
+/**
+ * @event MqttManager#error
+ * @description Emitted for broker and publish failures.
+ * @property {Error} error The failure.
+ */
 
 module.exports = { MqttManager };

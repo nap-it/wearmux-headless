@@ -6,8 +6,15 @@ const FRAME_COLOR = "#FFD05A";
 const escapeMarkup = (text) => text.replace(/&/g, "&amp;")
     .replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** Compact yes/no question layout, rendered through the SDK bitmap primitive. */
+/**
+ * Render a compact question with a fixed nod/shake hint through SDK bitmap commands.
+ * Unlike the image renderer, show() waits for the device's displayReady event.
+ * This class draws a prompt; gesture recognition belongs to a separate interaction.
+ * @class
+ * @see ActionDispatcher
+ */
 class PromptDisplay {
+    /** @param {Object} device Connected SDK device implementing display and event APIs. */
     constructor(device) {
         this.device = device;
         // Cache host-side rasterization, not display contents (clear and other
@@ -15,6 +22,7 @@ class PromptDisplay {
         this.cache = new Map();
     }
 
+    /** @private */
     async _renderText(text, fontSize, maxWidth, bold = false) {
         const { data, info } = await sharp({
             text: {
@@ -35,6 +43,7 @@ class PromptDisplay {
         };
     }
 
+    /** @private */
     async _fitText(text, minimumSize, maximumSize, maxWidth, maxHeight, wrap = false) {
         const largest = await this._renderText(text, maximumSize, wrap ? maxWidth : undefined, true);
         if (largest.width <= maxWidth && largest.height <= maxHeight) {
@@ -57,6 +66,7 @@ class PromptDisplay {
         return fitted;
     }
 
+    /** @private */
     async _layout(text, width, height) {
         const scale = Math.min(width / 640, height / 400);
         const margin = Math.max(4, Math.round(48 * scale));
@@ -101,6 +111,7 @@ class PromptDisplay {
         };
     }
 
+    /** @private */
     _waitForDisplayReady(send) {
         return new Promise((resolve, reject) => {
             let settled = false;
@@ -143,6 +154,11 @@ class PromptDisplay {
         });
     }
 
+    /**
+     * Clear the display and wait for the device acknowledgement.
+     * @returns {Promise<Object>} Timing record with monotonic flushedAt/readyAt in milliseconds.
+     * Rejects on a command failure or a 3000 ms acknowledgement timeout.
+     */
     async clear() {
         if (this.device.isDisplayReady === false) await this._waitForDisplayReady();
         // clear is its own asynchronous display operation in the SDK, not a
@@ -151,6 +167,13 @@ class PromptDisplay {
         return this._waitForDisplayReady(() => this.device.clearDisplay(true));
     }
 
+    /**
+     * Draw the question and gesture hint, clear previous content, and await displayReady.
+     * Changes global palette slots; other renderers must invalidate their palette cache.
+     * @param {string} text Question that fits the device's display.
+     * @returns {Promise<void>} Rejects if layout does not fit, MTU is too small,
+     * a command fails, or an acknowledgement times out after 3000 ms.
+     */
     async show(text) {
         const timingEnabled = process.env.DISPLAY_TIMING === "1" || process.env.DEBUG === "1";
         const startedAt = timingEnabled ? performance.now() : 0;

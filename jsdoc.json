@@ -1,0 +1,44 @@
+{
+  "source": {
+    "include": [
+      "docs/api/types.js",
+      "utils/device-manager.js",
+      "utils/device-fleet.js",
+      "utils/device-session.js",
+      "utils/action-dispatcher.js",
+      "utils/transport.js",
+      "utils/mqtt-manager.js",
+      "utils/mqtt-subscriber.js",
+      "utils/zenoh-manager.js",
+      "utils/zenoh-subscriber.js",
+      "utils/config.js",
+      "utils/ini-config.js",
+      "utils/topics.js",
+      "utils/raw-media.js",
+      "camera/lib/camera-session.js",
+      "microphone/lib/microphone-session.js",
+      "microphone/lib/rtsp-publisher.js",
+      "sensors/lib/sensor-manager.js",
+      "display/lib/display-manager.js",
+      "display/lib/text-display.js",
+      "display/lib/prompt-display.js"
+    ]
+  },
+  "sourceType": "script",
+  "plugins": ["plugins/markdown"],
+  "markdown": { "parser": "marked", "idInHeadings": true },
+  "tags": { "allowUnknownTags": false },
+  "templates": {
+    "cleverLinks": true,
+    "monospaceLinks": true,
+    "default": {
+      "outputSourceFiles": true,
+      "useLongnameInNav": true,
+      "includeDate": false
+    }
+  },
+  "opts": {
+    "destination": "docs/api/html",
+    "encoding": "utf8"
+  }
+}

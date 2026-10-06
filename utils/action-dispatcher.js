@@ -6,7 +6,29 @@ const ACTION_TOPIC = topic("actions");
 const RESULT_TOPIC = topic("actions", "result");
 const MAX_IMAGE_BYTES = 1024 * 1024;
 
+/**
+ * Serializes display and haptic actions received from the selected transport.
+ * @class
+ * @extends EventEmitter
+ * @param {Object} device Connected SDK device.
+ * @param {Object} [options]
+ * @param {string} [options.transport] `mqtt`, `zenoh`, or `none`.
+ * @param {string} [options.actionTopic] Inbound action key.
+ * @param {string} [options.resultTopic] Outbound result key.
+ * @param {Publisher|null} [options.publisher] Shared publisher.
+ * @param {Subscriber|null} [options.subscriber] Shared subscriber.
+ */
 class ActionDispatcher extends EventEmitter {
+    /**
+     * Create a dispatcher for one connected SDK device.
+     * @param {Object} device Connected SDK device.
+     * @param {Object} [options]
+     * @param {string} [options.transport] `mqtt`, `zenoh`, or `none`.
+     * @param {string} [options.actionTopic] Inbound action key.
+     * @param {string} [options.resultTopic] Outbound result key.
+     * @param {Publisher|null} [options.publisher] Shared publisher to reuse.
+     * @param {Subscriber|null} [options.subscriber] Shared subscriber to reuse.
+     */
     constructor(device, options = {}) {
         super();
         if (!device) throw new Error("ActionDispatcher requires a connected device");
@@ -30,6 +52,13 @@ class ActionDispatcher extends EventEmitter {
         };
     }
 
+    /**
+     * Start the publisher and subscriber, then listen for action messages.
+     * Stops both endpoints on startup failure, including supplied endpoints.
+     * Register an error listener before starting this standalone receiver.
+     * @returns {Promise<void>}
+     * @throws {Error} If the selected transport cannot start.
+     */
     async start() {
         if (this._started) return;
         if (this.transport === "none" && (!this.publisher || !this.subscriber)) {
@@ -58,6 +87,12 @@ class ActionDispatcher extends EventEmitter {
         console.log(`[Actions] Listening on ${this.actionTopic} via ${this.transport}`);
     }
 
+    /**
+     * Stop inbound messages, drain queued actions, and stop transport endpoints.
+     * Supplied publisher/subscriber instances are stopped too. To share a publisher
+     * with a fleet or session, use dispatch() directly rather than starting this receiver.
+     * @returns {Promise<void>}
+     */
     async stop() {
         try {
             await this.subscriber?.stop();
@@ -74,6 +109,10 @@ class ActionDispatcher extends EventEmitter {
         }
     }
 
+    /**
+     * Return a snapshot of the target device identity.
+     * @returns {DeviceIdentity}
+     */
     get deviceInfo() {
         return {
             id: this.device.bluetoothId || this.device.id || null,
@@ -81,6 +120,12 @@ class ActionDispatcher extends EventEmitter {
         };
     }
 
+    /**
+     * Validate and dispatch one transport message.
+     * @private
+     * @param {{key:string,payload:*}} message
+     * @returns {Promise<void>}
+     */
     async _handleMessage({ key, payload } = {}) {
         if (key !== this.actionTopic) return;
         let command = payload;
@@ -106,11 +151,23 @@ class ActionDispatcher extends EventEmitter {
         }
     }
 
+    /**
+     * Compare a command target with this device identity.
+     * @private
+     * @param {string} deviceId
+     * @returns {boolean}
+     */
     _isTargetDevice(deviceId) {
         const normalize = (value) => String(value || "").toLowerCase().replaceAll(":", "");
         return normalize(deviceId) === normalize(this.deviceInfo.id);
     }
 
+    /**
+     * Publish a result envelope for an action message.
+     * @private
+     * @param {ActionResult} result
+     * @returns {Promise<void>}
+     */
     async _publishResult(result) {
         await this.publisher.publish(this.resultTopic, {
             ts: Date.now(),
@@ -119,12 +176,23 @@ class ActionDispatcher extends EventEmitter {
         });
     }
 
+    /**
+     * Ensure the display is connected and awake before rendering.
+     * @private
+     * @returns {Promise<void>}
+     * @throws {Error} If display capability is unavailable or the device is disconnected.
+     */
     async _readyDisplay() {
         if (!this.device.isDisplayAvailable) throw new Error("Display is unavailable on this device");
         if (this.device.isConnected === false) throw new Error("Device is disconnected");
         if (this.device.displayStatus === "asleep") await this.device.wakeDisplay();
     }
 
+    /**
+     * Lazily create the SDK prompt display helper.
+     * @private
+     * @returns {Object}
+     */
     _getPromptDisplay() {
         if (!this.promptDisplay) {
             const { PromptDisplay } = require("../display/lib/prompt-display");
@@ -133,6 +201,14 @@ class ActionDispatcher extends EventEmitter {
         return this.promptDisplay;
     }
 
+    /**
+     * Execute one validated display or haptic command.
+     * @param {ActionCommand} command
+     * @returns {Promise<void>} Rejects for invalid fields, missing capabilities,
+     * a disconnected device, or a failed SDK call. Does not serialize concurrent
+     * direct calls or publish an action result.
+     * @throws {Error} If the device is unavailable, input is invalid, or the action is unsupported.
+     */
     async dispatch(command) {
         if (this.device.isConnected === false) throw new Error("Device is disconnected");
         switch (command.action) {
@@ -213,5 +289,11 @@ class ActionDispatcher extends EventEmitter {
         }
     }
 }
+
+/**
+ * @event ActionDispatcher#error
+ * @description Emitted when transport setup or a queued inbound action fails.
+ * @property {Error} error The failure.
+ */
 
 module.exports = { ActionDispatcher, ACTION_TOPIC, RESULT_TOPIC };
