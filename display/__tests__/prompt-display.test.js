@@ -291,20 +291,46 @@ test("does not draw a prompt if clearing is never acknowledged", async () => {
     expect(jest.getTimerCount()).toBe(0);
 });
 
-test("standalone clear waits for readiness and does not issue a second buffer swap", async () => {
+test("standalone clear presents the empty buffer and awaits both acknowledgements", async () => {
     const fake = device();
+    let drawingBuffer = "Question?";
+    let visibleContent = "Question?";
     let sent;
     const clearSent = new Promise((resolve) => { sent = resolve; });
-    fake.clearDisplay.mockImplementation(async () => { fake.isDisplayReady = false; sent(); });
+    fake.clearDisplay.mockImplementation(async () => {
+        fake.isDisplayReady = false;
+        drawingBuffer = "";
+        sent();
+    });
+    fake.showDisplay.mockImplementation(async () => {
+        fake.isDisplayReady = false;
+        visibleContent = drawingBuffer;
+    });
     let settled = false;
     const clearing = new PromptDisplay(fake).clear().then(() => { settled = true; });
-    await clearSent;
-    expect(fake.clearDisplay).toHaveBeenCalledWith(true);
-    expect(settled).toBe(false);
-    fake.emitReady();
-    await clearing;
-    expect(fake.showDisplay).not.toHaveBeenCalled();
-    expect(fake.listeners.size).toBe(0);
+    try {
+        await clearSent;
+        expect(fake.clearDisplay).toHaveBeenCalledWith(true);
+        expect(visibleContent).toBe("Question?");
+        expect(fake.showDisplay).not.toHaveBeenCalled();
+        expect(settled).toBe(false);
+
+        fake.emitReady();
+        await jest.advanceTimersByTimeAsync(0);
+        expect(visibleContent).toBe("");
+        expect(fake.showDisplay).toHaveBeenCalledTimes(1);
+        expect(fake.showDisplay).toHaveBeenCalledWith(true);
+        expect(settled).toBe(false);
+        expect(fake.listeners.size).toBe(1);
+
+        fake.emitReady();
+        await clearing;
+        expect(settled).toBe(true);
+        expect(fake.listeners.size).toBe(0);
+        expect(jest.getTimerCount()).toBe(0);
+    } finally {
+        fake.emitReady();
+    }
 });
 
 test("drains a preceding displayReady before drawing and still requires the new acknowledgement", async () => {

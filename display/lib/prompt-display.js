@@ -154,17 +154,23 @@ class PromptDisplay {
         });
     }
 
+    /** @private */
+    async _clearBuffer() {
+        if (this.device.isDisplayReady === false) await this._waitForDisplayReady();
+        // Clearing the drawing buffer is asynchronous and must finish before
+        // new pixels are written. Its acknowledgement does not present the
+        // empty buffer; the visible display changes only after showDisplay.
+        return this._waitForDisplayReady(() => this.device.clearDisplay(true));
+    }
+
     /**
-     * Clear the display and wait for the device acknowledgement.
-     * @returns {Promise<Object>} Timing record with monotonic flushedAt/readyAt in milliseconds.
+     * Clear the drawing buffer, present it, and await both acknowledgements.
+     * @returns {Promise<Object>} Presentation timing with monotonic flushedAt/readyAt in milliseconds.
      * Rejects on a command failure or a 3000 ms acknowledgement timeout.
      */
     async clear() {
-        if (this.device.isDisplayReady === false) await this._waitForDisplayReady();
-        // clear is its own asynchronous display operation in the SDK, not a
-        // buffered drawing primitive. Frame must finish clearing/switching its
-        // buffers before we write new pixels. No extra show command is needed.
-        return this._waitForDisplayReady(() => this.device.clearDisplay(true));
+        await this._clearBuffer();
+        return this._waitForDisplayReady(() => this.device.showDisplay(true));
     }
 
     /**
@@ -222,7 +228,7 @@ class PromptDisplay {
         // MTU limit. Do not queue a clear alongside drawing or let its late
         // displayReady event acknowledge the final show prematurely.
         const clearStartedAt = timingEnabled ? performance.now() : 0;
-        await this.clear();
+        await this._clearBuffer();
         const drawStartedAt = timingEnabled ? performance.now() : 0;
 
         // A vector outline costs only a few commands; it does not increase
