@@ -33,6 +33,16 @@ const CHARACTERISTICS = new Set([
  */
 const normalizeId = (id) => String(id || "").toLowerCase().replaceAll(":", "");
 
+function validateTiming(timing) {
+    if (!timing || typeof timing !== "object" || Array.isArray(timing) ||
+        typeof timing.clock_domain !== "string" || timing.clock_domain.length > 160 ||
+        !/^android:[a-f0-9-]{36}:elapsed_realtime$/.test(timing.clock_domain) ||
+        ![timing.wall_time_ns, timing.mono_time_ns].every(value =>
+            typeof value === "string" && /^\d{1,24}$/.test(value))) {
+        throw new Error("Invalid Android timing metadata");
+    }
+}
+
 /**
  * Decode bounded canonical standard Base64 without accepting alternate encodings.
  * @memberof AndroidBleProtocol
@@ -66,8 +76,21 @@ function parseFrame(data, isBinary = false) {
     try { frame = JSON.parse(data.toString()); }
     catch { throw new Error("Invalid bridge JSON"); }
     if (!frame || typeof frame !== "object" || Array.isArray(frame)) throw new Error("Expected bridge object");
-    if (!["hello", "connected", "value", "writeResult", "disconnected", "error"].includes(frame.type)) {
+    if (!["hello", "connected", "value", "writeResult", "disconnected", "error", "clockSample"].includes(frame.type)) {
         throw new Error("Unknown bridge message type");
+    }
+    if (frame.timing !== undefined) validateTiming(frame.timing);
+    if (frame.type === "clockSample") {
+        if (typeof frame.probeId !== "string" || !/^[A-Za-z0-9-]{1,64}$/.test(frame.probeId)) {
+            throw new Error("Invalid clock probe ID");
+        }
+        validateTiming(frame.received);
+        validateTiming(frame.sent);
+        if (frame.received.clock_domain !== frame.sent.clock_domain ||
+            BigInt(frame.sent.mono_time_ns) < BigInt(frame.received.mono_time_ns)) {
+            throw new Error("Clock probe changed clock domain or ran backwards");
+        }
+        return frame;
     }
     if (frame.type === "hello") {
         if (frame.version !== VERSION) throw new Error("Unsupported Android bridge protocol version");

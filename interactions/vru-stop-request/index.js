@@ -6,23 +6,13 @@ const { NodDetector, GESTURE_SENSOR, GESTURE_WINDOW_MS } = require("./nod-detect
 const PROMPT_TOPIC = topic("vru", "prompt");
 const ANSWER_TOPIC = topic("vru", "answer");
 const normalizeId = (value) => String(value || "").toLowerCase().replaceAll(":", "");
-const LATENCY_TOPIC = "latency/events/v1";
-
-const latencyEvent = (stage, fields = {}) => ({
-    schema: 1,
-    source: "wearmux",
-    stage,
-    // Keep wall-clock values as decimal strings: JavaScript Numbers cannot
-    // represent nanoseconds since the Unix epoch exactly.
-    wall_time_ns: `${Date.now()}000000`,
-    mono_time_ns: process.hrtime.bigint().toString(),
-    ...fields,
-});
+const { createLatencyEmitter } = require("../../utils/latency-events");
 
 class VruStopRequestInteraction {
     constructor({ publisher, getSessions }) {
         this.publisher = publisher;
         this.getSessions = getSessions;
+        this.emitLatency = createLatencyEmitter(publisher);
         this.subscriber = createSubscriber({ topicFilter: PROMPT_TOPIC });
         const configuredTimeoutMs = Number(process.env.VRU_INTERACTION_TIMEOUT_MS);
         this.timeoutMs = Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
@@ -36,14 +26,13 @@ class VruStopRequestInteraction {
         };
     }
 
-    _emitLatency(stage, fields = {}) {
-        try {
-            const result = this.publisher.publish(LATENCY_TOPIC, latencyEvent(stage, fields));
-            Promise.resolve(result).catch((error) =>
-                console.warn("[VRU interaction] latency event unavailable:", error?.message || error));
-        } catch (error) {
-            console.warn("[VRU interaction] latency event unavailable:", error?.message || error);
-        }
+    _emitLatency(stage, fields = {}, active = this.active) {
+        this.emitLatency(stage, {
+            ...(active ? { prompt_id: active.promptId,
+                ...(active.requestActionId ? { request_action_id: active.requestActionId } : {}),
+                device_id: active.session.info.id } : {}),
+            ...fields,
+        });
     }
 
     async start() {
@@ -92,20 +81,25 @@ class VruStopRequestInteraction {
         this._emitLatency("prompt_received", {
             prompt_id: prompt.prompt_id,
             ...(requestActionId ? { request_action_id: requestActionId } : {}),
-        });
+        }, null);
         if (this.active) {
+            this._emitLatency("prompt_rejected", { prompt_id: prompt.prompt_id,
+                ...(requestActionId ? { request_action_id: requestActionId } : {}), reason: "busy" }, null);
             console.warn("[VRU interaction] busy; ignoring prompt " + prompt.prompt_id);
             return;
         }
 
         const session = this._chooseSession(prompt);
         if (!session) {
+            this._emitLatency("prompt_rejected", { prompt_id: prompt.prompt_id,
+                ...(requestActionId ? { request_action_id: requestActionId } : {}), reason: "no_unique_ready_device" }, null);
             console.warn("[VRU interaction] no unique ready display/acceleration device for prompt " + prompt.prompt_id);
             return;
         }
 
         const active = {
             promptId: prompt.prompt_id,
+            requestActionId,
             session,
             display: new MessageDisplay(session),
             detector: new NodDetector(session.sensors, { classifier: this.classifier }),
@@ -118,7 +112,7 @@ class VruStopRequestInteraction {
             ? Math.min(this.timeoutMs, Math.max(100, advertisedTimeoutMs - 500))
             : this.timeoutMs;
         active.timeout = setTimeout(() => {
-            this._complete(active, null).catch((error) =>
+            this._complete(active, null, { reason: "timeout" }).catch((error) =>
                 console.warn("[VRU interaction] timeout cleanup failed:", error?.message || error));
         }, promptTimeoutMs);
 
@@ -132,17 +126,20 @@ class VruStopRequestInteraction {
             this._emitLatency("display_ready", {
                 prompt_id: active.promptId,
                 ...(requestActionId ? { request_action_id: requestActionId } : {}),
+                completion_semantics: "firmware_render_ack", optical_completion: false,
             });
             active.detector.start((gesture, details) => {
                 this._complete(active, gesture, details).catch((error) =>
                     console.warn("[VRU interaction] response failed:", error?.message || error));
             }, (error) => {
                 console.warn("[VRU interaction] gesture inference failed:", error?.message || error);
-                this._complete(active, null).catch((cleanupError) =>
+                this._complete(active, null, { reason: "inference_failure", error: String(error?.message || error).slice(0, 512) }).catch((cleanupError) =>
                     console.warn("[VRU interaction] inference cleanup failed:", cleanupError?.message || cleanupError));
-            });
+            }, (stage, details) => this._emitLatency(stage, details, active));
+            this._emitLatency("gesture_collection_started", { window_ms: GESTURE_WINDOW_MS });
             console.log("[VRU interaction] prompt " + active.promptId + " shown on " + session.info.id + "; waiting for nod/shake");
         } catch (error) {
+            this._emitLatency("prompt_failed", { reason: "display_or_detector_failure", error: String(error?.message || error).slice(0, 512) }, active);
             clearTimeout(active.timeout);
             active.detector.stop();
             await this._finishDisplay(active);
@@ -164,7 +161,9 @@ class VruStopRequestInteraction {
                     prompt_id: active.promptId,
                     answer,
                     gesture,
+                    ...(details || {}),
                 });
+                this._emitLatency("answer_publish_started", { answer, gesture });
                 await this.publisher.publish(ANSWER_TOPIC, {
                     prompt_id: active.promptId,
                     answer,
@@ -179,8 +178,12 @@ class VruStopRequestInteraction {
                 const extra = details ? " (" + JSON.stringify(details) + ")" : "";
                 console.log("[VRU interaction] prompt " + active.promptId + ": " + gesture + " -> " + answer + extra);
             } else {
+                this._emitLatency(details?.reason === "timeout" ? "prompt_timeout" : "prompt_failed", details || { reason: "no_accepted_gesture" }, active);
                 console.log("[VRU interaction] prompt " + active.promptId + ": no accepted gesture; handler will apply its timeout policy");
             }
+        } catch (error) {
+            this._emitLatency("answer_publish_failed", { error: String(error?.message || error).slice(0, 512) }, active);
+            throw error;
         } finally {
             await this._finishDisplay(active);
             if (this.active === active) this.active = null;
@@ -188,8 +191,12 @@ class VruStopRequestInteraction {
     }
 
     async _finishDisplay(active) {
-        try { await active.display.clear(); }
-        catch (error) {
+        this._emitLatency("display_clear_started", {}, active);
+        try {
+            await active.display.clear();
+            this._emitLatency("display_cleared", { completion_semantics: "firmware_render_ack", optical_completion: false }, active);
+        } catch (error) {
+            this._emitLatency("display_clear_failed", { error: String(error?.message || error).slice(0, 512) }, active);
             console.warn("[VRU interaction] display cleanup " + active.promptId + ":", error?.message || error);
         }
     }
@@ -198,6 +205,7 @@ class VruStopRequestInteraction {
         if (this.active) {
             const active = this.active;
             active.finished = true;
+            this._emitLatency("prompt_cancelled", { reason: "shutdown" }, active);
             clearTimeout(active.timeout);
             active.detector.stop();
             await this._finishDisplay(active);
