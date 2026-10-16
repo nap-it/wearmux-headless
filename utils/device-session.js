@@ -31,6 +31,7 @@ class DeviceSession {
         this.device = device;
         this.publisher = publisher;
         this.vruInteractionEnabled = process.env.VRU_INTERACTION_ENABLED === "1";
+        this.promptSpritesEnabled = process.env.VRU_PROMPT_SPRITES === "1";
         this.cameraIndex = options.cameraIndex || 0;
         this.microphoneIndex = options.microphoneIndex || 0;
         /**
@@ -51,11 +52,17 @@ class DeviceSession {
         this.ready = false;
         this.started = false;
         this.resuming = null;
+        this.connectionGeneration = 0;
+        this.promptPreparation = null;
+        this.promptRequiresReconnect = false;
         this.onConnection = (event) => {
             if (event.message?.isConnected === true && this.running && this.started) {
                 this.resume().catch((error) => console.warn(`[Device][${this.info.id}] reconnect:`, error?.message || error));
             } else if (event.message?.isConnected === false) {
                 this.ready = false;
+                this.connectionGeneration++;
+                this.actions.resetPromptCache();
+                this.promptPreparation = null;
                 this.publishStatus("disconnected");
             }
         };
@@ -89,6 +96,10 @@ class DeviceSession {
      */
     async start() {
         if (this.running) return;
+        if (this.promptRequiresReconnect) {
+            throw this.promptPreparationError("Prompt graphics require a fresh SDK connection");
+        }
+        const generation = this.connectionGeneration;
         this.refreshCapabilities();
         this.running = true;
         this.device.addEventListener?.("isConnected", this.onConnection);
@@ -96,6 +107,7 @@ class DeviceSession {
         try {
             // Configure sensors before starting any requested media sessions.
             await this.startSensors();
+            await this.prepareInteractionPrompt();
             if (this.capabilities.camera && !this.vruInteractionEnabled) {
                 this.camera = new CameraSession(this.device, this.publisher, {
                     cameraIndex: this.cameraIndex, deviceInfo: this.info,
@@ -111,6 +123,9 @@ class DeviceSession {
                 catch (error) { console.warn(`[Device][${this.info.id}] microphone:`, error?.message || error); this.microphone = null; }
             }
             await this.publishStatus("connected");
+            if (!this.running || generation !== this.connectionGeneration) {
+                throw new Error("Device disconnected or session stopped during startup");
+            }
             this.started = true;
             this.ready = true;
         } catch (error) {
@@ -172,8 +187,68 @@ class DeviceSession {
     dispatchAction(command) {
         this.pendingAction = this.pendingAction
             .catch(() => {})
-            .then(() => this.actions.dispatch(command));
+            .then(() => {
+                if (this.promptRequiresReconnect) {
+                    throw this.promptPreparationError("Prompt graphics require a fresh SDK connection");
+                }
+                return this.actions.dispatch(command);
+            });
         return this.pendingAction;
+    }
+
+    /**
+     * Upload fixed prompt graphics before accepting an interaction. This shares
+     * the action queue so an upload cannot overlap a clear or a presentation.
+     * @private
+     * @returns {Promise<void>}
+     */
+    async prepareInteractionPrompt({ reset = false } = {}) {
+        if (!this.vruInteractionEnabled || !this.promptSpritesEnabled || !this.capabilities.display) return;
+        if (this.promptRequiresReconnect) {
+            throw this.promptPreparationError("Prompt graphics require a fresh SDK connection");
+        }
+        const generation = this.connectionGeneration;
+        this.promptPreparation = { ready: false, mode: "preparing" };
+        const preparing = this.pendingAction.catch(() => {}).then(async () => {
+            if (reset) this.actions.resetPromptCache();
+            let outcome;
+            try { outcome = await this.actions.preparePrompt(); }
+            catch (error) {
+                outcome = { ready: false, mode: "bitmap", reason: "preparation_failed",
+                    requiresReconnect: true, error: error?.message || String(error) };
+            }
+            // Apply this guard inside the queue, before a later display action
+            // can run, even when status publication is still pending.
+            if (outcome?.ready !== true || outcome.requiresReconnect) this.promptRequiresReconnect = true;
+            return outcome;
+        });
+        this.pendingAction = preparing;
+        await this.publishStatus("preparing");
+        const outcome = await preparing;
+        if (outcome?.requiresReconnect) this.promptRequiresReconnect = true;
+        if (generation !== this.connectionGeneration || !this.running) {
+            if (this.promptRequiresReconnect) {
+                this.promptPreparation = outcome;
+                throw this.promptPreparationError("Device disconnected or session stopped during prompt preparation");
+            }
+            throw new Error("Device disconnected or session stopped during prompt preparation");
+        }
+        this.promptPreparation = outcome;
+        console.log(`[Device][${this.info.id}] prompt preparation: ${JSON.stringify(outcome)}`);
+        if (outcome?.ready !== true || outcome.requiresReconnect) {
+            this.promptRequiresReconnect = true;
+            this.promptPreparation = { ...outcome, ready: false, requiresReconnect: true };
+            await this.publishStatus("preparation_failed");
+            throw this.promptPreparationError("Prompt graphics preparation failed; create a fresh SDK connection");
+        }
+    }
+
+    /** @private */
+    promptPreparationError(message) {
+        const error = new Error(message);
+        error.requiresReconnect = true;
+        error.promptPreparation = this.promptPreparation;
+        return error;
     }
 
     /**
@@ -186,12 +261,17 @@ class DeviceSession {
         this.resuming = (async () => {
             if (!this.running) return;
             this.ready = false;
+            if (this.promptRequiresReconnect) {
+                throw this.promptPreparationError("Prompt graphics require a fresh SDK connection");
+            }
+            const generation = this.connectionGeneration;
             this.refreshCapabilities();
             // Reapply device configuration after the SDK reconnects.
             if (this.sensors) {
                 try { await this.sensors.reconfigure(); }
                 catch (error) { console.warn(`[Device][${this.info.id}] sensor resume:`, error?.message || error); }
             }
+            await this.prepareInteractionPrompt({ reset: true });
             if (this.camera) {
                 try { await this.camera.resume(); }
                 catch (error) { console.warn(`[Device][${this.info.id}] camera resume:`, error?.message || error); }
@@ -202,7 +282,7 @@ class DeviceSession {
             }
             if (this.running) {
                 await this.publishStatus("connected");
-                this.ready = true;
+                if (this.running && generation === this.connectionGeneration) this.ready = true;
             }
         })().finally(() => { this.resuming = null; });
         return this.resuming;
@@ -218,6 +298,7 @@ class DeviceSession {
         try {
             await this.publisher.publish(topic("devices", "status"), {
                 ts: Date.now(), device: this.info, status, capabilities: this.capabilities,
+                ...(this.promptPreparation ? { promptPreparation: this.promptPreparation } : {}),
             });
         } catch (error) {
             console.warn(`[Device][${this.info.id}] status:`, error?.message || error);
@@ -234,6 +315,7 @@ class DeviceSession {
         this.running = false;
         this.ready = false;
         this.started = false;
+        this.actions.resetPromptCache();
         this.device.removeEventListener?.("isConnected", this.onConnection);
         // Stop feature handlers before disconnecting so no more data is sent for this device.
         await this.camera?.stop();

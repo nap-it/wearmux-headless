@@ -398,3 +398,214 @@ test("also bounds an unfinished flush and handles its late rejection", async () 
     expect(fake.listeners.size).toBe(0);
     expect(jest.getTimerCount()).toBe(0);
 });
+
+function spriteDevice() {
+    const fake = device(512);
+    fake.fileTypes = ["spriteSheet"];
+    fake.fileTransferStatus = "idle";
+    fake.maxFileLength = 65535;
+    fake.displaySpriteSheets = {};
+    fake.connectionManager = {};
+    for (const method of ["selectDisplaySpriteSheet", "drawDisplaySprite", "selectDisplaySpriteColors", "resetDisplaySpriteScale"]) {
+        fake[method] = jest.fn().mockResolvedValue(undefined);
+    }
+    fake.serializeDisplaySpriteSheet = jest.fn(() => new ArrayBuffer(4096));
+    fake.uploadDisplaySpriteSheet = jest.fn(async (sheet) => { fake.displaySpriteSheets[sheet.name] = sheet; });
+    return fake;
+}
+
+function simpleSpriteDisplay(fake, options = {}) {
+    const display = new PromptDisplay(fake, { spritesEnabled: true, ...options });
+    jest.spyOn(display, "_layout").mockResolvedValue({
+        blocks: [
+            { x: 4, y: 4, width: 1, height: 1, pixels: [1] },
+            { x: 4, y: 12, width: 1, height: 1, pixels: [1] },
+        ], frame: { x: 1, y: 1, width: 7, height: 7, lineWidth: 2 },
+    });
+    return display;
+}
+
+test("preloads exact text without presenting it; warm prompts reuse device graphics and retain the frame", async () => {
+    const fake = spriteDevice();
+    const display = simpleSpriteDisplay(fake);
+    const result = await display.preload();
+    expect(result).toEqual(expect.objectContaining({ ready: true, mode: "sprites", uploadBytes: 4096 }));
+    expect(fake.clearDisplay).not.toHaveBeenCalled();
+    expect(fake.showDisplay).not.toHaveBeenCalled();
+    const sheet = fake.uploadDisplaySpriteSheet.mock.calls[0][0];
+    expect(sheet.sprites.map(sprite => sprite.commands[1].bitmap.pixels)).toEqual([[1], [1]]);
+    for (const sprite of sheet.sprites) {
+        expect(sprite.commands[0]).toEqual({ type: "selectBitmapColors", bitmapColorPairs: [
+            { bitmapColorIndex: 0, colorIndex: 0 }, { bitmapColorIndex: 1, colorIndex: 1 },
+        ] });
+    }
+    await display.show("Should I stop?");
+    await display.clear();
+    await display.show("Should I stop?");
+    await expect(display.preload()).resolves.toEqual(expect.objectContaining({ mode: "sprites", cacheHit: true }));
+    expect(fake.uploadDisplaySpriteSheet).toHaveBeenCalledTimes(1);
+    expect(fake.drawDisplayBitmap).not.toHaveBeenCalled();
+    expect(fake.drawDisplaySprite.mock.calls).toEqual([
+        [4, 4, "0", false], [4, 12, "1", false], [4, 4, "0", false], [4, 12, "1", false],
+    ]);
+    expect(fake.drawDisplayRect).toHaveBeenCalledTimes(2);
+    expect(fake.setDisplayColor).toHaveBeenCalledWith(2, "#FFD05A", false);
+    expect(fake.selectDisplaySpriteColors).toHaveBeenCalledWith([
+        { spriteColorIndex: 0, colorIndex: 0 }, { spriteColorIndex: 1, colorIndex: 1 },
+    ], false);
+    expect(fake.resetDisplaySpriteScale).toHaveBeenCalledWith(false);
+    expect(jest.getTimerCount()).toBe(0);
+});
+
+test("does not advertise a sprite before SDK upload completion or draw while preloading", async () => {
+    const fake = spriteDevice();
+    let resolveUpload;
+    fake.uploadDisplaySpriteSheet.mockImplementation(sheet => new Promise(resolve => {
+        resolveUpload = () => { fake.displaySpriteSheets[sheet.name] = sheet; resolve(); };
+    }));
+    const display = simpleSpriteDisplay(fake);
+    let settled = false;
+    const preloading = display.preload().then(result => { settled = true; return result; });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    expect(display.spriteCache.size).toBe(0);
+    await expect(display.show("Should I stop?")).rejects.toThrow(/pending or unsafe/);
+    await expect(display.clear()).rejects.toThrow(/pending or unsafe/);
+    resolveUpload();
+    await expect(preloading).resolves.toEqual(expect.objectContaining({ ready: true, mode: "sprites" }));
+    expect(display.spriteCache.size).toBe(1);
+    expect(jest.getTimerCount()).toBe(0);
+});
+
+test.each(["disabled", "unsupported", "too-large"])("falls back without starting unsafe uploads when %s", async reason => {
+    const fake = spriteDevice();
+    if (reason === "unsupported") fake.fileTypes = [];
+    if (reason === "too-large") fake.maxFileLength = 100;
+    const display = simpleSpriteDisplay(fake, { spritesEnabled: reason !== "disabled" });
+    await expect(display.preload()).resolves.toEqual(expect.objectContaining({ ready: true, mode: "bitmap" }));
+    await display.show("Should I stop?");
+    expect(fake.uploadDisplaySpriteSheet).not.toHaveBeenCalled();
+    expect(fake.drawDisplayBitmap).toHaveBeenCalled();
+    expect(fake.drawDisplaySprite).not.toHaveBeenCalled();
+});
+
+test("does not silently upload custom questions on the prompt path and bounds preloaded layouts", async () => {
+    const fake = spriteDevice();
+    const display = simpleSpriteDisplay(fake);
+    await display.preload();
+    await display.show("Custom question?");
+    expect(fake.uploadDisplaySpriteSheet).toHaveBeenCalledTimes(1);
+    expect(fake.drawDisplayBitmap).toHaveBeenCalled();
+    expect(fake.drawDisplaySprite).not.toHaveBeenCalled();
+    await display.preload("Second preloaded question?");
+    await expect(display.preload("Third question?")).resolves.toEqual({ ready: true, mode: "bitmap", reason: "cache_full" });
+    expect(fake.uploadDisplaySpriteSheet).toHaveBeenCalledTimes(2);
+});
+
+test.each(["reject", "timeout", "missing-metadata"])("retires a failed SDK upload (%s), including late completion", async failure => {
+    const fake = spriteDevice();
+    let resolveUpload;
+    fake.uploadDisplaySpriteSheet.mockImplementation(sheet => {
+        if (failure === "reject") return Promise.reject(new Error("Transfer failed"));
+        if (failure === "missing-metadata") return Promise.resolve();
+        return new Promise(resolve => { resolveUpload = () => { fake.displaySpriteSheets[sheet.name] = sheet; resolve(); }; });
+    });
+    const display = simpleSpriteDisplay(fake, { preloadTimeoutMs: 100 });
+    const preloading = display.preload();
+    await jest.advanceTimersByTimeAsync(failure === "timeout" ? 100 : 0);
+    await expect(preloading).resolves.toEqual(expect.objectContaining({ ready: false, mode: "bitmap", requiresReconnect: true }));
+    await expect(display.show("Should I stop?")).rejects.toThrow(/recreate the device session/);
+    if (resolveUpload) { resolveUpload(); await jest.advanceTimersByTimeAsync(0); }
+    expect(display.spriteCache.size).toBe(0);
+    await expect(display.preload()).resolves.toEqual(expect.objectContaining({ ready: false, requiresReconnect: true }));
+    expect(fake.uploadDisplaySpriteSheet).toHaveBeenCalledTimes(1);
+    expect(fake.showDisplay).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+});
+
+test.each(["connection", "sdk-reset", "invalidate"])("does not reuse stale device sprite indices after %s", async reset => {
+    const fake = spriteDevice();
+    const display = simpleSpriteDisplay(fake);
+    await display.preload();
+    if (reset === "connection") fake.connectionManager = {};
+    if (reset === "sdk-reset") fake.displaySpriteSheets = {};
+    if (reset === "invalidate") display.invalidate();
+    await display.show("Should I stop?");
+    expect(fake.drawDisplaySprite).not.toHaveBeenCalled();
+    expect(fake.drawDisplayBitmap).toHaveBeenCalled();
+    expect(fake.uploadDisplaySpriteSheet).toHaveBeenCalledTimes(1);
+    expect(display.spriteCache.size).toBe(0);
+});
+
+test("invalidating an unfinished upload promptly ends preload and never accepts its late result", async () => {
+    const fake = spriteDevice();
+    let resolveUpload;
+    fake.uploadDisplaySpriteSheet.mockImplementation(sheet => new Promise(resolve => {
+        resolveUpload = () => { fake.displaySpriteSheets[sheet.name] = sheet; resolve(); };
+    }));
+    const display = simpleSpriteDisplay(fake);
+    const preloading = display.preload();
+    await jest.advanceTimersByTimeAsync(0);
+    display.invalidate();
+    await expect(preloading).resolves.toEqual(expect.objectContaining({ ready: false, reason: "invalidated", requiresReconnect: true }));
+    resolveUpload();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(display.spriteCache.size).toBe(0);
+    expect(jest.getTimerCount()).toBe(0);
+});
+
+test("warm sprites still wait for distinct clear and show acknowledgements", async () => {
+    const fake = spriteDevice();
+    const display = simpleSpriteDisplay(fake);
+    await display.preload();
+    fake.clearDisplay.mockImplementation(async () => { fake.isDisplayReady = false; });
+    fake.showDisplay.mockImplementation(async () => { fake.isDisplayReady = false; });
+    let settled = false;
+    const showing = display.show("Should I stop?").then(() => { settled = true; });
+    await jest.advanceTimersByTimeAsync(0);
+    expect(fake.drawDisplaySprite).not.toHaveBeenCalled();
+    expect(fake.showDisplay).not.toHaveBeenCalled();
+    fake.emitReady();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(fake.drawDisplaySprite).toHaveBeenCalledTimes(2);
+    expect(fake.showDisplay).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+    fake.emitReady();
+    await showing;
+    expect(settled).toBe(true);
+    expect(fake.listeners.size).toBe(0);
+    expect(jest.getTimerCount()).toBe(0);
+});
+
+test.each(["missing-length", "missing-status", "busy"])("does not start sprite upload with %s file metadata", async state => {
+    const fake = spriteDevice();
+    if (state === "missing-length") fake.maxFileLength = undefined;
+    if (state === "missing-status") fake.fileTransferStatus = undefined;
+    if (state === "busy") fake.fileTransferStatus = "sending";
+    const display = simpleSpriteDisplay(fake);
+    await expect(display.preload()).resolves.toEqual(expect.objectContaining({ ready: true, mode: "bitmap" }));
+    expect(fake.uploadDisplaySpriteSheet).not.toHaveBeenCalled();
+});
+
+test("reports the actual warmed sprite route without claiming bitmap transfer bytes", async () => {
+    const previousTiming = process.env.DISPLAY_TIMING;
+    const log = jest.spyOn(console, "log").mockImplementation(() => {});
+    process.env.DISPLAY_TIMING = "1";
+    try {
+        const fake = spriteDevice();
+        const display = simpleSpriteDisplay(fake);
+        await display.preload();
+        await display.show("Should I stop?");
+        expect(log).toHaveBeenLastCalledWith("[Prompt display timing]", expect.objectContaining({
+            mode: "sprites", spriteCacheHit: true, tileCount: 0, packedBitmapBytes: 0, bitmapCommandBytes: 0,
+        }));
+        await display.show("Uncached question?");
+        expect(log).toHaveBeenLastCalledWith("[Prompt display timing]", expect.objectContaining({
+            mode: "bitmap", spriteCacheHit: false,
+        }));
+    } finally {
+        log.mockRestore();
+        if (previousTiming === undefined) delete process.env.DISPLAY_TIMING;
+        else process.env.DISPLAY_TIMING = previousTiming;
+    }
+});

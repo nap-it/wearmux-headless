@@ -12,6 +12,8 @@ jest.mock("../../display/lib/prompt-display", () => ({
     PromptDisplay: jest.fn().mockImplementation(() => ({
         show: jest.fn().mockResolvedValue(undefined),
         clear: jest.fn().mockResolvedValue(undefined),
+        preload: jest.fn().mockResolvedValue({ ready: true, mode: "sprites" }),
+        invalidate: jest.fn(),
     })),
 }));
 const { PromptDisplay } = require("../../display/lib/prompt-display");
@@ -157,4 +159,30 @@ test("display.prompt uses a persistent renderer and invalidates image palette ca
     expect(invalidatePaletteCache).toHaveBeenCalledTimes(2);
     await expect(dispatcher.dispatch({ action: "display.prompt", text: "x".repeat(501) })).rejects.toThrow("1–500");
     expect(renderer.show).toHaveBeenCalledTimes(2);
+});
+
+test("prompt preparation uploads without presenting and returns the renderer outcome", async () => {
+    const device = fakeDevice();
+    const dispatcher = new ActionDispatcher(device);
+    const outcome = await dispatcher.preparePrompt();
+    const renderer = PromptDisplay.mock.results.at(-1).value;
+    expect(outcome).toEqual({ ready: true, mode: "sprites" });
+    expect(renderer.preload).toHaveBeenCalledWith("Should I stop?");
+    expect(renderer.show).not.toHaveBeenCalled();
+    expect(device.showDisplay).not.toHaveBeenCalled();
+    renderer.preload.mockResolvedValueOnce({ ready: false, mode: "bitmap", requiresReconnect: true });
+    await expect(dispatcher.preparePrompt()).resolves.toEqual({ ready: false, mode: "bitmap", requiresReconnect: true });
+});
+
+test("reset invalidates graphics and a new connection uses a new renderer", async () => {
+    const dispatcher = new ActionDispatcher(fakeDevice());
+    await dispatcher.preparePrompt();
+    const first = PromptDisplay.mock.results.at(-1).value;
+    dispatcher.resetPromptCache();
+    expect(first.invalidate).toHaveBeenCalledTimes(1);
+    await dispatcher.preparePrompt();
+    const second = PromptDisplay.mock.results.at(-1).value;
+    expect(second).not.toBe(first);
+    expect(second.preload).toHaveBeenCalledTimes(1);
+    expect(second.show).not.toHaveBeenCalled();
 });

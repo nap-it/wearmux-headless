@@ -1,4 +1,5 @@
 const sharp = require("sharp");
+const { randomUUID } = require("crypto");
 
 const GESTURE_HINT = "Nod yes · Shake no";
 const FRAME_COLOR = "#FFD05A";
@@ -15,11 +16,148 @@ const escapeMarkup = (text) => text.replace(/&/g, "&amp;")
  */
 class PromptDisplay {
     /** @param {Object} device Connected SDK device implementing display and event APIs. */
-    constructor(device) {
+    constructor(device, { spritesEnabled = process.env.VRU_PROMPT_SPRITES === "1", preloadTimeoutMs = 5000 } = {}) {
         this.device = device;
         // Cache host-side rasterization, not display contents (clear and other
         // actions can change the device between questions).
         this.cache = new Map();
+        this.spritesEnabled = spritesEnabled;
+        this.preloadTimeoutMs = preloadTimeoutMs;
+        this.spriteCache = new Map();
+        this.spriteNamespace = `wm_vru_${randomUUID().slice(0, 8)}`;
+        this.spriteGeneration = 0;
+        this.spriteConnection = device.connectionManager;
+        this.preloading = null;
+        this.unsafeUpload = false;
+        this.spritesInvalidated = false;
+    }
+
+    /**
+     * Drop device-resident references when the owning session ends. An unfinished
+     * SDK upload cannot be cancelled; its device/session must be replaced before
+     * drawing again. Late completion never repopulates this renderer's cache.
+     */
+    invalidate() {
+        this.spriteGeneration++;
+        this.spriteCache.clear();
+        this.spritesInvalidated = true;
+        if (this.preloading) this.preloading.cancel();
+    }
+
+    /** @private */
+    _spriteKey(text, width, height) { return JSON.stringify([text, width, height]); }
+
+    /** @private */
+    _spriteSupported() {
+        return this.spritesEnabled && !this.spritesInvalidated
+            && this.device.fileTypes?.includes("spriteSheet")
+            && ["uploadDisplaySpriteSheet", "selectDisplaySpriteSheet", "drawDisplaySprite",
+                "selectDisplaySpriteColors", "resetDisplaySpriteScale", "serializeDisplaySpriteSheet"]
+                .every((method) => typeof this.device[method] === "function");
+    }
+
+    /** @private */
+    _checkSpriteConnection() {
+        if (this.spriteConnection !== this.device.connectionManager) this.invalidate();
+    }
+
+    /**
+     * Upload text pixels before the session becomes ready; never called by show.
+     * At most two layouts are uploaded per renderer/session (no device eviction
+     * API exists). Missing support uses the existing bitmap renderer. A failed or
+     * timed-out upload returns ready:false/requiresReconnect:true because the SDK
+     * owns uncancellable internal transfer state. The caller must retire that
+     * device/session instead of advertising readiness or retrying its upload.
+     * @returns {Promise<Object>} Explicit mode, readiness and fallback reason.
+     */
+    async preload(text = "Should I stop?") {
+        this._checkSpriteConnection();
+        if (this.unsafeUpload) return { ready: false, mode: "bitmap", reason: "upload_unsafe", requiresReconnect: true };
+        if (!this.spritesEnabled) return { ready: true, mode: "bitmap", reason: "disabled" };
+        if (!this._spriteSupported()) return { ready: true, mode: "bitmap", reason: "unsupported" };
+        if (this.preloading) return this.preloading.promise;
+        if (!Number.isInteger(this.device.maxFileLength) || this.device.maxFileLength <= 0
+            || !this.device.fileTransferStatus) {
+            return { ready: true, mode: "bitmap", reason: "file_transfer_uninitialized" };
+        }
+        const width = this.device.displayInformation?.width || 640;
+        const height = this.device.displayInformation?.height || 400;
+        const key = this._spriteKey(text, width, height);
+        const existing = this.spriteCache.get(key);
+        if (existing && !this.device.displaySpriteSheets?.[existing.name]) {
+            this.invalidate();
+            return { ready: true, mode: "bitmap", reason: "sdk_reset" };
+        }
+        if (existing && this.device.displaySpriteSheets?.[existing.name]) {
+            return { ready: true, mode: "sprites", cacheHit: true, sheetName: existing.name };
+        }
+        if (this.spriteCache.size >= 2) return { ready: true, mode: "bitmap", reason: "cache_full" };
+        if (this.device.fileTransferStatus && this.device.fileTransferStatus !== "idle") {
+            return { ready: true, mode: "bitmap", reason: "file_transfer_busy" };
+        }
+
+        const generation = this.spriteGeneration;
+        let uploadStarted = false;
+        let settled = false;
+        let finish;
+        const promise = new Promise((resolve) => { finish = resolve; });
+        const complete = (result) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (this.preloading?.promise === promise) this.preloading = null;
+            finish(result);
+        };
+        const fail = (reason, error) => {
+            this.unsafeUpload ||= uploadStarted;
+            this.spritesInvalidated = true;
+            this.spriteGeneration++;
+            this.spriteCache.clear();
+            complete({ ready: !uploadStarted, mode: "bitmap", reason,
+                ...(uploadStarted ? { requiresReconnect: true } : {}),
+                ...(error ? { error: String(error?.message || error).slice(0, 256) } : {}) });
+        };
+        const timer = setTimeout(() => fail("upload_timeout"), this.preloadTimeoutMs);
+        this.preloading = { promise, cancel: () => fail("invalidated") };
+        // Handle both synchronous exceptions and late SDK rejection immediately.
+        Promise.resolve().then(async () => {
+            let layout = this.cache.get(key);
+            if (!layout) {
+                layout = await this._layout(text, width, height);
+                if (this.cache.size >= 8) this.cache.delete(this.cache.keys().next().value);
+                this.cache.set(key, layout);
+            }
+            if (settled || generation !== this.spriteGeneration) return;
+            this._checkSpriteConnection();
+            if (generation !== this.spriteGeneration) return;
+            const sheet = {
+                name: `${this.spriteNamespace}_${this.spriteCache.size}`,
+                sprites: layout.blocks.map((block, index) => ({
+                    name: String(index), width: block.width, height: block.height,
+                    commands: [{ type: "selectBitmapColors", bitmapColorPairs: [
+                        { bitmapColorIndex: 0, colorIndex: 0 }, { bitmapColorIndex: 1, colorIndex: 1 },
+                    ] }, { type: "drawBitmap", offsetX: 0, offsetY: 0, bitmap: {
+                        width: block.width, height: block.height, numberOfColors: 2, pixels: block.pixels,
+                    } }],
+                })),
+            };
+            const bytes = this.device.serializeDisplaySpriteSheet(sheet).byteLength;
+            if (this.device.maxFileLength > 0 && bytes > this.device.maxFileLength) {
+                complete({ ready: true, mode: "bitmap", reason: "sprite_file_too_large" });
+                return;
+            }
+            uploadStarted = true;
+            await this.device.uploadDisplaySpriteSheet(sheet);
+            if (settled || generation !== this.spriteGeneration) return;
+            this._checkSpriteConnection();
+            if (generation !== this.spriteGeneration) return;
+            if (!this.device.displaySpriteSheets?.[sheet.name]) {
+                throw new Error("Sprite upload completed without acknowledged SDK metadata");
+            }
+            this.spriteCache.set(key, { name: sheet.name, layout });
+            complete({ ready: true, mode: "sprites", cacheHit: false, sheetName: sheet.name, uploadBytes: bytes });
+        }).catch((error) => fail("upload_failed", error));
+        return promise;
     }
 
     /** @private */
@@ -169,6 +307,7 @@ class PromptDisplay {
      * Rejects on a command failure or a 3000 ms acknowledgement timeout.
      */
     async clear() {
+        if (this.preloading || this.unsafeUpload) throw new Error("Prompt sprite upload is pending or unsafe; recreate the device session before drawing");
         await this._clearBuffer();
         return this._waitForDisplayReady(() => this.device.showDisplay(true));
     }
@@ -181,11 +320,13 @@ class PromptDisplay {
      * a command fails, or an acknowledgement times out after 3000 ms.
      */
     async show(text) {
+        this._checkSpriteConnection();
+        if (this.preloading || this.unsafeUpload) throw new Error("Prompt sprite upload is pending or unsafe; recreate the device session before drawing");
         const timingEnabled = process.env.DISPLAY_TIMING === "1" || process.env.DEBUG === "1";
         const startedAt = timingEnabled ? performance.now() : 0;
         const width = this.device.displayInformation?.width || 640;
         const height = this.device.displayInformation?.height || 400;
-        const key = JSON.stringify([text, width, height]);
+        const key = this._spriteKey(text, width, height);
         let layout = this.cache.get(key);
         const cacheHit = Boolean(layout);
         if (!layout) {
@@ -194,6 +335,13 @@ class PromptDisplay {
             this.cache.set(key, layout);
         }
         const { blocks, frame } = layout;
+        let sprite = this.spritesEnabled && !this.spritesInvalidated ? this.spriteCache.get(key) : null;
+        if (sprite && !this.device.displaySpriteSheets?.[sprite.name]) {
+            // SDK reset/reconnect discarded loaded-sheet metadata. Never reuse
+            // its old numeric index, or upload again on the prompt path.
+            this.invalidate();
+            sprite = null;
+        }
 
         // The SDK reserves seven bytes of transport overhead, one command byte
         // and a 13-byte bitmap header. One-bit pixels pack eight per byte.
@@ -224,6 +372,12 @@ class PromptDisplay {
         await this.device.clearDisplayRotation(false);
         await this.device.clearDisplayCrop(false);
         await this.device.clearDisplayRotationCrop(false);
+        if (sprite) {
+            await this.device.resetDisplaySpriteScale(false);
+            await this.device.selectDisplaySpriteColors([
+                { spriteColorIndex: 0, colorIndex: 0 }, { spriteColorIndex: 1, colorIndex: 1 },
+            ], false);
+        }
         // `false` only batches transport: the SDK flushes automatically at its
         // MTU limit. Do not queue a clear alongside drawing or let its late
         // displayReady event acknowledge the final show prematurely.
@@ -246,7 +400,12 @@ class PromptDisplay {
         await this.device.setDisplayLineWidth(0, false);
         await this.device.selectDisplayLineColor(1, false);
 
-        for (const block of blocks) {
+        if (sprite) {
+            await this.device.selectDisplaySpriteSheet(sprite.name, false);
+            for (let index = 0; index < blocks.length; index++) {
+                await this.device.drawDisplaySprite(blocks[index].x, blocks[index].y, String(index), false);
+            }
+        } else for (const block of blocks) {
             const tileWidth = Math.min(block.width, maxPixels);
             const tileHeight = Math.max(1, Math.floor(maxPixels / tileWidth));
             for (let y = 0; y < block.height; y += tileHeight) {
@@ -272,6 +431,8 @@ class PromptDisplay {
         if (timingEnabled) {
             console.log("[Prompt display timing]", {
                 cache: cacheHit ? "hit" : "miss",
+                mode: sprite ? "sprites" : "bitmap",
+                spriteCacheHit: Boolean(sprite),
                 prepareMs: Number((preparedAt - startedAt).toFixed(2)),
                 previousReadyWaitMs: Number((setupStartedAt - preparedAt).toFixed(2)),
                 setupMs: Number((clearStartedAt - setupStartedAt).toFixed(2)),

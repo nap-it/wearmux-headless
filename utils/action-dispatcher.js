@@ -202,6 +202,23 @@ class ActionDispatcher extends EventEmitter {
     }
 
     /**
+     * Prepare the fixed interaction graphics without presenting a question.
+     * The owning session serializes this helper with dispatch() calls.
+     * @param {string} [text="Should I stop?"] Fixed question to cache on the device.
+     * @returns {Promise<Object>} Explicit sprite/bitmap readiness outcome.
+     */
+    async preparePrompt(text = "Should I stop?") {
+        await this._readyDisplay();
+        return this._getPromptDisplay().preload(text);
+    }
+
+    /** Drop graphics belonging to the previous physical connection. */
+    resetPromptCache() {
+        this.promptDisplay?.invalidate();
+        this.promptDisplay = null;
+    }
+
+    /**
      * Execute one validated display or haptic command.
      * @param {ActionCommand} command
      * @returns {Promise<void>} Rejects for invalid fields, missing capabilities,
