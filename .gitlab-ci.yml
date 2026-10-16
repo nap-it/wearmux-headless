@@ -11,15 +11,29 @@ stages:
 
 before_script:
   - |
+    IMAGE_PROFILE=native-ble
     # This branch runs beside Android, which owns the Bluetooth connection.
     if [ -z "$CI_COMMIT_TAG" ] && [ "$CI_COMMIT_BRANCH" = "feature-android-bluetooth" ]; then
       DOCKERFILE_NAME=Dockerfile.android
+      IMAGE_PROFILE=android-ble
     fi
     if [ -n "$CI_COMMIT_TAG" ] || [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
       DOCKER_TAG=latest
     else
       DOCKER_TAG="$CI_COMMIT_BRANCH"
     fi
+    export IMAGE_PROFILE
+
+test_ci_publication:
+  stage: build
+  image: code.nap.av.it.pt:5050/external-tools/misc-docker-images/docker
+  tags:
+    - amd64
+  script:
+    - sh tools/ci/test-publish-image.sh
+  rules:
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
+    - if: '$CI_COMMIT_BRANCH'
 
 build_amd64:
   stage: build
@@ -42,12 +56,14 @@ build_amd64:
         --provenance=false \
         --sbom=false \
         --load \
-        -t "$CI_REGISTRY_IMAGE:$DOCKER_TAG-amd64" \
+        --label "org.opencontainers.image.revision=$CI_COMMIT_SHA" \
+        --label "io.wearmux.profile=$IMAGE_PROFILE" \
+        -t "$CI_REGISTRY_IMAGE:ci-$CI_PIPELINE_ID-amd64" \
         -f "$DOCKERFILE_PATH/$DOCKERFILE_NAME" \
         "$DOCKERFILE_PATH"
     - |
       if [ -n "$CI_COMMIT_TAG" ] || [ "$CI_COMMIT_BRANCH" != "$CI_DEFAULT_BRANCH" ]; then
-        docker push "$CI_REGISTRY_IMAGE:$DOCKER_TAG-amd64"
+        docker push "$CI_REGISTRY_IMAGE:ci-$CI_PIPELINE_ID-amd64"
       fi
   rules:
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
@@ -74,12 +90,14 @@ build_arm64:
         --provenance=false \
         --sbom=false \
         --load \
-        -t "$CI_REGISTRY_IMAGE:$DOCKER_TAG-arm64" \
+        --label "org.opencontainers.image.revision=$CI_COMMIT_SHA" \
+        --label "io.wearmux.profile=$IMAGE_PROFILE" \
+        -t "$CI_REGISTRY_IMAGE:ci-$CI_PIPELINE_ID-arm64" \
         -f "$DOCKERFILE_PATH/$DOCKERFILE_NAME" \
         "$DOCKERFILE_PATH"
     - |
       if [ -n "$CI_COMMIT_TAG" ] || [ "$CI_COMMIT_BRANCH" != "$CI_DEFAULT_BRANCH" ]; then
-        docker push "$CI_REGISTRY_IMAGE:$DOCKER_TAG-arm64"
+        docker push "$CI_REGISTRY_IMAGE:ci-$CI_PIPELINE_ID-arm64"
       fi
   rules:
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest"'
@@ -165,20 +183,13 @@ manage_release:
 
 create_manifest:
   stage: manifest
+  resource_group: image-publication-$CI_COMMIT_REF_SLUG
   image: code.nap.av.it.pt:5050/external-tools/misc-docker-images/docker
   tags:
     - amd64
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - |
-      IMAGE_REF="$CI_REGISTRY_IMAGE:$DOCKER_TAG"
-      docker buildx imagetools create -t "$IMAGE_REF" \
-        "$CI_REGISTRY_IMAGE:$DOCKER_TAG-amd64" \
-        "$CI_REGISTRY_IMAGE:$DOCKER_TAG-arm64"
-      INSPECT_OUTPUT="$(docker buildx imagetools inspect "$IMAGE_REF")"
-      echo "$INSPECT_OUTPUT"
-      echo "$INSPECT_OUTPUT" | grep -q "linux/amd64" || { echo "Missing linux/amd64 in $IMAGE_REF"; exit 1; }
-      echo "$INSPECT_OUTPUT" | grep -q "linux/arm64" || { echo "Missing linux/arm64 in $IMAGE_REF"; exit 1; }
+    - PUBLISH_TAG="$DOCKER_TAG" sh tools/ci/publish-image.sh publish
   dependencies:
     - build_amd64
     - build_arm64
@@ -187,20 +198,13 @@ create_manifest:
 
 create_tagged_manifest:
   stage: manifest
+  resource_group: image-publication-$CI_COMMIT_REF_SLUG
   image: code.nap.av.it.pt:5050/external-tools/misc-docker-images/docker
   tags:
     - amd64
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
-    - |
-      IMAGE_REF="$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
-      docker buildx imagetools create -t "$IMAGE_REF" \
-        "$CI_REGISTRY_IMAGE:$DOCKER_TAG-amd64" \
-        "$CI_REGISTRY_IMAGE:$DOCKER_TAG-arm64"
-      INSPECT_OUTPUT="$(docker buildx imagetools inspect "$IMAGE_REF")"
-      echo "$INSPECT_OUTPUT"
-      echo "$INSPECT_OUTPUT" | grep -q "linux/amd64" || { echo "Missing linux/amd64 in $IMAGE_REF"; exit 1; }
-      echo "$INSPECT_OUTPUT" | grep -q "linux/arm64" || { echo "Missing linux/arm64 in $IMAGE_REF"; exit 1; }
+    - PUBLISH_TAG="$CI_COMMIT_TAG" sh tools/ci/publish-image.sh publish
   dependencies:
     - build_amd64
     - build_arm64
@@ -217,15 +221,8 @@ cleanup_arch_images:
     - curl --fail-with-body --location "https://github.com/regclient/regclient/releases/download/v0.6.1/regctl-linux-amd64" > /usr/bin/regctl
     - chmod 755 /usr/bin/regctl
     - regctl registry login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD"
-    - regctl tag rm "$CI_REGISTRY_IMAGE:$DOCKER_TAG-amd64"
-    - regctl tag rm "$CI_REGISTRY_IMAGE:$DOCKER_TAG-arm64"
-    - |
-      if printf '%s\n' "$CI_COMMIT_TAG" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+$' && [ "${CI_COMMIT_TAG##*.}" -gt 0 ]; then
-        PREVIOUS_PATCH_VERSION=$(expr "${CI_COMMIT_TAG##*.}" - 1 || true)
-        PREVIOUS_TAG="${CI_COMMIT_TAG%.*}.$PREVIOUS_PATCH_VERSION"
-        regctl tag rm "$CI_REGISTRY_IMAGE:$PREVIOUS_TAG" || true
-      fi
-  dependencies:
-    - create_manifest
+    - regctl tag rm "$CI_REGISTRY_IMAGE:ci-$CI_PIPELINE_ID-amd64"
+    - regctl tag rm "$CI_REGISTRY_IMAGE:ci-$CI_PIPELINE_ID-arm64"
+  dependencies: []
   rules:
     - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG != "latest" || ($CI_COMMIT_BRANCH && $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH)'
