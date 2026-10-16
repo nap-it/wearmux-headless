@@ -44,67 +44,6 @@ test('rejects malformed wire values and unsupported versions', () => {
     assert.throws(() => parseFrame(JSON.stringify({ type: 'connected', deviceId: id, mtu: 518 })), /MTU/);
 });
 
-const androidTime = ns => ({
-    clock_domain: 'android:00000000-0000-4000-8000-000000000000:elapsed_realtime',
-    mono_time_ns: String(ns), wall_time_ns: '1000000000000000000',
-});
-
-test('optional callback timing is validated without requiring it from legacy companions', () => {
-    const value = { type: 'value', deviceId: id, characteristic: 'rx', data: '' };
-    assert.equal(parseFrame(JSON.stringify(value)).timing, undefined);
-    assert.deepEqual(parseFrame(JSON.stringify({ ...value, timing: androidTime(123) })).timing, androidTime(123));
-    assert.throws(() => parseFrame(JSON.stringify({ ...value, timing: { ...androidTime(123), mono_time_ns: 123 } })), /timing/);
-    assert.throws(() => parseFrame(JSON.stringify({ type: 'clockSample', probeId: 'one',
-        received: androidTime(200), sent: androidTime(100) })), /backwards/);
-});
-
-test('negotiated authenticated clock probe records four boundaries without BLE connection', async t => {
-    const observed = [];
-    const { bridge, url, errors } = await setup(t, { evaluationDetail: true,
-        telemetry: (stage, fields, captured) => observed.push({ stage, fields, captured }) });
-    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
-    await once(ws, 'open');
-    const frames = [];
-    ws.on('message', raw => {
-        const frame = JSON.parse(raw);
-        frames.push(frame);
-        if (frame.type === 'clockProbe') send(ws, { type: 'clockSample', probeId: frame.probeId,
-            received: androidTime(100), sent: androidTime(200) });
-    });
-    send(ws, { type: 'hello', version: 1, timingVersion: 1, timing: androidTime(50) });
-    for (let n = 0; n < 100 && !observed.length; n++) await delay(5);
-    assert.deepEqual(frames[0], { type: 'hello', version: 1, evaluationTiming: true });
-    assert.equal(observed[0].stage, 'android_clock_sample');
-    const { headless_send, headless_receive, android_received, android_sent } = observed[0].fields;
-    assert.ok(BigInt(headless_receive.mono_time_ns) >= BigInt(headless_send.mono_time_ns));
-    assert.equal(android_received.mono_time_ns, '100');
-    assert.equal(android_sent.mono_time_ns, '200');
-    assert.deepEqual(observed[0].captured, headless_receive);
-    // A delayed duplicate is evaluation data, never a reason to tear down GATT.
-    send(ws, { type: 'clockSample', probeId: frames[1].probeId,
-        received: androidTime(100), sent: androidTime(200) });
-    await delay(5);
-    assert.equal(ws.readyState, WebSocket.OPEN);
-    assert.equal(bridge.peer.clockProbe, null);
-    assert.deepEqual(errors, []);
-});
-
-test('a telemetry observer failure cannot interrupt Android clock negotiation', async t => {
-    const { bridge, url, errors } = await setup(t, { telemetry: () => { throw new Error('offline'); } });
-    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
-    await once(ws, 'open');
-    ws.on('message', raw => {
-        const frame = JSON.parse(raw);
-        if (frame.type === 'clockProbe') send(ws, { type: 'clockSample', probeId: frame.probeId,
-            received: androidTime(100), sent: androidTime(200) });
-    });
-    send(ws, { type: 'hello', version: 1, timingVersion: 1 });
-    await delay(30);
-    assert.equal(ws.readyState, WebSocket.OPEN);
-    assert.equal(bridge.peer.clockProbe, null);
-    assert.deepEqual(errors, []);
-});
-
 test('serializes complete SDK messages to ATT MTU and waits for write acknowledgement', async () => {
     const writes = [], acks = [], errors = [];
     const connection = new AndroidBleConnection({ deviceId: id, mtu: 23, messageTypes: ['a'],

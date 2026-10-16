@@ -31,7 +31,6 @@ class DeviceSession {
         this.device = device;
         this.publisher = publisher;
         this.vruInteractionEnabled = process.env.VRU_INTERACTION_ENABLED === "1";
-        this.promptSpritesEnabled = process.env.VRU_PROMPT_SPRITES === "1";
         this.cameraIndex = options.cameraIndex || 0;
         this.microphoneIndex = options.microphoneIndex || 0;
         /**
@@ -203,7 +202,7 @@ class DeviceSession {
      * @returns {Promise<void>}
      */
     async prepareInteractionPrompt({ reset = false } = {}) {
-        if (!this.vruInteractionEnabled || !this.promptSpritesEnabled || !this.capabilities.display) return;
+        if (!this.vruInteractionEnabled || !this.capabilities.display) return;
         if (this.promptRequiresReconnect) {
             throw this.promptPreparationError("Prompt graphics require a fresh SDK connection");
         }

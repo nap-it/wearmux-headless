@@ -16,12 +16,11 @@ const escapeMarkup = (text) => text.replace(/&/g, "&amp;")
  */
 class PromptDisplay {
     /** @param {Object} device Connected SDK device implementing display and event APIs. */
-    constructor(device, { spritesEnabled = process.env.VRU_PROMPT_SPRITES === "1", preloadTimeoutMs = 5000 } = {}) {
+    constructor(device, { preloadTimeoutMs = 5000 } = {}) {
         this.device = device;
         // Cache host-side rasterization, not display contents (clear and other
         // actions can change the device between questions).
         this.cache = new Map();
-        this.spritesEnabled = spritesEnabled;
         this.preloadTimeoutMs = preloadTimeoutMs;
         this.spriteCache = new Map();
         this.spriteNamespace = `wm_vru_${randomUUID().slice(0, 8)}`;
@@ -49,7 +48,7 @@ class PromptDisplay {
 
     /** @private */
     _spriteSupported() {
-        return this.spritesEnabled && !this.spritesInvalidated
+        return !this.spritesInvalidated
             && this.device.fileTypes?.includes("spriteSheet")
             && ["uploadDisplaySpriteSheet", "selectDisplaySpriteSheet", "drawDisplaySprite",
                 "selectDisplaySpriteColors", "resetDisplaySpriteScale", "serializeDisplaySpriteSheet"]
@@ -73,7 +72,6 @@ class PromptDisplay {
     async preload(text = "Should I stop?") {
         this._checkSpriteConnection();
         if (this.unsafeUpload) return { ready: false, mode: "bitmap", reason: "upload_unsafe", requiresReconnect: true };
-        if (!this.spritesEnabled) return { ready: true, mode: "bitmap", reason: "disabled" };
         if (!this._spriteSupported()) return { ready: true, mode: "bitmap", reason: "unsupported" };
         if (this.preloading) return this.preloading.promise;
         if (!Number.isInteger(this.device.maxFileLength) || this.device.maxFileLength <= 0
@@ -255,8 +253,6 @@ class PromptDisplay {
             let settled = false;
             let acknowledged = false;
             let flushed = !send;
-            let flushedAt = performance.now();
-            let readyAt;
             let listenerAdded = false;
             const finish = (error) => {
                 if (settled || (!error && (!acknowledged || !flushed))) return;
@@ -264,11 +260,10 @@ class PromptDisplay {
                 clearTimeout(timeout);
                 if (listenerAdded) this.device.removeEventListener("displayReady", onReady);
                 if (error) reject(error);
-                else resolve({ flushedAt, readyAt });
+                else resolve();
             };
             const onReady = () => {
                 acknowledged = true;
-                readyAt = performance.now();
                 finish();
             };
             const timeout = setTimeout(() => finish(new Error("Timed out waiting for displayReady after 3000 ms")), 3000);
@@ -280,7 +275,6 @@ class PromptDisplay {
                     // synchronous throw or a send that rejects after timeout.
                     Promise.resolve().then(send).then(() => {
                         flushed = true;
-                        flushedAt = performance.now();
                         finish();
                     }, finish);
                 } else if (this.device.isDisplayReady !== false) {
@@ -303,7 +297,7 @@ class PromptDisplay {
 
     /**
      * Clear the drawing buffer, present it, and await both acknowledgements.
-     * @returns {Promise<Object>} Presentation timing with monotonic flushedAt/readyAt in milliseconds.
+     * @returns {Promise<void>} Resolves after the empty buffer is presented and acknowledged.
      * Rejects on a command failure or a 3000 ms acknowledgement timeout.
      */
     async clear() {
@@ -322,20 +316,17 @@ class PromptDisplay {
     async show(text) {
         this._checkSpriteConnection();
         if (this.preloading || this.unsafeUpload) throw new Error("Prompt sprite upload is pending or unsafe; recreate the device session before drawing");
-        const timingEnabled = process.env.DISPLAY_TIMING === "1" || process.env.DEBUG === "1";
-        const startedAt = timingEnabled ? performance.now() : 0;
         const width = this.device.displayInformation?.width || 640;
         const height = this.device.displayInformation?.height || 400;
         const key = this._spriteKey(text, width, height);
         let layout = this.cache.get(key);
-        const cacheHit = Boolean(layout);
         if (!layout) {
             layout = await this._layout(text, width, height);
             if (this.cache.size >= 8) this.cache.delete(this.cache.keys().next().value);
             this.cache.set(key, layout);
         }
         const { blocks, frame } = layout;
-        let sprite = this.spritesEnabled && !this.spritesInvalidated ? this.spriteCache.get(key) : null;
+        let sprite = !this.spritesInvalidated ? this.spriteCache.get(key) : null;
         if (sprite && !this.device.displaySpriteSheets?.[sprite.name]) {
             // SDK reset/reconnect discarded loaded-sheet metadata. Never reuse
             // its old numeric index, or upload again on the prompt path.
@@ -348,13 +339,9 @@ class PromptDisplay {
         const mtu = Number(this.device.mtu) || 23;
         const maxPixels = Math.floor(mtu - 21) * 8;
         if (maxPixels < 8) throw new Error("Display MTU is too small for bitmap commands");
-        const preparedAt = timingEnabled ? performance.now() : 0;
         // A preceding clear/show action can finish its SDK flush before the
         // device acknowledges it. Drain that event before drawing this prompt.
         if (this.device.isDisplayReady === false) await this._waitForDisplayReady();
-        const setupStartedAt = timingEnabled ? performance.now() : 0;
-        let tileCount = 0;
-        let packedBitmapBytes = 0;
 
         await this.device.setDisplayColor(0, "#000000", false);
         await this.device.setDisplayColor(1, "#FFFFFF", false);
@@ -381,9 +368,7 @@ class PromptDisplay {
         // `false` only batches transport: the SDK flushes automatically at its
         // MTU limit. Do not queue a clear alongside drawing or let its late
         // displayReady event acknowledge the final show prematurely.
-        const clearStartedAt = timingEnabled ? performance.now() : 0;
         await this._clearBuffer();
-        const drawStartedAt = timingEnabled ? performance.now() : 0;
 
         // A vector outline costs only a few commands; it does not increase
         // the one-bit text rasters or require a full-screen color bitmap.
@@ -420,30 +405,12 @@ class PromptDisplay {
                     await this.device.drawDisplayBitmap(block.x + x, block.y + y, {
                         width: w, height: h, numberOfColors: 2, pixels,
                     }, false);
-                    tileCount++;
-                    packedBitmapBytes += Math.ceil(pixels.length / 8);
                 }
             }
         }
         // showDisplay resolves after sending. The separate displayReady event
         // gates the interaction's gesture monitoring until drawing is acknowledged.
-        const { flushedAt, readyAt } = await this._waitForDisplayReady(() => this.device.showDisplay(true));
-        if (timingEnabled) {
-            console.log("[Prompt display timing]", {
-                cache: cacheHit ? "hit" : "miss",
-                mode: sprite ? "sprites" : "bitmap",
-                spriteCacheHit: Boolean(sprite),
-                prepareMs: Number((preparedAt - startedAt).toFixed(2)),
-                previousReadyWaitMs: Number((setupStartedAt - preparedAt).toFixed(2)),
-                setupMs: Number((clearStartedAt - setupStartedAt).toFixed(2)),
-                clearAndReadyMs: Number((drawStartedAt - clearStartedAt).toFixed(2)),
-                drawAndFlushMs: Number((flushedAt - drawStartedAt).toFixed(2)),
-                readyWaitMs: Number(Math.max(0, readyAt - flushedAt).toFixed(2)),
-                tileCount,
-                packedBitmapBytes,
-                bitmapCommandBytes: packedBitmapBytes + tileCount * 14,
-            });
-        }
+        await this._waitForDisplayReady(() => this.device.showDisplay(true));
     }
 }
 

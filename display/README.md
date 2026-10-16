@@ -144,30 +144,13 @@ buffer, waits for its acknowledgement, presents that empty buffer, and awaits
 the separate display update acknowledgement.
 Packed pixel data depends on the question, font availability, and display size.
 
-`VRU_PROMPT_SPRITES=1` optionally preloads the fixed question and hint into the
-device before the VRU session becomes ready. `PromptDisplay.preload()` waits for
-the SDK's completed sprite upload; a warmed prompt then sends sprite references
-with the same text layout, amber frame, and separate clear/show acknowledgements.
-No graphics are uploaded by `show()`. Unsupported devices and uncached custom
-questions keep the bitmap path. The cache holds at most two layouts per session;
-disconnect/reset invalidates its references. A failed or timed-out upload returns
-`ready:false, requiresReconnect:true`, and that device/session must be recreated
-because the SDK's pending upload cannot safely be cancelled. Startup logs report
-the selected mode; `DISPLAY_TIMING=1` also reports `mode` and `spriteCacheHit` for
-each displayed question. Device upload support and visible rendering must be
-verified before treating this optional mode as a latency improvement.
-
-For the Android Compose deployment, set `VRU_PROMPT_SPRITES=1` in the environment
-file passed to Compose and recreate the Headless service. The updated
-`docker-compose.android.yml` passes this setting into the container; an older
-host Compose file also needs the `VRU_PROMPT_SPRITES` environment entry. Updating
-only the image does not change an existing container's environment. Set
-`DISPLAY_TIMING=1` in the same file for comparison logs. Returning
-`VRU_PROMPT_SPRITES=0` selects bitmap rendering on the next service recreation.
-
-Set `DISPLAY_TIMING=1` to log cache hits, preparation time, palette/setup time,
-`clearAndReadyMs`, drawing/SDK flush time, previous/final acknowledgement waits, tile count, packed pixel
-bytes, and bitmap command bytes. Command bytes
-include bitmap headers but exclude palette/setup commands and transport
-overhead. The timing measures host processing, SDK calls, and receipt of the
-device acknowledgement; it does not measure the physical display optically.
+VRU display sessions preload the fixed question and hint into compatible devices
+before accepting an interaction. `PromptDisplay.preload()` waits for the SDK's
+completed sprite upload; a warmed prompt then sends sprite references with the
+same text layout, amber frame, and separate clear/show acknowledgements. No
+runtime switch is needed, and `show()` never uploads graphics. Unsupported
+devices and uncached custom questions keep the bitmap path. The cache holds at
+most two layouts per session; disconnect/reset invalidates its references.
+A failed or timed-out upload returns `ready:false, requiresReconnect:true`, and
+that device/session must be recreated because the SDK's pending upload cannot
+safely be cancelled. Startup status reports the selected sprite or bitmap mode.

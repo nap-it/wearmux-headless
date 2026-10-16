@@ -65,9 +65,8 @@ test("ordinary sessions still honor their sensor selection and start media", asy
     expect(MicrophoneSession).toHaveBeenCalledTimes(1);
 });
 
-test("opt-in interaction waits for sprite preparation after sensors before becoming ready", async () => {
+test("interaction prepares supported graphics by default after sensors before becoming ready", async () => {
     process.env.VRU_INTERACTION_ENABLED = "1";
-    process.env.VRU_PROMPT_SPRITES = "1";
     const device = makeSession();
     let finishPreparation;
     jest.spyOn(session.actions, "preparePrompt").mockImplementation(() => {
@@ -89,10 +88,9 @@ test("opt-in interaction waits for sprite preparation after sensors before becom
 });
 
 test.each([
-    ["0", "1", true], ["1", "0", true], ["1", "1", false],
-])("preparation skips ordinary, disabled, or display-less sessions (%s, %s, %s)", async (interaction, sprites, display) => {
+    ["0", true], ["1", false],
+])("preparation skips ordinary or display-less sessions (%s, %s)", async (interaction, display) => {
     process.env.VRU_INTERACTION_ENABLED = interaction;
-    process.env.VRU_PROMPT_SPRITES = sprites;
     makeSession({ availableSensorTypes: [], isDisplayAvailable: display });
     jest.spyOn(session.actions, "preparePrompt");
     await session.start();
@@ -103,7 +101,6 @@ test.each([
 
 test("unsupported sprites are explicitly ready through bitmap fallback", async () => {
     process.env.VRU_INTERACTION_ENABLED = "1";
-    process.env.VRU_PROMPT_SPRITES = "1";
     makeSession({ availableSensorTypes: [] });
     jest.spyOn(session.actions, "preparePrompt").mockResolvedValue({ ready: true, mode: "bitmap", reason: "unsupported" });
     await session.start();
@@ -113,7 +110,6 @@ test("unsupported sprites are explicitly ready through bitmap fallback", async (
 
 test("failed sprite upload keeps the session unavailable and requires a fresh SDK connection", async () => {
     process.env.VRU_INTERACTION_ENABLED = "1";
-    process.env.VRU_PROMPT_SPRITES = "1";
     makeSession({ availableSensorTypes: [] });
     jest.spyOn(session.actions, "preparePrompt").mockResolvedValue({ ready: false, mode: "bitmap",
         reason: "upload_timeout", requiresReconnect: true });
@@ -133,7 +129,6 @@ test("failed sprite upload keeps the session unavailable and requires a fresh SD
 
 test("a clean reconnect resets the old graphics and prewarms again before readiness", async () => {
     process.env.VRU_INTERACTION_ENABLED = "1";
-    process.env.VRU_PROMPT_SPRITES = "1";
     const device = makeSession({ availableSensorTypes: [] });
     jest.spyOn(session.actions, "preparePrompt").mockResolvedValue({ ready: true, mode: "sprites" });
     const reset = jest.spyOn(session.actions, "resetPromptCache");
@@ -155,7 +150,6 @@ test("a clean reconnect resets the old graphics and prewarms again before readin
 
 test("preparation and display commands execute in submission order on the same queue", async () => {
     process.env.VRU_INTERACTION_ENABLED = "1";
-    process.env.VRU_PROMPT_SPRITES = "1";
     makeSession({ availableSensorTypes: [] });
     session.refreshCapabilities();
     session.running = true;
@@ -180,7 +174,6 @@ test("preparation and display commands execute in submission order on the same q
 
 test("a display queued during a failed preload cannot use the tainted SDK state", async () => {
     process.env.VRU_INTERACTION_ENABLED = "1";
-    process.env.VRU_PROMPT_SPRITES = "1";
     makeSession({ availableSensorTypes: [] });
     session.refreshCapabilities();
     session.running = true;
@@ -200,7 +193,6 @@ test("a display queued during a failed preload cannot use the tainted SDK state"
 
 test("disconnect invalidates an in-flight preload without advertising readiness", async () => {
     process.env.VRU_INTERACTION_ENABLED = "1";
-    process.env.VRU_PROMPT_SPRITES = "1";
     const device = makeSession({ availableSensorTypes: [] });
     let finishPreparation;
     jest.spyOn(session.actions, "preparePrompt").mockImplementation(() => new Promise((resolve) => { finishPreparation = resolve; }));

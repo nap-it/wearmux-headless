@@ -195,37 +195,6 @@ test("fails explicitly instead of drawing a clipped question on a tiny display",
     expect(fake.clearDisplay).not.toHaveBeenCalled();
 });
 
-test("reports opt-in host timing, cache hits, and bytes actually passed to the SDK", async () => {
-    const previousTiming = process.env.DISPLAY_TIMING;
-    const log = jest.spyOn(console, "log").mockImplementation(() => {});
-    process.env.DISPLAY_TIMING = "1";
-    try {
-        const fake = device();
-        const display = new PromptDisplay(fake);
-        await display.show("Should I stop?");
-        const tileCount = fake.drawDisplayBitmap.mock.calls.length;
-        const packedBitmapBytes = fake.drawDisplayBitmap.mock.calls.reduce(
-            (total, [, , bitmap]) => total + Math.ceil(bitmap.pixels.length / 8), 0);
-        expect(log).toHaveBeenLastCalledWith("[Prompt display timing]", expect.objectContaining({
-            cache: "miss",
-            prepareMs: expect.any(Number),
-            previousReadyWaitMs: expect.any(Number),
-            clearAndReadyMs: expect.any(Number),
-            drawAndFlushMs: expect.any(Number),
-            readyWaitMs: expect.any(Number),
-            tileCount,
-            packedBitmapBytes,
-            bitmapCommandBytes: packedBitmapBytes + tileCount * 14,
-        }));
-        await display.show("Should I stop?");
-        expect(log).toHaveBeenLastCalledWith("[Prompt display timing]", expect.objectContaining({ cache: "hit" }));
-    } finally {
-        log.mockRestore();
-        if (previousTiming === undefined) delete process.env.DISPLAY_TIMING;
-        else process.env.DISPLAY_TIMING = previousTiming;
-    }
-});
-
 test("keeps show pending until displayReady after the SDK flush, then removes the listener", async () => {
     const fake = device();
     let sent;
@@ -415,7 +384,7 @@ function spriteDevice() {
 }
 
 function simpleSpriteDisplay(fake, options = {}) {
-    const display = new PromptDisplay(fake, { spritesEnabled: true, ...options });
+    const display = new PromptDisplay(fake, options);
     jest.spyOn(display, "_layout").mockResolvedValue({
         blocks: [
             { x: 4, y: 4, width: 1, height: 1, pixels: [1] },
@@ -477,11 +446,11 @@ test("does not advertise a sprite before SDK upload completion or draw while pre
     expect(jest.getTimerCount()).toBe(0);
 });
 
-test.each(["disabled", "unsupported", "too-large"])("falls back without starting unsafe uploads when %s", async reason => {
+test.each(["unsupported", "too-large"])("falls back without starting unsafe uploads when %s", async reason => {
     const fake = spriteDevice();
     if (reason === "unsupported") fake.fileTypes = [];
     if (reason === "too-large") fake.maxFileLength = 100;
-    const display = simpleSpriteDisplay(fake, { spritesEnabled: reason !== "disabled" });
+    const display = simpleSpriteDisplay(fake);
     await expect(display.preload()).resolves.toEqual(expect.objectContaining({ ready: true, mode: "bitmap" }));
     await display.show("Should I stop?");
     expect(fake.uploadDisplaySpriteSheet).not.toHaveBeenCalled();
@@ -585,27 +554,4 @@ test.each(["missing-length", "missing-status", "busy"])("does not start sprite u
     const display = simpleSpriteDisplay(fake);
     await expect(display.preload()).resolves.toEqual(expect.objectContaining({ ready: true, mode: "bitmap" }));
     expect(fake.uploadDisplaySpriteSheet).not.toHaveBeenCalled();
-});
-
-test("reports the actual warmed sprite route without claiming bitmap transfer bytes", async () => {
-    const previousTiming = process.env.DISPLAY_TIMING;
-    const log = jest.spyOn(console, "log").mockImplementation(() => {});
-    process.env.DISPLAY_TIMING = "1";
-    try {
-        const fake = spriteDevice();
-        const display = simpleSpriteDisplay(fake);
-        await display.preload();
-        await display.show("Should I stop?");
-        expect(log).toHaveBeenLastCalledWith("[Prompt display timing]", expect.objectContaining({
-            mode: "sprites", spriteCacheHit: true, tileCount: 0, packedBitmapBytes: 0, bitmapCommandBytes: 0,
-        }));
-        await display.show("Uncached question?");
-        expect(log).toHaveBeenLastCalledWith("[Prompt display timing]", expect.objectContaining({
-            mode: "bitmap", spriteCacheHit: false,
-        }));
-    } finally {
-        log.mockRestore();
-        if (previousTiming === undefined) delete process.env.DISPLAY_TIMING;
-        else process.env.DISPLAY_TIMING = previousTiming;
-    }
 });

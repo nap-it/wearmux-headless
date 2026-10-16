@@ -5,8 +5,6 @@ const { isIP } = require("net");
 const { WebSocketServer, WebSocket } = require("ws");
 const { AndroidBleConnection } = require("./connection");
 const { VERSION, PATH, MAX_PAYLOAD, normalizeId, parseFrame } = require("./protocol");
-const { captureTime } = require("../latency-events");
-const { randomUUID } = require("node:crypto");
 
 function authorized(header, token) {
     const supplied = Buffer.from(typeof header === "string" ? header : "");
@@ -42,8 +40,7 @@ class AndroidBleBridge extends EventEmitter {
         token = process.env.ANDROID_BLE_BRIDGE_TOKEN,
         authMode = process.env.ANDROID_BLE_BRIDGE_AUTH_MODE || "token",
         localPeers = process.env.ANDROID_BLE_BRIDGE_LOCAL_PEERS || "127.0.0.1,::1",
-        writeTimeoutMs = 10000, helloTimeoutMs = 10000, readyTimeoutMs = 30000, heartbeatMs = 15000,
-        telemetry, evaluationDetail = process.env.HITL_EVAL_DETAIL === "1" } = {}) {
+        writeTimeoutMs = 10000, helloTimeoutMs = 10000, readyTimeoutMs = 30000, heartbeatMs = 15000 } = {}) {
         super();
         if (!["token", "local"].includes(authMode)) throw new Error("Invalid Android bridge authentication mode");
         if (authMode === "token" && (typeof token !== "string" || token.length < 16 || token.length > 256 || /\s/.test(token))) {
@@ -65,8 +62,6 @@ class AndroidBleBridge extends EventEmitter {
         this.helloTimeoutMs = helloTimeoutMs;
         this.readyTimeoutMs = readyTimeoutMs;
         this.heartbeatMs = heartbeatMs;
-        this.telemetry = telemetry;
-        this.evaluationDetail = evaluationDetail;
         this.devices = new Map();
         this.pending = new Map();
         this.nextRequestId = 0;
@@ -137,8 +132,7 @@ class AndroidBleBridge extends EventEmitter {
         socket.on("error", (error) => this.emit("error", error));
         socket.on("close", () => this.drop(peer));
         socket.on("message", (data, binary) => {
-            const received = captureTime();
-            try { this.receive(peer, parseFrame(data, binary), received); }
+            try { this.receive(peer, parseFrame(data, binary)); }
             catch (error) {
                 this.emit("error", error);
                 // Stop controls immediately; don't keep a session ready during the close handshake.
@@ -156,37 +150,17 @@ class AndroidBleBridge extends EventEmitter {
     }
 
     /** @private */
-    receive(peer, frame, received = captureTime()) {
+    receive(peer, frame) {
         if (peer !== this.peer) return;
         if (!peer.hello) {
             if (frame.type !== "hello") throw new Error("Protocol hello must be the first bridge frame");
             peer.hello = true;
             clearTimeout(peer.timer);
-            this.send(peer, { type: "hello", version: VERSION,
-                ...(this.evaluationDetail ? { evaluationTiming: true } : {}) });
-            peer.timing = frame.timingVersion === 1;
-            if (peer.timing) {
-                this.probeClock(peer);
-                if (this.evaluationDetail) {
-                    peer.clockTimer = setInterval(() => this.probeClock(peer), 30000);
-                    peer.clockTimer.unref();
-                }
-            }
+            this.send(peer, { type: "hello", version: VERSION });
             this.emit("companionConnected");
             return;
         }
         if (frame.type === "hello") throw new Error("Duplicate bridge hello");
-        if (frame.type === "clockSample") {
-            // Late evaluation metadata cannot invalidate an otherwise healthy BLE link.
-            if (!peer.clockProbe || peer.clockProbe.id !== frame.probeId) return;
-            clearTimeout(peer.clockProbe.timer);
-            const sent = peer.clockProbe.sent;
-            peer.clockProbe = null;
-            this.observe("android_clock_sample", { probe_id: frame.probeId,
-                headless_send: sent, android_received: frame.received,
-                android_sent: frame.sent, headless_receive: received }, received);
-            return;
-        }
         if (frame.type === "error") { this.emit("status", frame.error); return; }
         if (frame.type === "connected") {
             if (this.active) throw new Error("Disconnect the previous peripheral before connecting another");
@@ -232,10 +206,6 @@ class AndroidBleBridge extends EventEmitter {
         if (frame.type === "disconnected" && !entry && this.devices.has(normalizeId(frame.deviceId))) return;
         if (!entry || normalizeId(frame.deviceId) !== normalizeId(entry.id)) throw new Error("Bridge frame refers to a different peripheral");
         if (frame.type === "value") {
-            if (this.evaluationDetail) this.observe("android_ble_value_received", {
-                device_id: entry.id, characteristic: frame.characteristic,
-                byte_count: frame.bytes.length, android_timing: frame.timing,
-            }, received);
             entry.manager.receive(frame.characteristic, frame.bytes);
             this.checkReady(entry);
         } else if (frame.type === "writeResult") {
@@ -243,37 +213,11 @@ class AndroidBleBridge extends EventEmitter {
             if (!pending || pending.peer !== peer || pending.entry !== entry) throw new Error("Unknown or expired BLE write result");
             this.pending.delete(frame.requestId);
             clearTimeout(pending.timer);
-            if (this.evaluationDetail) this.observe("android_ble_write_result", {
-                device_id: entry.id, bridge_request_id: frame.requestId,
-                ok: frame.ok, android_timing: frame.timing,
-            }, received);
             if (frame.ok) pending.resolve();
             else pending.reject(new Error(frame.error || "Android GATT write failed"));
         } else if (frame.type === "disconnected") {
             this.disconnectEntry(entry);
         }
-    }
-
-    /** @private Best-effort instrumentation must never fail a BLE operation. */
-    observe(stage, fields, captured) {
-        try { this.telemetry?.(stage, fields, captured); } catch {}
-    }
-
-    /** @private Four boundary snapshots; clock offset is estimated offline. */
-    probeClock(peer) {
-        if (peer !== this.peer || !peer.hello || !peer.timing || peer.clockProbe) return;
-        const id = randomUUID();
-        const sent = captureTime();
-        const timer = setTimeout(() => {
-            if (peer.clockProbe?.id === id) {
-                peer.clockProbe = null;
-                this.observe("android_clock_probe_timeout", { probe_id: id });
-            }
-        }, 5000);
-        timer.unref();
-        peer.clockProbe = { id, sent, timer };
-        try { this.send(peer, { type: "clockProbe", probeId: id }); }
-        catch { clearTimeout(timer); peer.clockProbe = null; }
     }
 
     /** @private */
@@ -345,9 +289,6 @@ class AndroidBleBridge extends EventEmitter {
     /** @private */
     drop(peer) {
         clearTimeout(peer.timer);
-        clearInterval(peer.clockTimer);
-        clearTimeout(peer.clockProbe?.timer);
-        peer.clockProbe = null;
         if (this.peer !== peer) return;
         this.peer = null;
         this.disconnectEntry(this.active);

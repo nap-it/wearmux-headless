@@ -89,33 +89,3 @@ test("inference failure stops detection and reports an error without answering",
     expect(answer).not.toHaveBeenCalled();
     expect(sensors.listenerCount("acceleration")).toBe(0);
 });
-
-test("accepted gesture carries window-arrival and classifier times without changing features", () => {
-    const { detector, emit, answer } = setup([{ label: "2_shake", value: 0.9 }]);
-    detector.start(answer);
-    for (let i = 0; i < 30; i++) { emit(i); jest.advanceTimersByTime(20); }
-    const details = answer.mock.calls[0][1];
-    expect(details).toEqual(expect.objectContaining({ window_samples: 30, window_features: 90,
-        model_input_features: 150, nominal_window_ms: 600, sample_interval_ms: 20,
-        window_first_sensor_timestamp_ms: 1000, window_last_sensor_timestamp_ms: 1580 }));
-    expect(BigInt(details.window_last_sample_mono_ns) - BigInt(details.window_first_sample_mono_ns)).toBe(580000000n);
-    expect(BigInt(details.classifier_finished_mono_ns)).toBeGreaterThanOrEqual(BigInt(details.classifier_started_mono_ns));
-    expect(BigInt(details.classifier_started_mono_ns)).toBeGreaterThanOrEqual(BigInt(details.window_last_sample_mono_ns));
-});
-
-test("per-window instrumentation is opt-in and a failed observer cannot alter recognition", () => {
-    const { detector, emit, answer } = setup([{ label: "1_nod", value: 0.9 }]);
-    const observe = jest.fn(() => { throw new Error("telemetry offline"); });
-    const previous = process.env.HITL_EVAL_DETAIL;
-    try {
-        process.env.HITL_EVAL_DETAIL = "1";
-        detector.start(answer, undefined, observe);
-        for (let i = 0; i < 30; i++) emit(i);
-        expect(observe).toHaveBeenCalledWith("gesture_window_evaluated", expect.objectContaining({ accepted: true }));
-        expect(answer).toHaveBeenCalledTimes(1);
-    } finally {
-        if (previous === undefined) delete process.env.HITL_EVAL_DETAIL;
-        else process.env.HITL_EVAL_DETAIL = previous;
-        detector.stop();
-    }
-});

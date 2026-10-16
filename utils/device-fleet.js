@@ -6,7 +6,6 @@ const { topic } = require("./topics");
 const { VruStopRequestInteraction } = require("../interactions/vru-stop-request");
 const { loadSdk, usesAndroidBleBridge } = require("./sdk");
 const { AndroidBleBridge } = require("./android-ble/bridge");
-const { createLatencyEmitter } = require("./latency-events");
 
 // Own one session per discovered wearable while sharing a single transport connection.
 const normalizeId = (value) => String(value || "").toLowerCase().replaceAll(":", "");
@@ -35,7 +34,6 @@ class DeviceFleet {
         this.connecting = new Set();
         this.connectQueue = Promise.resolve();
         this.publisher = createPublisher({ keyPrefix: topic() });
-        this.emitLatency = createLatencyEmitter(this.publisher);
         this.subscriber = createSubscriber({ topicFilter: ACTION_TOPIC });
         this.vruInteraction = process.env.VRU_INTERACTION_ENABLED === "1"
             ? new VruStopRequestInteraction({
@@ -88,14 +86,7 @@ class DeviceFleet {
         this.sdk = await loadSdk();
         if (usesAndroidBleBridge()) {
             if (process.env.DEVICE_IP) throw new Error("DEVICE_IP cannot be combined with DEVICE_TRANSPORT=android-ble");
-            this.androidBridge = new AndroidBleBridge({ sdk: this.sdk,
-                telemetry: (stage, fields, captured) => {
-                    const active = this.vruInteraction?.active;
-                    this.emitLatency(stage, { ...(active ? {
-                        prompt_id: active.promptId, request_action_id: active.requestActionId,
-                    } : {}), ...fields }, captured);
-                },
-            });
+            this.androidBridge = new AndroidBleBridge({ sdk: this.sdk });
             this.androidBridge.on("error", (error) => console.warn("[Android BLE]", error?.message || error));
             this.androidBridge.on("status", (status) => console.log("[Android BLE]", status));
             // Explicit listener also supports SDK builds whose global manager does
